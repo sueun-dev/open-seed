@@ -84,6 +84,7 @@ import { extractClaims, verifyClaims, buildFactcheckContext } from "./factcheck.
 import { analyzeForSimplification, buildSimplificationReport, detectLanguageFromPath } from "./code-simplifier.js";
 import { createHudState, updateHudFromEvent, formatHudTerminal, wireHudToEventBus, type HudState } from "./hud.js";
 import { createWriteGuard, recordRead, recordCreate, createEditRecovery, createAgentHealth, recordResponse, isAgentUnstable, getRecoveryAction, type WriteGuardState, type AgentHealthState } from "./guards.js";
+import { detectThinkMode, selectEffort, createContextMonitor, updateContextUsage, getContextStatus, buildContextWarning, detectKeywords, buildKeywordContext, BackgroundTaskManager, buildTaskReminder, buildStartWorkChecklist, shouldStop } from "./omo-hooks.js";
 import { createTokenBudget, estimateTokens, compactContext, needsCompaction, updateBudget } from "../core/token-counter.js";
 import { getModelVariant, applyVariantToPrompt, detectModelFamily } from "./model-variants.js";
 import { wireEventBusToStream, createTerminalWriter } from "./stream-protocol.js";
@@ -179,6 +180,14 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
 
   // Verify-Fix state — structured test→parse→fix→retest
   const verifyFixState = createVerifyFixState(config.retry.maxToolRetries + 3);
+
+  // OMO Hooks — all run automatically, no setup needed
+  const thinkMode = detectThinkMode(options.task);
+  const contextMonitor = createContextMonitor(tokenBudget.maxTokens);
+  const bgTaskManager = new BackgroundTaskManager();
+  const detectedSkills = detectKeywords(options.task);
+  const skillContext = buildKeywordContext(detectedSkills);
+  const startChecklist = buildStartWorkChecklist(options.task);
 
   // OMO Guards — all run automatically, no setup needed
   const writeGuard = createWriteGuard();
@@ -311,7 +320,7 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   // Learned patterns from previous runs
   const learnedCtx = buildLearnedContext(learnedPatterns);
 
-  const combinedContext = [agentsContext, designReferenceContext, memoryContext, consolidatedMemoryContext, microagentContext, assessmentContext, modelRoutingCtx, learnedCtx].filter(Boolean).join("\n\n");
+  const combinedContext = [agentsContext, designReferenceContext, memoryContext, consolidatedMemoryContext, microagentContext, assessmentContext, modelRoutingCtx, learnedCtx, skillContext].filter(Boolean).join("\n\n");
   const requestedCategory = classifyTask(options.task);
   const repoSummary = buildRepoSummary(repoMap);
 
