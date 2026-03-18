@@ -1,5 +1,5 @@
 /**
- * AXON CORTEX — Electron Desktop App
+ * Open Seed — Electron Desktop App
  *
  * Runs the web server internally and opens a native window.
  * Usage: npx electron app/
@@ -82,7 +82,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: "AXON CORTEX",
+    title: "Open Seed",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 12, y: 10 },
     backgroundColor: "#0a0a0a",

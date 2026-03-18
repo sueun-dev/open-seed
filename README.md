@@ -1,4 +1,4 @@
-# AXON CORTEX
+# Open Seed
 
 ### Autonomous AGI Coding Engine
 
@@ -8,16 +8,16 @@
 
 ---
 
-## What is AXON CORTEX?
+## What is Open Seed?
 
-AXON CORTEX is an **autonomous AGI coding engine** that plans, delegates to 40 specialist neural roles, executes real tools, self-heals on errors, and verifies its own output — all from a single prompt.
+Open Seed is an **autonomous AGI coding engine** that plans, delegates to 40 specialist neural roles, executes real tools, self-heals on errors, and verifies its own output — all from a single prompt.
 
 It is not a copilot. It is not an autocomplete. It is a **fully autonomous software engineer** that reads your codebase, understands your intent, writes code, runs tests, fixes its own bugs, and ships working software.
 
 Powered by **GPT-5.4 + Claude Opus 4.6** via OAuth. **$0 cost** with subscription.
 
 ```
-$ axoncortex run "Build a REST API with user auth, tests, and docs"
+$ openseed run "Build a REST API with user auth, tests, and docs"
 
 → Intent: implementation (module scope, medium risk)
 → Codebase: disciplined (TypeScript, vitest, ESLint)
@@ -30,9 +30,9 @@ Status: completed
 
 ---
 
-## Why AXON CORTEX?
+## Why Open Seed?
 
-| Feature | Copilots | AXON CORTEX |
+| Feature | Copilots | Open Seed |
 |---|---|---|
 | Writes code | ✓ | ✓ |
 | Plans architecture | ✗ | ✓ |
@@ -85,8 +85,8 @@ Extracted from **22 top open-source repos** (1.4M+ combined GitHub stars):
 ### Web UI
 
 ```bash
-git clone https://github.com/user/axon-cortex.git
-cd axon-cortex
+git clone https://github.com/user/open-seed.git
+cd open-seed
 npm install
 npm run build
 node app/server.js --port 4040 --cwd /path/to/your/project
@@ -208,7 +208,7 @@ MIT
 ---
 
 <p align="center">
-  <b>AXON CORTEX</b> · Autonomous AGI Coding Engine<br>
+  <b>Open Seed</b> · Autonomous AGI Coding Engine<br>
   <i>The last engineer you'll ever need.</i><br><br>
   40 roles · 49 subsystems · 0 excuses
 </p>

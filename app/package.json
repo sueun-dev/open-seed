@@ -1,7 +1,7 @@
 {
-  "name": "axon-cortex",
+  "name": "open-seed",
   "version": "0.1.0",
-  "description": "AXON CORTEX — Autonomous AGI Coding Engine Desktop App",
+  "description": "Open Seed — Autonomous AGI Coding Engine Desktop App",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
