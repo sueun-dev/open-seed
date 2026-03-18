@@ -26,6 +26,20 @@ export interface ProviderRequest {
   responseFormat: "json" | "text";
   /** Max output tokens override (context-window aware) */
   maxTokens?: number;
+  /** Native tool definitions for agentic loop */
+  tools?: NativeToolDef[];
+}
+
+export interface NativeToolDef {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface NativeToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
 }
 
 export interface ProviderInvokeOptions {

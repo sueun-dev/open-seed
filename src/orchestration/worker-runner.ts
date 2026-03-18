@@ -28,6 +28,7 @@ import type { UndoManager } from "./undo.js";
 import { parseJsonWithRecovery, truncateObservation, createRetryPolicy } from "./retry.js";
 import { learnFromToolOutput, type LearnedPattern } from "./ralph.js";
 import { analyzeForSimplification, buildSimplificationReport, detectLanguageFromPath } from "./code-simplifier.js";
+import { runAgenticLoop } from "./agentic-runner.js";
 
 function isCoreRole(roleId: string): boolean {
   return roleId === "planner"
@@ -94,6 +95,63 @@ export async function runWorkerInline(params: {
   const role = resolveRole(registry, params.roleId);
   const providers = new ProviderRegistry();
   const store = new SessionStore(params.cwd, config.sessions);
+
+  // Use agentic loop for executor roles — multi-turn tool calling
+  const isExecutor = role.id === "executor" || role.id === "frontend-engineer" || (!isCoreRole(role.id) && role.category === "execution");
+  if (isExecutor) {
+    const agenticResult = await runAgenticLoop({
+      cwd: params.cwd,
+      sessionId: params.sessionId,
+      taskId: params.taskId,
+      role,
+      config,
+      systemPrompt: role.prompt,
+      userPrompt: params.prompt,
+      store,
+      providerRegistry: providers,
+      providerId: params.providerId,
+      costTracker: params.costTracker,
+      rulesEngine: params.rulesEngine,
+      hooks: params.hooks,
+      sandbox: params.sandbox,
+      eventBus: params.eventBus,
+      maxTurns: 10
+    });
+
+    // Convert to executor artifact format
+    const artifact = {
+      kind: "execution" as const,
+      summary: `${agenticResult.summary} Executed ${agenticResult.totalToolCalls} tool calls across ${agenticResult.totalTurns} turns.`,
+      changes: agenticResult.toolResults.filter(r => r.ok && (r.name === "write" || r.name === "apply_patch")).map(r => {
+        const out = r.output as { path?: string } | undefined;
+        return `${r.name}: ${out?.path ?? "unknown"}`;
+      }),
+      suggestedCommands: [],
+      toolCalls: [],
+      toolResults: agenticResult.toolResults
+    };
+
+    await store.writeArtifact(params.taskId, artifact);
+
+    // Learn from tool results
+    if (params.projectMemory) {
+      for (const result of agenticResult.toolResults) {
+        await params.projectMemory.recordToolCall(result.name, result.ok);
+        if (result.name === "bash" && result.ok && result.output) {
+          const output = result.output as { command?: string; stdout?: string };
+          if (output.command && output.stdout) await params.projectMemory.learnFromBashOutput(output.command, output.stdout);
+        }
+        if ((result.name === "read" || result.name === "write") && result.ok && result.output) {
+          const output = result.output as { path?: string };
+          if (output.path) await params.projectMemory.recordFileAccess(output.path);
+        }
+      }
+    }
+
+    return artifact;
+  }
+
+  // Non-executor roles: use single-shot LLM call (planner, researcher, reviewer)
   const response = await providers.invokeWithFailover(config, params.providerId, {
     role: role.id,
     category: role.category,
