@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AXON CORTEX</title>
+<title>Open Seed</title>
 <!-- Syntax highlighting -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -291,7 +291,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
       <!-- Editor -->
       <div class="editor-zone" id="edZone">
         <div class="welcome-screen" id="welc">
-          <h1>AXON <b>CORTEX</b></h1>
+          <h1>Open <b>Seed</b></h1>
           <p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Sisyphus Protocol<br><br><kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer<br><kbd>⌘S</kbd> Save &nbsp; <kbd>⌘J</kbd> Terminal</p>
         </div>
       </div>
@@ -312,7 +312,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 
     <!-- Chat Panel -->
     <div class="chat-panel" id="chatP">
-      <div class="ch-head"><h3>Axon Cortex</h3><button onclick="nav('files')">×</button></div>
+      <div class="ch-head"><h3>Open Seed</h3><button onclick="nav('files')">×</button></div>
       <div class="ch-body" id="chBody"></div>
       <div class="ch-foot">
         <div class="ch-box">
@@ -334,7 +334,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
     <div style="flex:1"></div>
     <span>GPT-5.4 + Claude Opus 4.6</span>
     <div class="sep"></div>
-    <span>AXON CORTEX v0.1</span>
+    <span>Open Seed v0.1</span>
   </div>
 </div>
 
@@ -365,7 +365,7 @@ function closeTab(p){const i=T.findIndex(t=>t.p===p);if(i<0)return;if(T[i].d&&!c
 function renderEd(){if(!AT){showWelcome();return}const z=document.getElementById('edZone');z.querySelector('.welcome-screen')?.remove();let w=z.querySelector('.code-wrap');if(!w){w=document.createElement('div');w.className='code-wrap';w.innerHTML='<div class="line-gutter" id="lg"></div><div class="code-edit"><textarea id="ce" spellcheck="false"></textarea></div>';z.appendChild(w);const ce=document.getElementById('ce');ce.oninput=()=>{AT.c=ce.value;AT.d=ce.value!==AT.o;renderTabs();updateGutter()};ce.onscroll=()=>{document.getElementById('lg').scrollTop=ce.scrollTop};ce.onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();const s=ce.selectionStart;ce.value=ce.value.substring(0,s)+'  '+ce.value.substring(ce.selectionEnd);ce.selectionStart=ce.selectionEnd=s+2;ce.oninput()}}}document.getElementById('ce').value=AT.c;updateGutter()}
 function updateHighlight(){const hl=document.getElementById('hl');if(!hl||!AT)return;const ext=AT.p.split('.').pop();const lang={ts:'typescript',tsx:'typescript',js:'javascript',json:'json',css:'css',html:'xml',md:'markdown',py:'python',sh:'bash'}[ext]||'';let html;if(lang&&hljs.getLanguage(lang)){html=hljs.highlight(AT.c,{language:lang}).value}else{html=esc(AT.c)}hl.innerHTML='<code>'+html+'</code>'}
 function updateGutter(){const g=document.getElementById('lg'),ce=document.getElementById('ce');if(!g||!ce)return;const n=ce.value.split('\n').length;g.innerHTML=Array.from({length:n},(_,i)=>'<div>'+(i+1)+'</div>').join('')}
-function showWelcome(){const z=document.getElementById('edZone');z.querySelector('.code-wrap')?.remove();if(!z.querySelector('.welcome-screen'))z.innerHTML='<div class="welcome-screen" id="welc"><h1>AXON <b>CORTEX</b></h1><p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Sisyphus Protocol<br><br><kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer<br><kbd>⌘S</kbd> Save &nbsp; <kbd>⌘\`</kbd> Terminal</p></div>'}
+function showWelcome(){const z=document.getElementById('edZone');z.querySelector('.code-wrap')?.remove();if(!z.querySelector('.welcome-screen'))z.innerHTML='<div class="welcome-screen" id="welc"><h1>Open <b>Seed</b></h1><p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Sisyphus Protocol<br><br><kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer<br><kbd>⌘S</kbd> Save &nbsp; <kbd>⌘\`</kbd> Terminal</p></div>'}
 
 /* ═══ SAVE ═══ */
 async function saveActive(){if(!AT||!AT.d)return;const r=await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:AT.p,content:AT.c})});if((await r.json()).ok){AT.o=AT.c;AT.d=false;renderTabs();setSB('Saved '+AT.p)}}
@@ -383,7 +383,7 @@ setTimeout(()=>{const ti=document.getElementById('tIn');if(ti){ti.addEventListen
 
 /* ═══ CHAT ═══ */
 function setM(m){M=m;document.querySelectorAll('.pill[data-m]').forEach(b=>b.classList.toggle('on',b.dataset.m===m))}
-async function send(){const i=document.getElementById('chIn');const t=i.value.trim();if(!t||R)return;i.value='';i.style.height='auto';const bd=document.getElementById('chBody');bd.innerHTML+='<div class="ch-msg user"><div class="bbl">'+esc(t)+'</div></div>';const ag=document.createElement('div');ag.className='ch-msg agent';ag.innerHTML='<div class="tag">axon cortex</div><div class="think"><div class="ds"><i></i><i></i><i></i></div>Thinking...</div><div class="bd"></div>';bd.appendChild(ag);bd.scrollTop=bd.scrollHeight;R=true;document.getElementById('goBtn').disabled=true;setSB('Thinking...',true);const b=ag.querySelector('.bd');const url=M==='question'?'/api/ask':'/api/run/stream';const pl=M==='question'?{question:t}:{task:t,mode:M==='team'?'team':'run'};let thk=true;try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pl)});const rd=r.body.getReader();const dc=new TextDecoder();let buf='';while(true){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';for(const l of lines){if(!l.startsWith('data: '))continue;const d=l.slice(6);if(d==='[DONE]')break;try{const ev=JSON.parse(d);if(thk&&ev.type!=='status'){ag.querySelector('.think')?.remove();thk=false}if(ev.type==='status'){if(ev.status==='started'){const th=ag.querySelector('.think');if(th)th.lastChild.textContent='Working...'}if(ev.status==='completed'){ag.querySelector('.think')?.remove();const ok=ev.exitCode===0;b.innerHTML+='<div class="done-badge '+(ok?'ok':'fail')+'">● '+(ok?'Completed':'Failed')+' (exit '+ev.exitCode+')</div>'}}else if(ev.type==='llm'){b.textContent+=ev.text||''}else if(ev.type==='event'){const cls=ev.eventType?.includes('tool')?'tool':ev.eventType?.includes('error')?'error':ev.eventType?.includes('review')?'review':'phase';b.innerHTML+='<details class="ev"><summary><span class="t '+cls+'">'+cls+'</span>'+esc(ev.eventType||'')+(ev.time?' <span style="color:var(--fg3)">'+ev.time+'</span>':'')+'</summary><pre>'+esc(typeof ev.payload==='object'?JSON.stringify(ev.payload,null,2):String(ev.payload||''))+'</pre></details>'}else if(ev.type==='stdout'&&ev.text&&!/^\d{2}:\d{2}:\d{2}/.test(ev.text)){b.innerHTML+='<div style="color:var(--fg2);border-left:2px solid var(--border2);padding-left:8px;margin:2px 0;font-family:var(--font);font-size:11px">'+esc(ev.text)+'</div>'}else if(ev.type==='stderr'){b.innerHTML+='<div style="color:var(--red);font-family:var(--font);font-size:11px">'+esc(ev.text)+'</div>'}bd.scrollTop=bd.scrollHeight}catch{}}}}catch(e){ag.querySelector('.think')?.remove();b.innerHTML+='<div style="color:var(--red)">Error: '+esc(e.message)+'</div>'}R=false;document.getElementById('goBtn').disabled=false;setSB('Ready');loadFiles()}
+async function send(){const i=document.getElementById('chIn');const t=i.value.trim();if(!t||R)return;i.value='';i.style.height='auto';const bd=document.getElementById('chBody');bd.innerHTML+='<div class="ch-msg user"><div class="bbl">'+esc(t)+'</div></div>';const ag=document.createElement('div');ag.className='ch-msg agent';ag.innerHTML='<div class="tag">open seed</div><div class="think"><div class="ds"><i></i><i></i><i></i></div>Thinking...</div><div class="bd"></div>';bd.appendChild(ag);bd.scrollTop=bd.scrollHeight;R=true;document.getElementById('goBtn').disabled=true;setSB('Thinking...',true);const b=ag.querySelector('.bd');const url=M==='question'?'/api/ask':'/api/run/stream';const pl=M==='question'?{question:t}:{task:t,mode:M==='team'?'team':'run'};let thk=true;try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pl)});const rd=r.body.getReader();const dc=new TextDecoder();let buf='';while(true){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';for(const l of lines){if(!l.startsWith('data: '))continue;const d=l.slice(6);if(d==='[DONE]')break;try{const ev=JSON.parse(d);if(thk&&ev.type!=='status'){ag.querySelector('.think')?.remove();thk=false}if(ev.type==='status'){if(ev.status==='started'){const th=ag.querySelector('.think');if(th)th.lastChild.textContent='Working...'}if(ev.status==='completed'){ag.querySelector('.think')?.remove();const ok=ev.exitCode===0;b.innerHTML+='<div class="done-badge '+(ok?'ok':'fail')+'">● '+(ok?'Completed':'Failed')+' (exit '+ev.exitCode+')</div>'}}else if(ev.type==='llm'){b.textContent+=ev.text||''}else if(ev.type==='event'){const cls=ev.eventType?.includes('tool')?'tool':ev.eventType?.includes('error')?'error':ev.eventType?.includes('review')?'review':'phase';b.innerHTML+='<details class="ev"><summary><span class="t '+cls+'">'+cls+'</span>'+esc(ev.eventType||'')+(ev.time?' <span style="color:var(--fg3)">'+ev.time+'</span>':'')+'</summary><pre>'+esc(typeof ev.payload==='object'?JSON.stringify(ev.payload,null,2):String(ev.payload||''))+'</pre></details>'}else if(ev.type==='stdout'&&ev.text&&!/^\d{2}:\d{2}:\d{2}/.test(ev.text)){b.innerHTML+='<div style="color:var(--fg2);border-left:2px solid var(--border2);padding-left:8px;margin:2px 0;font-family:var(--font);font-size:11px">'+esc(ev.text)+'</div>'}else if(ev.type==='stderr'){b.innerHTML+='<div style="color:var(--red);font-family:var(--font);font-size:11px">'+esc(ev.text)+'</div>'}bd.scrollTop=bd.scrollHeight}catch{}}}}catch(e){ag.querySelector('.think')?.remove();b.innerHTML+='<div style="color:var(--red)">Error: '+esc(e.message)+'</div>'}R=false;document.getElementById('goBtn').disabled=false;setSB('Ready');loadFiles()}
 
 /* ═══ SETTINGS ═══ */
 async function loadSet(){try{CFG=await(await fetch('/api/settings')).json()}catch{}}
