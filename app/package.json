@@ -1,0 +1,15 @@
+{
+  "name": "axon-cortex",
+  "version": "0.1.0",
+  "description": "AXON CORTEX — Autonomous AGI Coding Engine Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "web": "node server.js",
+    "dev": "node server.js",
+    "electron": "electron ."
+  },
+  "dependencies": {
+    "electron": "^32.2.7"
+  }
+}
