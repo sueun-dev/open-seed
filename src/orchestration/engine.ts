@@ -84,7 +84,7 @@ import { extractClaims, verifyClaims, buildFactcheckContext } from "./factcheck.
 import { analyzeForSimplification, buildSimplificationReport, detectLanguageFromPath } from "./code-simplifier.js";
 import { createHudState, updateHudFromEvent, formatHudTerminal, wireHudToEventBus, type HudState } from "./hud.js";
 import { createWriteGuard, recordRead, recordCreate, createEditRecovery, createAgentHealth, recordResponse, isAgentUnstable, getRecoveryAction, type WriteGuardState, type AgentHealthState } from "./guards.js";
-import { detectThinkMode, selectEffort, createContextMonitor, updateContextUsage, getContextStatus, buildContextWarning, detectKeywords, buildKeywordContext, BackgroundTaskManager, buildTaskReminder, buildStartWorkChecklist, shouldStop } from "./omo-hooks.js";
+import { detectThinkMode, selectEffort, createContextMonitor, updateContextUsage, getContextStatus, buildContextWarning, detectKeywords, buildKeywordContext, BackgroundTaskManager, buildTaskReminder, buildStartWorkChecklist, shouldStop, buildAtlasContext, buildResumeInfo, buildTaskReminder as buildReminder } from "./omo-hooks.js";
 import { createTokenBudget, estimateTokens, compactContext, needsCompaction, updateBudget } from "../core/token-counter.js";
 import { getModelVariant, applyVariantToPrompt, detectModelFamily } from "./model-variants.js";
 import { wireEventBusToStream, createTerminalWriter } from "./stream-protocol.js";
@@ -208,6 +208,29 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     }
   });
 
+  // Wire context monitor — track token usage on every provider response
+  eventBus.on("cost.update", async (event) => {
+    const tokens = (event.payload.totalTokens as number) ?? 0;
+    Object.assign(contextMonitor, updateContextUsage(contextMonitor, tokens));
+    const warning = buildContextWarning(contextMonitor);
+    if (warning) {
+      await eventBus.fire("error.retriable", "system", event.sessionId, { message: warning, category: "context", attempt: contextMonitor.compactionCount });
+    }
+  });
+
+  // Wire agent health — track LLM response quality
+  eventBus.on("tool.completed", async (event) => {
+    if (event.payload.tool === "provider") {
+      const responseLen = typeof event.payload.responseLength === "number" ? event.payload.responseLength : 100;
+      const parseOk = event.payload.ok !== false;
+      recordResponse(agentHealth, responseLen, parseOk);
+      const health = isAgentUnstable(agentHealth);
+      if (health.unstable) {
+        await eventBus.fire("enforcer.stuck", "system", event.sessionId, { reason: `Agent unstable: ${health.reason}`, action: getRecoveryAction(agentHealth) });
+      }
+    }
+  });
+
   // Wire event bus to session store for persistence
   eventBus.on("*", async (event) => {
     if (event.sessionId) {
@@ -231,7 +254,19 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     }
   });
 
-  // ─── Session Setup ───────────────────────────────────────────────────────
+  // ─── Session Setup + Auto-Recovery (OMO session-recovery) ────────────────
+
+  // Check for durable checkpoint from crash (auto-resume)
+  if (!options.resumeSessionId) {
+    try {
+      const { loadLatestCheckpoint, shouldAutoResume: autoRes, buildResumeContext: resumeCtx } = await import("./durable-execution.js");
+      const cp = await loadLatestCheckpoint(options.cwd, config.sessions.localDirName);
+      if (cp && autoRes(cp)) {
+        options.resumeSessionId = cp.sessionId;
+        await eventBus.fire("session.resumed", "engine", cp.sessionId, { autoRecovery: true, phase: cp.phase, round: cp.round });
+      }
+    } catch { /* no checkpoint — fresh start */ }
+  }
 
   let session = options.resumeSessionId
     ? await sessionStore.loadSnapshot(options.resumeSessionId)
@@ -320,7 +355,21 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   // Learned patterns from previous runs
   const learnedCtx = buildLearnedContext(learnedPatterns);
 
-  const combinedContext = [agentsContext, designReferenceContext, memoryContext, consolidatedMemoryContext, microagentContext, assessmentContext, modelRoutingCtx, learnedCtx, skillContext].filter(Boolean).join("\n\n");
+  // Atlas — project structure context (OMO)
+  const atlasContext = buildAtlasContext({
+    rootFiles: files.filter(f => !f.includes("/")),
+    directories: files.filter(f => f.includes("/")).map(f => f.split("/").slice(0, -1).join("/")).filter((v, i, a) => a.indexOf(v) === i),
+    languages: codebaseAssessment.patterns.primaryLanguage ? { [codebaseAssessment.patterns.primaryLanguage]: files.length } : {},
+    frameworks: [codebaseAssessment.patterns.testFramework, codebaseAssessment.patterns.buildTool].filter((v): v is string => v !== null),
+    hasTests: codebaseAssessment.patterns.hasTests,
+    hasCI: codebaseAssessment.patterns.hasCi,
+    packageManager: codebaseAssessment.patterns.packageManager
+  });
+
+  // Start work checklist context (OMO)
+  const startCtx = startChecklist.length > 0 ? `# Pre-flight Checks\n${startChecklist.map(c => `- ${c}`).join("\n")}` : "";
+
+  const combinedContext = [agentsContext, designReferenceContext, memoryContext, consolidatedMemoryContext, microagentContext, assessmentContext, modelRoutingCtx, learnedCtx, skillContext, atlasContext, startCtx].filter(Boolean).join("\n\n");
   const requestedCategory = classifyTask(options.task);
   const repoSummary = buildRepoSummary(repoMap);
 
@@ -467,6 +516,13 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   updatedEvidence = updateEvidence(updatedEvidence, executionOutput.summary);
 
   while (!isEnforcerDone(enforcer)) {
+    // Stop continuation guard (OMO)
+    const stopCheck = shouldStop(enforcer.executionRounds, 8, review.verdict, consecutiveFailures);
+    if (stopCheck.stop) {
+      await eventBus.fire("enforcer.checklist", "engine", session.id, { round: enforcer.executionRounds, verdict: "stop-guard", checklist: [stopCheck.reason!] });
+      break;
+    }
+
     // Check if stuck (OpenHands-inspired loop detection)
     if (stuckDetector.isStuck()) {
       await eventBus.fire("enforcer.stuck", "engine", session.id, {
@@ -560,11 +616,20 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     // Fire after.execute
     await hooks.fire("after.execute", { sessionId: session.id, task: options.task, event: "after.execute", data: { execution: executionOutput.summary, round: enforcer.executionRounds } });
 
-    // Checkpoint each round
+    // Checkpoint each round + durable checkpoint for crash recovery
     await checkpointSaver.save(createCheckpoint(session.id, "executing", enforcer.executionRounds, {
       round: enforcer.executionRounds, costs: costTracker.getSummary(),
       evidence: updatedEvidence
     }));
+    try {
+      const { saveDurableCheckpoint } = await import("./durable-execution.js");
+      await saveDurableCheckpoint(options.cwd, config.sessions.localDirName, {
+        sessionId: session.id, phase: "executing", round: enforcer.executionRounds,
+        timestamp: new Date().toISOString(), state: { verdict: enforcer.verdict },
+        modifiedFiles: (executionOutput.changes ?? []).filter((c: string) => c.includes(":")),
+        resumable: true
+      });
+    } catch { /* durable save failed — non-critical */ }
 
     await transitionPhase(session, "reviewing", sessionStore, eventBus);
 
@@ -636,6 +701,12 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
 
   // Save project memory (learns from this session)
   await projectMemory.save();
+
+  // Mark durable checkpoint as complete (OMO session-recovery)
+  try {
+    const { markCheckpointComplete } = await import("./durable-execution.js");
+    await markCheckpointComplete(options.cwd, config.sessions.localDirName);
+  } catch { /* non-critical */ }
 
   // Save learned patterns (RALPH-style persistence)
   try {
