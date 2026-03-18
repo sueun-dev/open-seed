@@ -165,6 +165,35 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .go-btn:hover{background:var(--accent2);transform:scale(1.05)}
 .go-btn:disabled{opacity:.25;cursor:not-allowed;transform:none}
 
+/* ═══ Fullscreen Panels ═══ */
+.full-panel{display:none;overflow-y:auto;padding:24px 48px;position:absolute;inset:0;z-index:10;background:var(--bg)}
+.full-panel.show{display:block}
+.full-panel .inner{max-width:800px;margin:0 auto}
+.full-panel h2{font-family:var(--font);font-size:13px;color:var(--fg);margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.full-panel h2:first-child{margin-top:0}
+.full-panel pre{font-family:var(--font);font-size:12px;line-height:1.7;color:var(--fg2);white-space:pre-wrap;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin:8px 0}
+
+/* Search */
+.search-input{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;color:var(--fg);font-family:var(--font);font-size:13px;outline:none;margin-bottom:12px}
+.search-input:focus{border-color:var(--accent)}
+.search-result{padding:6px 0;border-bottom:1px solid var(--border)}
+.search-result .file{font-family:var(--font);font-size:11px;color:var(--accent);cursor:pointer}
+.search-result .file:hover{text-decoration:underline}
+.search-result .line{font-family:var(--font);font-size:12px;color:var(--fg2);margin:2px 0 0 12px}
+.search-result .line .num{color:var(--fg3);margin-right:8px}
+.search-result .line .match{background:var(--yellow-dim);color:var(--yellow);padding:0 2px;border-radius:2px}
+
+/* Sessions */
+.ses-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:var(--r);cursor:pointer;transition:background .1s;border:1px solid transparent;margin-bottom:4px}
+.ses-item:hover{background:rgba(255,255,255,.03);border-color:var(--border)}
+.ses-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.ses-dot.ok{background:var(--green)}
+.ses-dot.fail{background:var(--red)}
+.ses-dot.run{background:var(--yellow)}
+.ses-info{flex:1;min-width:0}
+.ses-task{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ses-meta{font-family:var(--font);font-size:10px;color:var(--fg3);margin-top:2px}
+
 /* ═══ Settings ═══ */
 .settings-panel{display:none;overflow-y:auto;padding:24px 48px;position:absolute;inset:0;z-index:10;background:var(--bg)}
 .settings-panel.show{display:block}
@@ -206,9 +235,18 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
     <div class="act-btn on" data-v="files" onclick="nav('files')" title="Explorer (⌘⇧E)">
       <svg viewBox="0 0 24 24"><path d="M17.5 0h-9L7 1.5V6H2.5L1 7.5v15.07L2.5 24h12.07L16 22.57V18h4.7l1.3-1.43V4.5L17.5 0zm0 2.12l2.38 2.38H17.5V2.12zm-3 20.38h-12v-15H7v9.07L8.5 18h6v4.5zm6-6h-12v-15H16V6h4.5v10.5z"/></svg>
     </div>
+    <div class="act-btn" data-v="search" onclick="nav('search')" title="Search (⌘⇧F)">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+    </div>
     <div class="act-btn" data-v="chat" onclick="nav('chat')" title="AI Chat (⌘⇧A)">
       <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
       <div class="dot" id="chatDot" style="display:none"></div>
+    </div>
+    <div class="act-btn" data-v="sessions" onclick="nav('sessions')" title="Sessions">
+      <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 00-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21a9 9 0 000-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+    </div>
+    <div class="act-btn" data-v="doctor" onclick="nav('doctor')" title="Doctor">
+      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5 0 1.02-.44 1.93-1.13 2.57l1.46 1.46C16.53 12.56 17 11.38 17 10c0-2.76-2.24-5-5-5s-5 2.24-5 5c0 1.38.47 2.56 1.17 3.53l1.46-1.46A3.454 3.454 0 018.5 9.5C8.5 7.57 10.07 6 12 6zm0 3c-.28 0-.5.22-.5.5s.22.5.5.5.5-.22.5-.5S12.28 9 12 9zM7 19l5-5 5 5H7z"/></svg>
     </div>
     <div class="act-sep"></div>
     <div class="act-btn" data-v="settings" onclick="nav('settings')" title="Settings">
@@ -227,6 +265,40 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
     <!-- Content -->
     <div class="content-area">
       <div class="tab-strip" id="tabs"></div>
+
+      <!-- Search Panel -->
+      <div class="full-panel" id="searchPanel">
+        <div class="inner">
+          <h2>Search in Project</h2>
+          <input class="search-input" id="searchIn" placeholder="Search files... (regex supported)" onkeydown="if(event.key==='Enter')runSearch()">
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <button class="save-btn" onclick="runSearch()" style="font-size:11px;padding:5px 14px;margin:0">Search</button>
+            <input class="si" id="searchGlob" placeholder="*.ts, *.js (optional)" style="width:150px;font-size:11px">
+          </div>
+          <div id="searchResults" style="font-size:12px;color:var(--fg3)">Type a query and press Enter</div>
+        </div>
+      </div>
+
+      <!-- Sessions Panel -->
+      <div class="full-panel" id="sessionsPanel">
+        <div class="inner">
+          <h2>Session History</h2>
+          <div style="margin-bottom:12px"><button class="save-btn" onclick="loadSessions()" style="font-size:11px;padding:5px 14px;margin:0">Refresh</button></div>
+          <div id="sessionsList" style="color:var(--fg3);font-size:12px">Click Refresh to load sessions</div>
+        </div>
+      </div>
+
+      <!-- Doctor Panel -->
+      <div class="full-panel" id="doctorPanel">
+        <div class="inner">
+          <h2>System Diagnostics</h2>
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <button class="save-btn" onclick="runDoctorFull()" style="font-size:11px;padding:5px 14px;margin:0">Run Full Diagnostic</button>
+            <button class="save-btn" onclick="runCommentsScan()" style="font-size:11px;padding:5px 14px;margin:0;background:var(--bg5);color:var(--fg2)">Scan Comments</button>
+          </div>
+          <div id="doctorOut" style="color:var(--fg3);font-size:12px">Press "Run Full Diagnostic" to check providers, tools, config, and system health.</div>
+        </div>
+      </div>
 
       <!-- Settings -->
       <div class="settings-panel" id="setPanel">
@@ -344,13 +416,20 @@ const T=[];let AT=null,M="task",R=false,CFG={};
 /* ═══ NAV ═══ */
 function nav(v){
   document.querySelectorAll('.act-btn').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  const sb=document.getElementById('sidebar'),ch=document.getElementById('chatP'),sp=document.getElementById('setPanel'),ez=document.getElementById('edZone');
-  sp.classList.remove('show');ez.style.display='';
-  if(v==='files'){sb.classList.remove('hide');ch.classList.remove('show');loadFiles();document.getElementById('sbLabel').textContent='Explorer';document.getElementById('termP').classList.remove('shut');document.getElementById('tabs').style.display=''}
+  const sb=document.getElementById('sidebar'),ch=document.getElementById('chatP'),ez=document.getElementById('edZone');
+  // Hide all fullscreen panels
+  ['setPanel','searchPanel','sessionsPanel','doctorPanel'].forEach(id=>document.getElementById(id).classList.remove('show'));
+  ez.style.display='';document.getElementById('termP').classList.remove('shut');document.getElementById('tabs').style.display='';
+
+  if(v==='files'){sb.classList.remove('hide');ch.classList.remove('show');loadFiles();document.getElementById('sbLabel').textContent='Explorer'}
+  else if(v==='search'){sb.classList.add('hide');ch.classList.remove('show');showFullPanel('searchPanel');document.getElementById('searchIn').focus()}
   else if(v==='chat'){ch.classList.toggle('show');document.getElementById('chIn').focus();document.getElementById('chatDot').style.display='none'}
-  else if(v==='settings'){sb.classList.add('hide');ch.classList.remove('show');sp.classList.add('show');ez.style.display='none';document.getElementById('termP').classList.add('shut');document.getElementById('tabs').style.display='none';loadSet()}
+  else if(v==='sessions'){sb.classList.add('hide');ch.classList.remove('show');showFullPanel('sessionsPanel');loadSessions()}
+  else if(v==='doctor'){sb.classList.add('hide');ch.classList.remove('show');showFullPanel('doctorPanel')}
+  else if(v==='settings'){sb.classList.add('hide');ch.classList.remove('show');showFullPanel('setPanel');loadSet()}
   else{sb.classList.add('hide');ch.classList.remove('show')}
 }
+function showFullPanel(id){document.getElementById(id).classList.add('show');document.getElementById('edZone').style.display='none';document.getElementById('termP').classList.add('shut');document.getElementById('tabs').style.display='none'}
 function stab(n){document.querySelectorAll('[data-st]').forEach(b=>b.classList.toggle('on',b.dataset.st===n));['providers','safety','engine','tools','expert'].forEach(t=>document.getElementById('st-'+t).style.display=t===n?'':'none');if(n==='expert')document.getElementById('s-raw').value=JSON.stringify(CFG,null,2)}
 
 /* ═══ FILES ═══ */
@@ -388,6 +467,58 @@ async function send(){const i=document.getElementById('chIn');const t=i.value.tr
 /* ═══ SETTINGS ═══ */
 async function loadSet(){try{CFG=await(await fetch('/api/settings')).json()}catch{}}
 async function saveSet(){try{const r=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(CFG)});if((await r.json()).ok){document.getElementById('sSt').textContent='Saved ✓';setTimeout(()=>document.getElementById('sSt').textContent='',2000)}}catch(e){document.getElementById('sSt').textContent='Error'}}
+/* ═══ SEARCH ═══ */
+async function runSearch(){
+  const q=document.getElementById('searchIn').value.trim();
+  if(!q)return;
+  const glob=document.getElementById('searchGlob').value.trim();
+  const el=document.getElementById('searchResults');
+  el.innerHTML='<div style="color:var(--fg3)">Searching...</div>';
+  try{
+    const r=await fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'grep -rn'+(glob?' --include="'+glob+'"':'')+' "'+q.replace(/"/g,'\\"')+'" . --color=never 2>/dev/null | head -100'})});
+    const rd=r.body.getReader();const dc=new TextDecoder();let buf='',out='';
+    while(true){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';for(const l of lines){if(!l.startsWith('data: '))continue;const d=l.slice(6);if(d==='[DONE]')break;try{const ev=JSON.parse(d);if(ev.type==='stdout')out+=ev.text}catch{}}}
+    if(!out.trim()){el.innerHTML='<div style="color:var(--fg3)">No results found</div>';return}
+    const results=out.trim().split('\n').filter(Boolean);
+    let html='<div style="color:var(--fg3);margin-bottom:8px">'+results.length+' result(s)</div>';
+    for(const line of results){
+      const m=line.match(/^\.\/(.+?):(\d+):(.*)$/);
+      if(m){const[,file,num,content]=m;html+='<div class="search-result"><div class="file" onclick="nav(\'files\');setTimeout(()=>openTab(\''+file+'\'),200)">'+esc(file)+':'+num+'</div><div class="line"><span class="num">'+num+'</span>'+esc(content)+'</div></div>'}
+    }
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div style="color:var(--red)">Error: '+esc(e.message)+'</div>'}
+}
+
+/* ═══ SESSIONS ═══ */
+async function loadSessions(){
+  const el=document.getElementById('sessionsList');
+  el.innerHTML='<div style="color:var(--fg3)">Loading...</div>';
+  try{
+    const d=await(await fetch('/api/status')).json();
+    const text=d.stdout||'';
+    if(!text.trim()){el.innerHTML='<div style="color:var(--fg3)">No sessions found</div>';return}
+    el.innerHTML='<pre>'+esc(text)+'</pre>';
+  }catch(e){el.innerHTML='<div style="color:var(--red)">'+esc(e.message)+'</div>'}
+}
+
+/* ═══ DOCTOR ═══ */
+async function runDoctorFull(){
+  const el=document.getElementById('doctorOut');
+  el.innerHTML='<div style="color:var(--fg3)">Running diagnostics...</div>';
+  try{
+    const d=await(await fetch('/api/doctor',{method:'POST'})).json();
+    el.innerHTML='<pre>'+esc(d.stdout||d.stderr||'No output')+'</pre>';
+  }catch(e){el.innerHTML='<div style="color:var(--red)">'+esc(e.message)+'</div>'}
+}
+async function runCommentsScan(){
+  const el=document.getElementById('doctorOut');
+  el.innerHTML+='<div style="color:var(--fg3);margin-top:12px">Scanning comments...</div>';
+  try{
+    const d=await(await fetch('/api/check-comments',{method:'POST'})).json();
+    el.innerHTML+='<pre>'+esc(d.stdout||d.stderr||'No comments found')+'</pre>';
+  }catch(e){el.innerHTML+='<div style="color:var(--red)">'+esc(e.message)+'</div>'}
+}
+
 async function checkAuth(){const b=document.getElementById('authBox');b.innerHTML='Checking...';try{const d=await(await fetch('/api/auth/status')).json();let h='';for(const[id,p]of Object.entries(d.providers)){const c=p.ready?'var(--green)':'var(--red)';h+='<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span style="color:'+c+'">●</span><b style="font-size:12px;color:var(--fg)">'+id+'</b><span style="font-size:10px;color:var(--fg3)">'+esc(p.detail||'')+'</span></div>'}b.innerHTML=h||'No data'}catch(e){b.innerHTML='Error: '+esc(e.message)}}
 async function testProv(p){const b=document.getElementById('authBox');b.innerHTML+='<div style="color:var(--fg3)">Testing '+p+'...</div>';try{const d=await(await fetch('/api/auth/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:p})})).json();b.innerHTML+='<div style="color:'+(d.ok?'var(--green)':'var(--red)')+'">'+esc(d.ok?'✓ '+p+' OK':'✗ '+p+' failed: '+(d.detail||'').slice(0,150))+'</div>'}catch(e){b.innerHTML+='<div style="color:var(--red)">'+esc(e.message)+'</div>'}}
 
@@ -396,7 +527,8 @@ function esc(s){const d=document.createElement('div');d.textContent=s;return d.i
 function setSB(t,run){document.getElementById('sbSt').textContent=t;document.getElementById('sBar').className='stat-bar'+(run?'':' off')}
 
 /* ═══ KEYS ═══ */
-document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();saveActive()}if((e.metaKey||e.ctrlKey)&&e.shiftKey&&(e.key==='A'||e.key==='a')){e.preventDefault();nav('chat')}if((e.metaKey||e.ctrlKey)&&e.shiftKey&&(e.key==='E'||e.key==='e')){e.preventDefault();nav('files')}if((e.metaKey||e.ctrlKey)&&e.key==='j'){e.preventDefault();toggleTerm();document.getElementById('tIn')?.focus()}});
+document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();saveActive()}if((e.metaKey||e.ctrlKey)&&e.shiftKey&&(e.key==='A'||e.key==='a')){e.preventDefault();nav('chat')}if((e.metaKey||e.ctrlKey)&&e.shiftKey&&(e.key==='E'||e.key==='e')){e.preventDefault();nav('files')}
+  if((e.metaKey||e.ctrlKey)&&e.shiftKey&&(e.key==='F'||e.key==='f')){e.preventDefault();nav('search')}if((e.metaKey||e.ctrlKey)&&e.key==='j'){e.preventDefault();toggleTerm();document.getElementById('tIn')?.focus()}});
 document.getElementById('chIn')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
 
 /* ═══ INIT ═══ */
