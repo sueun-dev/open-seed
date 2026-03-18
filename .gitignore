@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.agent/
+.research/
+.pytest_cache/
+coverage/
+*.tmp
+*.log
+.DS_Store
+app/node_modules/
