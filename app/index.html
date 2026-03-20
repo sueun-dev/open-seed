@@ -41,6 +41,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 
 /* ═══ Layout ═══ */
 .app{display:grid;grid-template-columns:48px 1fr;grid-template-rows:1fr 24px;height:100vh}
+.app.desktop-mode{padding-top:28px}
+.desktop-mode .act-bar{padding-top:28px}
+.desktop-mode .full-panel{top:28px}
+.desktop-mode .sidebar{padding-top:0}
+.desktop-mode .main-area{margin-top:0}
 *{box-sizing:border-box}
 
 /* ═══ Activity Bar ═══ */
@@ -125,6 +130,18 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .welcome-screen p{color:var(--fg3);font-size:13px;line-height:2;max-width:400px}
 .welcome-screen kbd{background:var(--bg4);padding:2px 8px;border-radius:4px;font-family:var(--font);font-size:11px;border:1px solid var(--border2);color:var(--fg2)}
 
+/* ═══ Modal Dialog (replaces prompt() for WKWebView) ═══ */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .15s}
+.modal-overlay.show{opacity:1;pointer-events:auto}
+.modal-box{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:20px;width:360px;box-shadow:0 16px 48px rgba(0,0,0,.5)}
+.modal-box h3{font-family:var(--font);font-size:13px;color:var(--fg);margin-bottom:12px;font-weight:600}
+.modal-box input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;color:var(--fg);font-family:var(--font);font-size:13px;outline:none;margin-bottom:14px}
+.modal-box input:focus{border-color:var(--accent)}
+.modal-box .modal-btns{display:flex;justify-content:flex-end;gap:8px}
+.modal-box .modal-btns button{padding:6px 16px;border-radius:var(--r);border:none;font-family:var(--font);font-size:12px;cursor:pointer}
+.modal-box .modal-btns .btn-cancel{background:var(--bg4);color:var(--fg2)}
+.modal-box .modal-btns .btn-ok{background:var(--accent);color:#fff;font-weight:600}
+
 /* Code display with syntax highlighting */
 .code-wrap{display:flex;height:100%;overflow:hidden;position:absolute;inset:0}
 .line-gutter{width:50px;background:var(--bg);padding:8px 8px 8px 0;text-align:right;font-family:var(--font);font-size:13px;line-height:20px;color:var(--fg3);overflow:hidden;flex-shrink:0;border-right:1px solid var(--border);user-select:none;white-space:nowrap}
@@ -145,8 +162,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .term-in input{flex:1;background:none;border:none;outline:none;color:var(--fg);font-family:var(--font);font-size:12px}
 
 /* ═══ Chat ═══ */
-.chat-panel{position:absolute;top:0;right:0;bottom:0;width:440px;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;z-index:50;box-shadow:-4px 0 24px rgba(0,0,0,.3);transform:translateX(100%);opacity:0;pointer-events:none;transition:transform .25s cubic-bezier(.4,0,.2,1),opacity .2s ease}
+.chat-panel{position:fixed;top:0;right:0;bottom:0;width:440px;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;z-index:200;box-shadow:-4px 0 24px rgba(0,0,0,.3);transform:translateX(100%);opacity:0;pointer-events:none;transition:transform .25s cubic-bezier(.4,0,.2,1),opacity .2s ease}
 .chat-panel.show{transform:translateX(0);opacity:1;pointer-events:auto}
+.desktop-mode .chat-panel{top:28px}
+.chat-fab{position:fixed;top:8px;right:16px;z-index:199;width:36px;height:20px;border-radius:6px;background:linear-gradient(135deg,#f97316,#8b5cf6);color:#fff;border:none;cursor:pointer;font-family:var(--font);font-size:9px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:transform .15s,box-shadow .15s,opacity .15s;opacity:.85}
+.chat-fab:hover{transform:scale(1.08);box-shadow:0 4px 16px rgba(0,0,0,.4);opacity:1}
+.desktop-mode .chat-fab{top:34px}
 .ch-head{padding:0 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);height:35px;min-height:35px;flex-shrink:0}
 .ch-head h3{font-family:var(--font);font-size:11px;font-weight:600;color:var(--accent);letter-spacing:.5px;text-transform:uppercase}
 .ch-head button{background:none;border:none;color:var(--fg3);font-size:16px;cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:var(--r);transition:background .1s,color .1s}
@@ -294,7 +315,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
   <div class="main-area">
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
-      <div class="sb-title"><span id="sbLabel">Explorer</span><div class="btns"><button onclick="cycleSortMode()" title="Sort" id="sortBtn">A↓</button><button onclick="collapseAll()" title="Collapse All">⊟</button><button onclick="promptNewFile()" title="New File">＋</button><button onclick="promptNewFolder()" title="New Folder">📁</button><button onclick="forceReloadFiles()">↻</button></div></div>
+      <div class="sb-title"><span id="sbLabel">Explorer</span><div class="btns"><button onclick="openFolder()" title="Open Folder">📂</button><button onclick="cycleSortMode()" title="Sort" id="sortBtn">A↓</button><button onclick="collapseAll()" title="Collapse All">⊟</button><button onclick="promptNewFile()" title="New File">＋</button><button onclick="promptNewFolder()" title="New Folder">📁</button><button onclick="forceReloadFiles()">↻</button></div></div>
       <div id="explorerFilter" style="padding:4px 8px;display:none"><input id="filterInput" type="text" placeholder="Filter files..." style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--fg);font-family:var(--font);font-size:12px;outline:none" oninput="filterTree(this.value)"></div>
       <div id="openEditors" style="display:none;border-bottom:1px solid var(--border);padding:4px 0">
         <div class="sb-title" style="padding:4px 16px 2px;margin:0;font-size:10px;cursor:pointer" onclick="document.getElementById('openEditorsList').style.display=document.getElementById('openEditorsList').style.display==='none'?'':'none'"><span>OPEN EDITORS</span></div>
@@ -358,23 +379,101 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
       <!-- AGI Autonomous Panel -->
       <div class="full-panel" id="agiPanel">
         <div class="inner">
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
             <div style="font-size:28px">🧠</div>
-            <div>
-              <h2 style="margin:0;border:0;padding:0;font-size:18px">AGI Autonomous Mode</h2>
-              <div style="font-size:11px;color:var(--fg3)">One prompt to build a complete app. Full autonomous execution with live activity log.</div>
+            <div style="flex:1">
+              <h2 style="margin:0;border:0;padding:0;font-size:18px">AGI Engine</h2>
+              <div style="font-size:11px;color:var(--fg3)">Command mode for directed tasks. Autonomous mode for self-directed work.</div>
             </div>
           </div>
 
-          <!-- AGI Input -->
-          <div style="margin-bottom:20px">
-            <div style="display:flex;gap:8px;margin-bottom:10px">
-              <input class="si" id="agiPrompt" type="text" placeholder="Describe what you want to build (e.g., Create a todo app, Improve this project...)" style="flex:1;font-size:13px;padding:12px 16px;border-radius:8px">
-              <button class="save-btn" id="agiStartBtn" onclick="startAgiV2()" style="font-size:13px;padding:12px 24px;margin:0;border-radius:8px;font-weight:700">AGI Start</button>
-              <button class="save-btn" id="agiStopBtn" onclick="stopAgi()" style="font-size:11px;padding:12px 16px;margin:0;border-radius:8px;background:var(--red);display:none">Stop</button>
+          <!-- Mode Tabs -->
+          <div style="display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:8px">
+            <button class="pill on" id="agiModeCmd" onclick="switchAgiMode('command')" style="font-size:11px;padding:5px 16px">Command AGI</button>
+            <button class="pill" id="agiModeAuto" onclick="switchAgiMode('autonomous')" style="font-size:11px;padding:5px 16px">Autonomous AGI</button>
+          </div>
+
+          <!-- Command Mode -->
+          <div id="agiCommandMode">
+            <div style="margin-bottom:16px">
+              <!-- Target folder — drag & drop or type path (Codex style) -->
+              <div id="agiDropZone" style="margin-bottom:10px;padding:10px 14px;background:var(--bg3);border:2px dashed var(--border);border-radius:8px;font-size:12px;transition:border-color .15s,background .15s;cursor:text;display:flex;align-items:center;gap:8px"
+                ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='var(--accent-dim)'"
+                ondragleave="this.style.borderColor='var(--border)';this.style.background='var(--bg3)'"
+                ondrop="handleAgiDrop(event)">
+                <span style="color:var(--fg3);flex-shrink:0;font-size:14px">📁</span>
+                <input id="agiPathInput" class="si" type="text" placeholder="Drop folder here or type path..." value=""
+                  style="flex:1;font-size:12px;padding:4px 0;border:none;background:none;color:var(--accent);font-weight:600;font-family:var(--font);outline:none"
+                  onchange="setAgiTarget(this.value.trim()||null)"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();setAgiTarget(this.value.trim()||null)}">
+                <button onclick="setAgiTarget(null)" style="background:none;border:none;color:var(--fg3);cursor:pointer;font-size:14px;padding:2px 4px;opacity:.5;flex-shrink:0" title="Reset to workspace root">✕</button>
+              </div>
+              <div style="display:flex;gap:8px;margin-bottom:8px">
+                <input class="si" id="agiPrompt" type="text" placeholder="Describe what you want to build..." style="flex:1;font-size:13px;padding:12px 16px;border-radius:8px">
+                <button class="save-btn" id="agiStartBtn" onclick="startAgiV2()" style="font-size:13px;padding:12px 24px;margin:0;border-radius:8px;font-weight:700">AGI Start</button>
+                <button class="save-btn" id="agiStopBtn" onclick="stopAgi()" style="font-size:11px;padding:12px 16px;margin:0;border-radius:8px;background:var(--red);display:none">Stop</button>
+              </div>
             </div>
-            <div style="font-size:10px;color:var(--fg3)">
-              Dynamic pipeline: steps are generated based on task complexity. Includes auto-replan on failure.
+          </div>
+
+          <!-- Autonomous Mode -->
+          <div id="agiAutoMode" style="display:none">
+            <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:16px;margin-bottom:16px">
+              <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--fg)">Autonomous Mode</div>
+              <div style="font-size:11px;color:var(--fg3);margin-bottom:12px">
+                The AGI analyzes your codebase, identifies tasks, and executes them autonomously. It learns your preferences over time.
+              </div>
+
+              <!-- Task Queue -->
+              <div style="margin-bottom:12px">
+                <div style="display:flex;gap:6px;margin-bottom:8px">
+                  <input class="si" id="autoAgiTask" type="text" placeholder="Add a task to the queue (or let the AGI find tasks)..." style="flex:1;font-size:12px;padding:8px 12px;border-radius:6px">
+                  <select class="ss" id="autoAgiPriority" style="width:90px;font-size:11px;padding:6px">
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                    <option value="critical">Critical</option>
+                    <option value="low">Low</option>
+                  </select>
+                  <select class="ss" id="autoAgiCategory" style="width:100px;font-size:11px;padding:6px">
+                    <option value="general">General</option>
+                    <option value="bug">Bug Fix</option>
+                    <option value="feature">Feature</option>
+                    <option value="refactor">Refactor</option>
+                    <option value="test">Test</option>
+                    <option value="security">Security</option>
+                    <option value="performance">Performance</option>
+                    <option value="docs">Docs</option>
+                  </select>
+                  <button class="save-btn" onclick="addAutoAgiTask()" style="font-size:11px;padding:8px 14px;margin:0;border-radius:6px">Add</button>
+                </div>
+              </div>
+
+              <!-- Queue Display -->
+              <div id="autoAgiQueue" style="max-height:160px;overflow-y:auto;margin-bottom:12px;font-size:11px;color:var(--fg3)">
+                <div style="opacity:.5;font-style:italic">No tasks in queue. Add tasks or use "Scan Codebase" to auto-detect.</div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="save-btn" id="autoAgiScanBtn" onclick="startAutoAgi('proactive')" style="font-size:11px;padding:8px 16px;margin:0;border-radius:6px;background:var(--purple-dim);color:var(--purple);border:1px solid rgba(188,140,255,.3)">Scan Codebase</button>
+                <button class="save-btn" id="autoAgiRunBtn" onclick="startAutoAgi('queue')" style="font-size:11px;padding:8px 16px;margin:0;border-radius:6px;font-weight:600">Run Queue</button>
+                <button class="save-btn" id="autoAgiStopBtn" onclick="stopAutoAgi()" style="font-size:11px;padding:8px 16px;margin:0;border-radius:6px;background:var(--red);display:none">Stop</button>
+                <div style="flex:1"></div>
+                <button class="save-btn" onclick="loadAutoAgiQueue()" style="font-size:10px;padding:6px 12px;margin:0;border-radius:6px;background:var(--bg5);color:var(--fg3)">Refresh Queue</button>
+              </div>
+            </div>
+
+            <!-- Autonomous Status -->
+            <div id="autoAgiStatus" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:12px;font-size:11px;display:none">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span style="font-weight:600;color:var(--fg)">Autonomous Execution</span>
+                <span id="autoAgiStatusBadge" style="font-size:10px;padding:2px 8px;border-radius:9px;background:var(--green-dim);color:var(--green)">Running</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                <div><span style="color:var(--fg3)">Tasks:</span> <span id="autoAgiProgress">0/0</span></div>
+                <div><span style="color:var(--fg3)">Succeeded:</span> <span id="autoAgiSucceeded" style="color:var(--green)">0</span></div>
+                <div><span style="color:var(--fg3)">Failed:</span> <span id="autoAgiFailed" style="color:var(--red)">0</span></div>
+              </div>
             </div>
           </div>
 
@@ -644,7 +743,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
       <div class="editor-zone" id="edZone">
         <div class="welcome-screen" id="welc">
           <h1>Open <b>Seed</b></h1>
-          <p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Prometheus Engine<br><br>
+          <p style="margin-bottom:4px">Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Prometheus Engine</p>
+          <div id="welcWorkspace" style="margin:24px 0">
+            <button onclick="openFolder()" style="background:var(--accent);color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:opacity .15s" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">Open Folder</button>
+            <div id="welcRecent" style="margin-top:20px;text-align:left;display:inline-block;min-width:320px"></div>
+          </div>
+          <p style="font-size:11px;color:var(--fg3)">
           <kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer &nbsp; <kbd>⌘J</kbd> Terminal<br><br>
           <b style="color:var(--accent)">🧠 AGI Mode</b> — 프롬프트 하나로 완전한 앱 생성<br>
           <b style="color:var(--green)">🔨 Build</b> — 코드 작성, 수정, 테스트<br>
@@ -666,9 +770,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
       </div>
     </div>
 
+    <!-- Chat FAB Button -->
+    <button class="chat-fab" id="chatFab" onclick="toggleChat()" title="Open Seed AI Chat">O.S</button>
+
     <!-- Chat Panel -->
     <div class="chat-panel" id="chatP">
-      <div class="ch-head"><h3>Open Seed</h3><button onclick="nav('files')">×</button></div>
+      <div class="ch-head"><h3>Open Seed</h3><button onclick="toggleChat()">×</button></div>
       <div class="ch-body" id="chBody"></div>
       <div class="ch-foot">
         <div class="ch-box">
@@ -678,6 +785,18 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             <button class="go-btn" id="goBtn" onclick="send()">↑</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Dialog -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal-box">
+      <h3 id="modalTitle">Input</h3>
+      <input id="modalInput" type="text" placeholder="" autofocus>
+      <div class="modal-btns">
+        <button class="btn-cancel" onclick="closeModal(null)">Cancel</button>
+        <button class="btn-ok" onclick="closeModal(document.getElementById('modalInput').value)">OK</button>
       </div>
     </div>
   </div>
@@ -695,24 +814,112 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 </div>
 
 <script>
+// Detect desktop app mode (native macOS app or Electron with hidden title bar)
+if (navigator.userAgent.includes('OpenSeed-Desktop') || navigator.userAgent.includes('Electron')) {
+  document.querySelector('.app')?.classList.add('desktop-mode');
+}
 const T=[];let AT=null,M="task",R=false,CFG={};
+let WORKSPACE=null; // current workspace dir
+
+/* ═══ WORKSPACE ═══ */
+async function initWorkspace(){
+  try{
+    const r=await fetch('/api/workspace');
+    const w=await r.json();
+    WORKSPACE=w.current;
+    if(WORKSPACE){
+      document.title='Open Seed — '+w.name;
+      setSB(w.name);
+      loadFiles();
+    }else{
+      // No workspace — show welcome with open folder
+      showWelcome();
+      document.getElementById('sbBody').innerHTML='<div style="padding:16px;text-align:center"><button onclick="openFolder()" style="background:var(--accent);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);width:100%">Open Folder</button></div>';
+    }
+    loadRecentWorkspaces();
+  }catch(e){console.error('initWorkspace',e)}
+}
+
+async function openFolder(dir){
+  try{
+    const body=dir?JSON.stringify({dir}):'{}';
+    const r=await fetch('/api/workspace/open',{method:'POST',headers:{'Content-Type':'application/json'},body});
+    const result=await r.json();
+    if(result.ok){
+      WORKSPACE=result.dir;
+      document.title='Open Seed — '+result.name;
+      // Reload everything
+      nav('files');
+      loadFiles();
+      loadRecentWorkspaces();
+    }
+  }catch(e){console.error('openFolder',e)}
+}
+
+async function loadRecentWorkspaces(){
+  try{
+    const r=await fetch('/api/workspace');
+    const w=await r.json();
+    const el=document.getElementById('welcRecent');
+    if(!el)return;
+    if(!w.recent||w.recent.length===0){el.innerHTML='';return;}
+    el.innerHTML='<div style="font-size:11px;color:var(--fg3);margin-bottom:8px;font-weight:600">Recent</div>'+
+      w.recent.slice(0,8).map(p=>{
+        const name=p.split('/').pop();
+        const short=p.replace(/^\/Users\/[^/]+/,'~');
+        return `<div onclick="openFolder('${p.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:6px;transition:background .1s;font-size:12px" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background=''"><span style="color:var(--accent);font-size:14px">📁</span><div><div style="color:var(--fg)">${name}</div><div style="color:var(--fg3);font-size:10px">${short}</div></div></div>`;
+      }).join('');
+  }catch(e){}
+}
+
+/* ═══ MODAL (replaces prompt() for WKWebView) ═══ */
+let _modalResolve=null;
+function showModal(title,placeholder,defaultVal){
+  return new Promise(resolve=>{
+    _modalResolve=resolve;
+    document.getElementById('modalTitle').textContent=title;
+    const inp=document.getElementById('modalInput');
+    inp.value=defaultVal||'';
+    inp.placeholder=placeholder||'';
+    document.getElementById('modalOverlay').classList.add('show');
+    setTimeout(()=>inp.focus(),50);
+  });
+}
+function closeModal(val){
+  document.getElementById('modalOverlay').classList.remove('show');
+  if(_modalResolve){_modalResolve(val);_modalResolve=null;}
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&document.getElementById('modalOverlay').classList.contains('show')){closeModal(null);}
+  if(e.key==='Enter'&&document.getElementById('modalOverlay').classList.contains('show')){closeModal(document.getElementById('modalInput').value);}
+});
+
+/* ═══ CHAT TOGGLE ═══ */
+function toggleChat(){
+  const ch=document.getElementById('chatP');
+  ch.classList.toggle('show');
+  if(ch.classList.contains('show')){
+    document.getElementById('chIn').focus();
+    document.getElementById('chatDot').style.display='none';
+  }
+}
 
 /* ═══ NAV ═══ */
 function nav(v){
   document.querySelectorAll('.act-btn').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  const sb=document.getElementById('sidebar'),ch=document.getElementById('chatP'),ez=document.getElementById('edZone');
+  const sb=document.getElementById('sidebar'),ez=document.getElementById('edZone');
   // Hide all fullscreen panels
   ['setPanel','searchPanel','sessionsPanel','doctorPanel','agiPanel'].forEach(id=>document.getElementById(id)?.classList.remove('show'));
   ez.style.display='';document.getElementById('termP').classList.remove('shut');document.getElementById('tabs').style.display='';
 
-  if(v==='files'){sb.classList.remove('hide');ch.classList.remove('show');loadFiles();document.getElementById('sbLabel').textContent='Explorer'}
-  else if(v==='search'){sb.classList.add('hide');ch.classList.remove('show');showFullPanel('searchPanel');document.getElementById('searchIn').focus()}
-  else if(v==='chat'){ch.classList.toggle('show');document.getElementById('chIn').focus();document.getElementById('chatDot').style.display='none'}
-  else if(v==='sessions'){sb.classList.add('hide');ch.classList.remove('show');showFullPanel('sessionsPanel');loadSessions()}
-  else if(v==='agi'){sb.classList.add('hide');ch.classList.remove('show');showFullPanel('agiPanel')}
-  else if(v==='doctor'){sb.classList.add('hide');ch.classList.remove('show');showFullPanel('doctorPanel')}
-  else if(v==='settings'){sb.classList.add('hide');ch.classList.remove('show');showFullPanel('setPanel');loadSet()}
-  else{sb.classList.add('hide');ch.classList.remove('show')}
+  if(v==='files'){sb.classList.remove('hide');loadFiles();document.getElementById('sbLabel').textContent='Explorer'}
+  else if(v==='search'){sb.classList.add('hide');showFullPanel('searchPanel');document.getElementById('searchIn').focus()}
+  else if(v==='chat'){toggleChat()}
+  else if(v==='sessions'){sb.classList.add('hide');document.getElementById('chatP').classList.remove('show');showFullPanel('sessionsPanel');loadSessions()}
+  else if(v==='agi'){sb.classList.add('hide');document.getElementById('chatP').classList.remove('show');showFullPanel('agiPanel')}
+  else if(v==='doctor'){sb.classList.add('hide');document.getElementById('chatP').classList.remove('show');showFullPanel('doctorPanel')}
+  else if(v==='settings'){sb.classList.add('hide');document.getElementById('chatP').classList.remove('show');showFullPanel('setPanel');loadSet()}
+  else{sb.classList.add('hide');document.getElementById('chatP').classList.remove('show')}
 }
 function showFullPanel(id){document.getElementById(id).classList.add('show');document.getElementById('edZone').style.display='none';document.getElementById('termP').classList.add('shut');document.getElementById('tabs').style.display='none'}
 function stab(n){document.querySelectorAll('[data-st]').forEach(b=>b.classList.toggle('on',b.dataset.st===n));['providers','safety','engine','tools','expert'].forEach(t=>document.getElementById('st-'+t).style.display=t===n?'':'none');if(n==='expert')document.getElementById('s-raw').value=JSON.stringify(CFG,null,2)}
@@ -1330,8 +1537,11 @@ async function handleExternalFileDrop(files,targetDir){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({path:targetPath,content})
       });
-      if(r.ok)uploaded++;
-      else failed++;
+      if(r.ok){
+        const rj=await r.json().catch(()=>({}));
+        if(rj.error==='no_workspace'){showDropNotification('Open a folder first',true);return;}
+        uploaded++;
+      }else failed++;
     }catch(err){
       failed++;
       console.error('Drop upload failed:',file.name,err);
@@ -1593,7 +1803,7 @@ function renderTabs(){
   }
 }
 
-function closeTab(p){const i=T.findIndex(t=>t.p===p);if(i<0)return;if(T[i].d&&!confirm('Discard?'))return;T.splice(i,1);if(AT?.p===p)AT=T[Math.min(i,T.length-1)]||null;renderTabs();AT?renderEd():showWelcome()}
+async function closeTab(p){const i=T.findIndex(t=>t.p===p);if(i<0)return;if(T[i].d){const c=await showModal('Discard unsaved changes? Type "yes"','yes');if(c!=='yes')return;}T.splice(i,1);if(AT?.p===p)AT=T[Math.min(i,T.length-1)]||null;renderTabs();AT?renderEd():showWelcome()}
 
 /* ═══ EDITOR — renders text, images, video, audio, PDF ═══ */
 function renderEd(){
@@ -1777,14 +1987,14 @@ function renderMarkdownPreview(){
 }
 function updateHighlight(){const hl=document.getElementById('hl');if(!hl||!AT)return;const ext=AT.p.split('.').pop();const lang={ts:'typescript',tsx:'typescript',js:'javascript',json:'json',css:'css',html:'xml',md:'markdown',py:'python',sh:'bash'}[ext]||'';let html;if(lang&&hljs.getLanguage(lang)){html=hljs.highlight(AT.c,{language:lang}).value}else{html=esc(AT.c)}hl.innerHTML='<code>'+html+'</code>'}
 function updateGutter(){const g=document.getElementById('lg'),ce=document.getElementById('ce');if(!g||!ce)return;const n=ce.value.split('\n').length;g.innerHTML=Array.from({length:n},(_,i)=>'<div>'+(i+1)+'</div>').join('')}
-function showWelcome(){const z=document.getElementById('edZone');z.querySelector('.code-wrap')?.remove();if(!z.querySelector('.welcome-screen'))z.innerHTML='<div class="welcome-screen" id="welc"><h1>Open <b>Seed</b></h1><p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Prometheus Engine<br><br><kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer<br><kbd>⌘S</kbd> Save &nbsp; <kbd>⌘\`</kbd> Terminal</p></div>'}
+function showWelcome(){const z=document.getElementById('edZone');z.querySelector('.code-wrap')?.remove();if(!z.querySelector('.welcome-screen'))z.innerHTML='<div class="welcome-screen" id="welc"><h1>Open <b>Seed</b></h1><p style="margin-bottom:4px">Autonomous AGI Coding Engine</p><div id="welcWorkspace" style="margin:24px 0"><button onclick="openFolder()" style="background:var(--accent);color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--sans)">Open Folder</button><div id="welcRecent" style="margin-top:20px;text-align:left;display:inline-block;min-width:320px"></div></div><p style="font-size:11px;color:var(--fg3)"><kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer<br><kbd>⌘S</kbd> Save &nbsp; <kbd>⌘\`</kbd> Terminal</p></div>';loadRecentWorkspaces()}
 
 /* ═══ SAVE ═══ */
 async function saveActive(){if(!AT||!AT.d)return;const r=await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:AT.p,content:AT.c})});if((await r.json()).ok){AT.o=AT.c;AT.d=false;renderTabs();setSB('Saved '+AT.p)}}
 
 /* ═══ FILE OPS ═══ */
-async function promptNewFile(){const p=prompt('New file:');if(!p)return;await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p,content:''})});forceReloadFiles();setTimeout(()=>openTab(p),200)}
-async function promptNewFolder(){const p=prompt('New folder:');if(!p)return;await fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});forceReloadFiles()}
+async function promptNewFile(){const p=await showModal('New File','filename.ts');if(!p)return;await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p,content:''})});forceReloadFiles();setTimeout(()=>openTab(p),200)}
+async function promptNewFolder(){const p=await showModal('New Folder','folder-name');if(!p)return;await fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});forceReloadFiles()}
 // Clipboard for copy/cut/paste
 let _clipboard={path:null,op:null}; // op: 'copy'|'cut'
 
@@ -1797,10 +2007,10 @@ function ctxMenu(e,p,type){
   const items=[];
 
   if(type==='dir'){
-    items.push(['New File...',()=>{const n=prompt('File name:');if(n)fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n,content:''})}).then(()=>{forceReloadFiles();setTimeout(()=>openTab(p+'/'+n),200)})},'']);
-    items.push(['New Folder...',()=>{const n=prompt('Folder name:');if(n)fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n})}).then(()=>forceReloadFiles())},'']);
+    items.push(['New File...',async()=>{const n=await showModal('New File in '+p.split('/').pop(),'filename.ts');if(n)fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n,content:''})}).then(()=>{forceReloadFiles();setTimeout(()=>openTab(p+'/'+n),200)})},'']);
+    items.push(['New Folder...',async()=>{const n=await showModal('New Folder in '+p.split('/').pop(),'folder-name');if(n)fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n})}).then(()=>forceReloadFiles())},'']);
     items.push(['---']);
-    items.push(['Rename...',()=>{const el=document.querySelector(`.fi.dir[data-dirpath="${p}"]`);if(el)startRename(el,p,true);else{const n=prompt('Rename:',p.split('/').pop());if(n){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(()=>forceReloadFiles())}}},'F2']);
+    items.push(['Rename...',async()=>{const el=document.querySelector(`.fi.dir[data-dirpath="${p}"]`);if(el)startRename(el,p,true);else{const n=await showModal('Rename Folder','new name',p.split('/').pop());if(n){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(()=>forceReloadFiles())}}},'F2']);
     items.push(['---']);
     items.push(['Cut',()=>{_clipboard={path:p,op:'cut'}},'Cmd+X']);
     items.push(['Copy',()=>{_clipboard={path:p,op:'copy'}},'Cmd+C']);
@@ -1812,12 +2022,14 @@ function ctxMenu(e,p,type){
     items.push(['Reveal in Finder',()=>{fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'open "'+p+'"'})})},'']);
     items.push(['Open in Terminal',()=>{document.getElementById('tIn').value='cd '+p;runCmd()},'']);
     items.push(['---']);
-    items.push(['Delete',()=>{if(confirm('Delete folder "'+p.split('/').pop()+'" and all contents?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>forceReloadFiles())},'']);
+    items.push([AGI_TARGET_DIR===p?'✓ AGI Target':'Set as AGI Target',()=>{setAgiTarget(AGI_TARGET_DIR===p?null:p);showDropNotification(AGI_TARGET_DIR?'AGI target: '+AGI_TARGET_DIR:'AGI target reset',false)},'']);
+    items.push(['---']);
+    items.push(['Delete',async()=>{const c=await showModal('Delete "'+p.split('/').pop()+'"? Type "yes" to confirm','yes');if(c==='yes')fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>forceReloadFiles())},'']);
   } else {
     items.push(['Open',()=>openTab(p),'Enter']);
     items.push(['Open to the Side',()=>{openTab(p)},'Cmd+Enter']);
     items.push(['---']);
-    items.push(['Rename...',()=>{const el=document.querySelector(`.fi[data-filepath="${p}"]`);if(el)startRename(el,p,false);else{const n=prompt('Rename:',p.split('/').pop());if(n&&n!==p.split('/').pop()){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(()=>{const t=T.find(x=>x.p===p);if(t)t.p=np;forceReloadFiles();renderTabs()})}}},'F2']);
+    items.push(['Rename...',async()=>{const el=document.querySelector(`.fi[data-filepath="${p}"]`);if(el)startRename(el,p,false);else{const n=await showModal('Rename File','new name',p.split('/').pop());if(n&&n!==p.split('/').pop()){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(()=>{const t=T.find(x=>x.p===p);if(t)t.p=np;forceReloadFiles();renderTabs()})}}},'F2']);
     items.push(['---']);
     items.push(['Cut',()=>{_clipboard={path:p,op:'cut'}},'Cmd+X']);
     items.push(['Copy',()=>{_clipboard={path:p,op:'copy'}},'Cmd+C']);
@@ -1832,7 +2044,7 @@ function ctxMenu(e,p,type){
     }
     items.push(['Reveal in Finder',()=>{fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'open -R "'+p+'"'})})},'']);
     items.push(['---']);
-    items.push(['Delete',()=>{if(confirm('Delete "'+p.split('/').pop()+'"?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>{closeTab(p);forceReloadFiles()})},'Del']);
+    items.push(['Delete',async()=>{const c=await showModal('Delete "'+p.split('/').pop()+'"? Type "yes"','yes');if(c==='yes')fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>{closeTab(p);forceReloadFiles()})},'Del']);
   }
 
   for(const item of items){
@@ -1986,6 +2198,55 @@ function setM(m){M=m;document.querySelectorAll('.pill[data-m]').forEach(b=>b.cla
 let AGI_RUNNING=false;
 let AGI_ABORT=null;
 let AGI_PROJECT_DIR=null;
+let AGI_TARGET_DIR=null; // subfolder within workspace to work in (e.g. "Test")
+
+function setAgiTarget(dir){
+  AGI_TARGET_DIR=dir&&dir.trim()?dir.trim():null;
+  const input=document.getElementById('agiPathInput');
+  const zone=document.getElementById('agiDropZone');
+  if(input) input.value=AGI_TARGET_DIR||'';
+  if(zone){
+    if(AGI_TARGET_DIR){
+      zone.style.borderColor='var(--accent)';
+      zone.style.borderStyle='solid';
+    }else{
+      zone.style.borderColor='var(--border)';
+      zone.style.borderStyle='dashed';
+    }
+  }
+}
+
+function handleAgiDrop(e){
+  e.preventDefault();
+  const zone=document.getElementById('agiDropZone');
+  if(zone){zone.style.borderColor='var(--border)';zone.style.background='var(--bg3)'}
+  // Try to get dropped folder path
+  const items=e.dataTransfer?.items;
+  if(items&&items.length>0){
+    // webkitGetAsEntry for folder detection
+    const entry=items[0].webkitGetAsEntry?.();
+    if(entry&&entry.isDirectory){
+      setAgiTarget(entry.fullPath);
+      return;
+    }
+  }
+  // Fallback: text/plain or files
+  const text=e.dataTransfer?.getData('text/plain');
+  if(text&&text.trim()){
+    // Could be a file:// URI or a plain path
+    let p=text.trim();
+    if(p.startsWith('file://'))p=decodeURIComponent(p.replace('file://',''));
+    setAgiTarget(p);
+    return;
+  }
+  const files=e.dataTransfer?.files;
+  if(files&&files.length>0){
+    // .path is available in some contexts (Electron/native)
+    const f=files[0];
+    if(f.path){setAgiTarget(f.path);return}
+    if(f.name){setAgiTarget(f.name);return}
+  }
+}
 
 /** Extract a project directory name from user prompt */
 function extractProjectName(prompt){
@@ -2131,21 +2392,23 @@ async function startAgiV2(){
   if(!prompt||AGI_RUNNING)return;
 
   AGI_RUNNING=true;
-  AGI_PROJECT_DIR=extractProjectName(prompt);
+  AGI_PROJECT_DIR=null; // no longer used for folder creation
   document.getElementById('agiStartBtn').style.display='none';
   document.getElementById('agiStopBtn').style.display='';
   document.getElementById('agiLog').innerHTML='';
   _agiFileCount=0;_agiTasksDone=0;_agiTasksTotal=0;_agiToolCalls=0;
   updateAgiDashboard({files:0,tasks:'0/0',tokens:0,cost:0,confidence:'—'});
 
+  const targetLabel=AGI_TARGET_DIR?AGI_TARGET_DIR+'/':'/ (root)';
   agiLog('AGI Pipeline V2 starting: '+prompt,'var(--accent)');
-  agiLog('Project: workspace/'+AGI_PROJECT_DIR+'/','var(--fg2)');
+  agiLog('Target: '+targetLabel,'var(--fg2)');
   agiLog('Dynamic pipeline — steps auto-generated based on task complexity','var(--fg3)');
   updateAgiDashboard({status:'Running',percent:0});
 
   try{
     const ctrl=new AbortController();AGI_ABORT=ctrl;
-    const payload={task:prompt,projectDir:AGI_PROJECT_DIR};
+    const payload={task:prompt};
+    if(AGI_TARGET_DIR) payload.targetDir=AGI_TARGET_DIR;
     const r=await fetch('/api/agi/run',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -2190,13 +2453,13 @@ async function startAgiV2(){
           else if(ev.type==='agi.step.complete'){
             completedCount++;
             setAgiStepById(ev.stepId,'done');
-            agiLog(`[DONE] ${(ev.stepType||'').toUpperCase()}: ${ev.summary||'completed'}`,'var(--green)');
+            agiLog(`[DONE] ${(ev.stepType||'').toUpperCase()}: completed`,'var(--green)');
             updateAgiDashboard({tasks:`${completedCount}/${currentSteps.length}`,files:ev.filesCreated||_agiFileCount});
             if(ev.filesCreated)_agiFileCount=ev.filesCreated;
           }
           else if(ev.type==='agi.step.fail'){
             setAgiStepById(ev.stepId,'error');
-            agiLog(`[FAIL] ${(ev.stepType||'').toUpperCase()}: ${ev.summary||'failed'}`,'var(--red)');
+            agiLog(`[FAIL] ${(ev.stepType||'').toUpperCase()}: failed`,'var(--red)');
           }
           else if(ev.type==='agi.step.skip'){
             setAgiStepById(ev.stepId,'skip');
@@ -2280,7 +2543,10 @@ async function startAgiV2(){
             }
             else if(cls==='enforcer.checklist'){
               const items=(pl.checklist||[]);
-              if(items.length)agiLog(`Enforcer round ${pl.round||'?'}: ${items.join('; ').slice(0,200)}`,'var(--fg3)');
+              if(items.length){
+                const strs=items.map(i=>typeof i==='string'?i:(i.label||i.message||i.name||JSON.stringify(i)));
+                agiLog(`Enforcer round ${pl.round||'?'}: ${strs.join('; ').slice(0,200)}`,'var(--fg3)');
+              }
             }
             else if(cls==='enforcer.stuck'){
               agiLog(`STUCK detected: ${pl.reason||'unknown'}`,'var(--yellow)');
@@ -2366,9 +2632,8 @@ async function startAgiV2(){
 
   // Finish
   updateAgiDashboard({status:'Done',percent:100});
-  if(AGI_PROJECT_DIR){
-    agiLog('Output: workspace/'+AGI_PROJECT_DIR+'/','var(--green)');
-    agiLog('Run: cd workspace/'+AGI_PROJECT_DIR+' && npm install && npm start','var(--fg2)');
+  if(AGI_TARGET_DIR){
+    agiLog('Output: '+AGI_TARGET_DIR+'/','var(--green)');
   }
   agiLog('AGI Pipeline V2 complete!','var(--green)');
   AGI_RUNNING=false;
@@ -2385,6 +2650,172 @@ function agiFinish(){
   AGI_RUNNING=false;AGI_PROJECT_DIR=null;
   document.getElementById('agiStartBtn').style.display='';
   document.getElementById('agiStopBtn').style.display='none';
+}
+
+// ═══ AGI Mode Switching ═══
+function switchAgiMode(mode){
+  const cmdMode=document.getElementById('agiCommandMode');
+  const autoMode=document.getElementById('agiAutoMode');
+  const cmdTab=document.getElementById('agiModeCmd');
+  const autoTab=document.getElementById('agiModeAuto');
+  if(mode==='command'){
+    cmdMode.style.display='';autoMode.style.display='none';
+    cmdTab.classList.add('on');autoTab.classList.remove('on');
+  }else{
+    cmdMode.style.display='none';autoMode.style.display='';
+    cmdTab.classList.remove('on');autoTab.classList.add('on');
+    loadAutoAgiQueue();
+  }
+}
+
+// ═══ Autonomous AGI ═══
+let AUTO_AGI_RUNNING=false;
+let AUTO_AGI_ABORT=null;
+
+async function loadAutoAgiQueue(){
+  try{
+    const r=await fetch('/api/auto-agi/queue');
+    const q=await r.json();
+    const el=document.getElementById('autoAgiQueue');
+    if(!q.tasks||q.tasks.length===0){
+      el.innerHTML='<div style="opacity:.5;font-style:italic">No tasks in queue. Add tasks or use "Scan Codebase" to auto-detect.</div>';
+      return;
+    }
+    const priorityColor={critical:'var(--red)',high:'var(--orange)',normal:'var(--fg2)',low:'var(--fg3)'};
+    const catIcon={bug:'🐛',feature:'✨',refactor:'🔧',test:'🧪',security:'🔒',performance:'⚡',docs:'📝',general:'📋'};
+    el.innerHTML=q.tasks.map(t=>`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:12px">${catIcon[t.category]||'📋'}</span>
+      <span style="flex:1;color:var(--fg2)">${t.task.slice(0,100)}</span>
+      <span style="color:${priorityColor[t.priority]||'var(--fg3)'};font-size:10px;font-weight:600">${t.priority.toUpperCase()}</span>
+      <button onclick="removeAutoAgiTask('${t.id}')" style="background:none;border:none;color:var(--fg3);cursor:pointer;font-size:12px" title="Remove">✕</button>
+    </div>`).join('');
+  }catch(e){console.error('loadAutoAgiQueue',e)}
+}
+
+async function addAutoAgiTask(){
+  const input=document.getElementById('autoAgiTask');
+  const task=input.value.trim();
+  if(!task)return;
+  const priority=document.getElementById('autoAgiPriority').value;
+  const category=document.getElementById('autoAgiCategory').value;
+  try{
+    await fetch('/api/auto-agi/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,priority,category})});
+    input.value='';
+    loadAutoAgiQueue();
+  }catch(e){console.error('addAutoAgiTask',e)}
+}
+
+async function removeAutoAgiTask(taskId){
+  try{
+    await fetch('/api/auto-agi/queue',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskId})});
+    loadAutoAgiQueue();
+  }catch(e){console.error('removeAutoAgiTask',e)}
+}
+
+async function startAutoAgi(mode){
+  if(AUTO_AGI_RUNNING)return;
+  AUTO_AGI_RUNNING=true;
+  document.getElementById('autoAgiRunBtn').style.display='none';
+  document.getElementById('autoAgiScanBtn').style.display='none';
+  document.getElementById('autoAgiStopBtn').style.display='';
+  document.getElementById('autoAgiStatus').style.display='';
+  document.getElementById('agiLog').innerHTML='';
+
+  agiLog(`Autonomous AGI starting (mode: ${mode})...`,'var(--accent)');
+  let tasksDone=0,tasksTotal=0,succeeded=0,failed=0;
+
+  try{
+    const ctrl=new AbortController();AUTO_AGI_ABORT=ctrl;
+    const r=await fetch('/api/auto-agi/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode}),signal:ctrl.signal});
+    const reader=r.body.getReader();
+    const decoder=new TextDecoder();
+    let buf='';
+
+    while(true){
+      const{done,value}=await reader.read();
+      if(done)break;
+      buf+=decoder.decode(value,{stream:true});
+      const lines=buf.split('\n');buf=lines.pop()||'';
+      for(const l of lines){
+        if(!l.startsWith('data: '))continue;
+        const d=l.slice(6);
+        if(d==='[DONE]')break;
+        try{
+          const ev=JSON.parse(d);
+          if(ev.type==='auto.status'){
+            agiLog(ev.message,'var(--accent)');
+            document.getElementById('autoAgiStatusBadge').textContent=ev.phase||'Running';
+          }
+          else if(ev.type==='auto.repomap'){
+            agiLog(`Codebase: ${ev.files} files — ${Object.entries(ev.languages||{}).map(([l,c])=>`${l}(${c})`).join(', ')}`,'var(--fg2)');
+          }
+          else if(ev.type==='auto.tasks-generated'){
+            agiLog(`Generated ${ev.count} tasks from codebase analysis`,'var(--purple)');
+            tasksTotal=ev.count;
+            document.getElementById('autoAgiProgress').textContent=`0/${tasksTotal}`;
+            loadAutoAgiQueue();
+          }
+          else if(ev.type==='auto.task-start'){
+            tasksTotal=ev.total;
+            agiLog(`[${ev.index+1}/${ev.total}] ${ev.category}: ${ev.task}`,'var(--accent)');
+            document.getElementById('autoAgiProgress').textContent=`${ev.index}/${ev.total}`;
+          }
+          else if(ev.type==='auto.task-complete'){
+            tasksDone++;
+            if(ev.status==='completed')succeeded++;else failed++;
+            const color=ev.status==='completed'?'var(--green)':'var(--red)';
+            agiLog(`[${ev.status.toUpperCase()}] Task ${ev.index+1}/${ev.total}`,color);
+            document.getElementById('autoAgiProgress').textContent=`${tasksDone}/${ev.total}`;
+            document.getElementById('autoAgiSucceeded').textContent=succeeded;
+            document.getElementById('autoAgiFailed').textContent=failed;
+          }
+          else if(ev.type==='auto.task-error'){
+            failed++;
+            agiLog(`[ERROR] ${ev.error}`,'var(--red)');
+            document.getElementById('autoAgiFailed').textContent=failed;
+          }
+          else if(ev.type==='auto.event'){
+            if(ev.eventType==='tool.completed'){
+              const pl=ev.payload||{};
+              const tool=pl.tool||'?';
+              const ok=pl.ok!==false;
+              if(tool==='write'&&ok)agiLog(`[write] ${pl.output?.path||''}`,'var(--green)');
+              else if(tool==='bash')agiLog(`[bash] ${(pl.input?.command||'').slice(0,80)}`,'var(--fg2)');
+            }
+          }
+          else if(ev.type==='auto.llm'){
+            // Streaming LLM output (batch to avoid flood)
+          }
+          else if(ev.type==='auto.error'){
+            agiLog(ev.message,'var(--red)');
+          }
+          else if(ev.type==='auto.complete'){
+            agiLog(`Autonomous execution complete: ${ev.succeeded}/${ev.processed} succeeded`,'var(--green)');
+          }
+        }catch(parseErr){}
+      }
+    }
+  }catch(e){
+    if(e.name==='AbortError')agiLog('Autonomous AGI stopped by user','var(--yellow)');
+    else agiLog('Error: '+e.message,'var(--red)');
+  }
+
+  AUTO_AGI_RUNNING=false;
+  document.getElementById('autoAgiRunBtn').style.display='';
+  document.getElementById('autoAgiScanBtn').style.display='';
+  document.getElementById('autoAgiStopBtn').style.display='none';
+  document.getElementById('autoAgiStatusBadge').textContent='Done';
+  loadAutoAgiQueue();
+  forceReloadFiles();
+}
+
+function stopAutoAgi(){
+  if(AUTO_AGI_ABORT)AUTO_AGI_ABORT.abort();
+  fetch('/api/auto-agi/stop',{method:'POST'}).catch(()=>{});
+  AUTO_AGI_RUNNING=false;
+  document.getElementById('autoAgiRunBtn').style.display='';
+  document.getElementById('autoAgiScanBtn').style.display='';
+  document.getElementById('autoAgiStopBtn').style.display='none';
 }
 
 async function processAgiStream(response){
@@ -2953,7 +3384,7 @@ document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){
 document.getElementById('chIn')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
 
 /* ═══ INIT ═══ */
-loadFiles();
+initWorkspace();
 </script>
 </body>
 </html>
