@@ -1,7 +1,11 @@
 import { attachLiveSessionOutput } from "./live-session.js";
 import { runEngine } from "../orchestration/engine.js";
+import { readFileSync } from "node:fs";
 
 export async function runTeamCommand(task: string): Promise<void> {
+  if (process.env.AGI_PROMPT_FILE && task === "__AGI_PROMPT_FILE__") {
+    try { task = readFileSync(process.env.AGI_PROMPT_FILE, "utf-8"); } catch { /* fallback */ }
+  }
   const cwd = process.cwd();
   let follower: Awaited<ReturnType<typeof attachLiveSessionOutput>> | undefined;
 

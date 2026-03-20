@@ -1,7 +1,12 @@
 import { attachLiveSessionOutput } from "./live-session.js";
 import { runEngine } from "../orchestration/engine.js";
+import { readFileSync } from "node:fs";
 
 export async function runRunCommand(task: string): Promise<void> {
+  // [FIX #7] If AGI_PROMPT_FILE env is set, read full prompt from file (avoids CLI arg length limits)
+  if (process.env.AGI_PROMPT_FILE && task === "__AGI_PROMPT_FILE__") {
+    try { task = readFileSync(process.env.AGI_PROMPT_FILE, "utf-8"); } catch { /* fallback to original task */ }
+  }
   const cwd = process.cwd();
   let follower: Awaited<ReturnType<typeof attachLiveSessionOutput>> | undefined;
 

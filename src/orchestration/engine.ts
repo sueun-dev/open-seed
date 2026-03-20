@@ -690,8 +690,11 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     ),
     retryConfig: config.retry, maxRetries
   }) as ExecutorArtifact;
-  // Defensive: ensure executionOutput always has safe defaults
-  if (!executionOutput || typeof executionOutput !== "object") executionOutput = {} as ExecutorArtifact;
+  // [FIX #9] Defensive: ensure executionOutput always has safe defaults — with warnings
+  if (!executionOutput || typeof executionOutput !== "object") {
+    await eventBus.fire("error.retriable", "engine", session.id, { message: "[WARN] executionOutput was empty/undefined — using defaults", category: "defensive-default", attempt: 0 });
+    executionOutput = {} as ExecutorArtifact;
+  }
   if (!executionOutput.summary) executionOutput.summary = "";
   if (!Array.isArray(executionOutput.changes)) executionOutput.changes = [];
   enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
@@ -772,8 +775,11 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     prompt: buildReviewerPrompt(options.task, executionOutput, delegationSummary, combinedContext),
     retryConfig: config.retry, maxRetries
   }) as ReviewResult;
-  // Defensive: ensure review always has safe defaults
-  if (!review || typeof review !== "object") review = {} as ReviewResult;
+  // [FIX #9] Defensive: ensure review always has safe defaults — with warning
+  if (!review || typeof review !== "object") {
+    await eventBus.fire("error.retriable", "engine", session.id, { message: "[WARN] review output was empty/undefined — using defaults", category: "defensive-default", attempt: 0 });
+    review = {} as ReviewResult;
+  }
   if (!review.verdict) review.verdict = "fail";
   if (!review.summary) review.summary = "";
   if (!Array.isArray(review.followUp)) review.followUp = [];
@@ -968,10 +974,28 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   // Rationale: reviewer may be overly strict, but code was still written correctly.
   // Better to keep the work and let the user decide than to silently delete everything.
   if (sandbox && sandbox.hasChanges()) {
-    const result = await sandbox.apply();
-    await eventBus.fire("sandbox.applied", "engine", session.id, {
-      applied: result.applied, paths: result.paths, reviewVerdict: review.verdict
-    });
+    try {
+      const result = await sandbox.apply();
+      // [FIX #8] Verify files actually exist on disk after apply
+      const missingFiles: string[] = [];
+      for (const p of result.paths) {
+        try { await fs.access(path.resolve(options.cwd, p)); } catch { missingFiles.push(p); }
+      }
+      await eventBus.fire("sandbox.applied", "engine", session.id, {
+        applied: result.applied, paths: result.paths, reviewVerdict: review.verdict,
+        verified: missingFiles.length === 0, missingFiles
+      });
+      if (missingFiles.length > 0) {
+        await eventBus.fire("error.retriable", "engine", session.id, {
+          message: `Sandbox apply: ${missingFiles.length} files failed to write: ${missingFiles.join(", ")}`,
+          category: "sandbox-verify", attempt: 1
+        });
+      }
+    } catch (sandboxErr) {
+      await eventBus.fire("error.fatal", "engine", session.id, {
+        message: `Sandbox apply failed: ${sandboxErr instanceof Error ? sandboxErr.message : String(sandboxErr)}`
+      });
+    }
   }
 
   // ─── Phase: Done ─────────────────────────────────────────────────────────

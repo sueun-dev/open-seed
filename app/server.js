@@ -526,17 +526,30 @@ const server = http.createServer(async (req, res) => {
       sections.push(`# AGI Pipeline — ${step.title}`);
       sections.push(`## Original Task\n${task}`);
 
-      // Inter-step memory: all prior results
+      // [FIX #2, #4] Inter-step memory: ALL prior results with FULL content — no truncation
       if (ctx.stepResults.length > 0) {
         sections.push(`## Prior Step Results (${ctx.stepResults.length} completed)`);
         for (const r of ctx.stepResults) {
           const icon = r.status === "completed" ? "PASS" : r.status === "failed" ? "FAIL" : "SKIP";
-          sections.push(`### [${icon}] ${r.type.toUpperCase()}\n${(r.summary || "").slice(0, 2000)}`);
-          if (r.changes && r.changes.length) sections.push(`Files: ${r.changes.join(", ")}`);
-          if (r.errors && r.errors.length) sections.push(`Errors: ${r.errors.join("; ")}`);
+          // Full summary — no truncation
+          sections.push(`### [${icon}] ${r.type.toUpperCase()}\n${r.summary || ""}`);
+          if (r.changes && r.changes.length) sections.push(`Files changed:\n${r.changes.map(c => `- ${c}`).join("\n")}`);
+          if (r.errors && r.errors.length) sections.push(`Errors:\n${r.errors.map(e => `- ${e}`).join("\n")}`);
+          // [FIX #6] Include tool results with full output for context
+          if (r.toolResults && r.toolResults.length > 0) {
+            const toolSummary = r.toolResults.map(t => {
+              let s = `- [${t.ok ? "OK" : "FAIL"}] ${t.name}`;
+              if (t.output?.path) s += `: ${t.output.path}`;
+              if (t.fullStdout) s += `\n  stdout: ${t.fullStdout}`;
+              if (t.fullStderr) s += `\n  stderr: ${t.fullStderr}`;
+              return s;
+            }).join("\n");
+            sections.push(`Tool Results:\n${toolSummary}`);
+          }
         }
       }
 
+      // [FIX #5] Architecture decisions — full text, no truncation
       if (ctx.decisions.length) sections.push(`## Architecture Decisions\n${ctx.decisions.map((d,i) => `${i+1}. ${d}`).join("\n")}`);
       if (ctx.allFiles.length) sections.push(`## Project Files\n${ctx.allFiles.map(f => `- ${f}`).join("\n")}`);
 
@@ -588,14 +601,20 @@ const server = http.createServer(async (req, res) => {
       return new Promise((resolve, reject) => {
         if (aborted) { reject(new Error("Aborted")); return; }
         const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
-        const child = spawn(NODE_BIN, [agentCli, mode || "run", prompt], {
+
+        // [FIX #7] Pass prompt via temp file instead of CLI arg to avoid OS arg length limits
+        const tmpPromptFile = path.join(os.tmpdir(), `agi-prompt-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
+        fs.writeFileSync(tmpPromptFile, prompt, "utf-8");
+
+        // CLI expects: node cli.js run "<task>" — pass placeholder, real prompt via env file
+        const child = spawn(NODE_BIN, [agentCli, mode || "run", "__AGI_PROMPT_FILE__"], {
           cwd: childCwd,
-          env: { ...process.env },
+          env: { ...process.env, AGI_PROMPT_FILE: tmpPromptFile },
           stdio: ["ignore", "pipe", "pipe"]
         });
 
         let stdout = "", stderr = "";
-        let summary = "", changes = [], errors = [], toolResults = [];
+        let changes = [], errors = [], toolResults = [];
 
         child.stdout.on("data", (chunk) => {
           const text = chunk.toString();
@@ -615,7 +634,7 @@ const server = http.createServer(async (req, res) => {
               // Tool streaming output (bash stdout/stderr) → forward for real-time visibility
               if (parsed.eventType === "tool.stream") {
                 const streamChunk = parsed.payload?.chunk || "";
-                if (streamChunk) sendAgi("stdout", { text: typeof streamChunk === "string" ? streamChunk.slice(0, 500) : "" });
+                if (streamChunk) sendAgi("stdout", { text: typeof streamChunk === "string" ? streamChunk : "" });
                 continue;
               }
               // Provider retry → show as warning
@@ -625,13 +644,22 @@ const server = http.createServer(async (req, res) => {
               }
               // Everything else: forward with full payload
               sendAgi("event", parsed);
-              // Track tool results
+              // [FIX #6] Track tool results — capture full output, no truncation
               if (parsed.eventType === "tool.completed") {
                 const ok = parsed.payload?.ok !== false;
                 const name = parsed.payload?.tool || "unknown";
-                toolResults.push({ name, ok, output: (parsed.payload?.output?.path || "").toString().slice(0, 200) });
-                if (ok && name === "write" && parsed.payload?.output?.path) {
-                  changes.push("created " + parsed.payload.output.path);
+                const toolOutput = parsed.payload?.output || {};
+                toolResults.push({ name, ok, output: toolOutput });
+                if (ok && name === "write" && toolOutput.path) {
+                  changes.push("created " + toolOutput.path);
+                }
+                if (ok && name === "apply_patch" && toolOutput.path) {
+                  changes.push("modified " + toolOutput.path);
+                }
+                if (ok && name === "bash" && toolOutput.stdout) {
+                  // Capture full bash output for context passing
+                  toolResults[toolResults.length - 1].fullStdout = toolOutput.stdout;
+                  toolResults[toolResults.length - 1].fullStderr = toolOutput.stderr || "";
                 }
               }
             } else {
@@ -648,22 +676,44 @@ const server = http.createServer(async (req, res) => {
         });
 
         child.on("close", (code) => {
-          // Extract summary from stdout
-          summary = stdout.slice(-3000);
+          // Cleanup temp prompt file
+          try { fs.unlinkSync(tmpPromptFile); } catch {}
+
+          // [FIX #1] Capture ALL stdout — no truncation
+          const summary = stdout;
+
           if (code !== 0) errors.push(`Exit code ${code}`);
 
-          // Detect errors in output
-          const errorPatterns = [/error/i, /failed/i, /TypeError/i, /SyntaxError/i, /FAIL/i];
+          // [FIX #3] Smart error detection — only real errors, not mentions of "error" in code/comments
+          // Only flag actual runtime errors, not mentions in code context
+          const realErrorPatterns = [
+            /^(?:Error|TypeError|SyntaxError|ReferenceError|RangeError|URIError|EvalError):\s/,  // JS error prefix at line start
+            /^\s*at\s+\S+\s+\(/,                     // Stack trace line
+            /FATAL\s*(?:ERROR|EXCEPTION)/i,           // Fatal markers
+            /\bUnhandledPromiseRejection\b/,          // Unhandled promise
+            /\bENOENT\b|\bEACCES\b|\bEPERM\b/,       // OS errors
+            /\bSegmentation fault\b/i,                // Segfault
+            /\bkilled\b.*\bSIGKILL\b/i,              // OOM kill
+            /npm ERR!/,                               // npm actual error
+            /\bpanic:\s/,                             // Go/Rust panic
+            /\bTraceback \(most recent/,              // Python traceback
+          ];
           for (const line of stderr.split("\n")) {
-            for (const p of errorPatterns) {
-              if (p.test(line)) { errors.push(line.trim().slice(0, 200)); break; }
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            for (const p of realErrorPatterns) {
+              if (p.test(trimmed)) { errors.push(trimmed); break; }
             }
           }
 
-          resolve({ summary, changes, toolResults, tokensUsed: 0, errors, rawOutput: stdout.slice(-5000) });
+          // [FIX #1, #10] Return full stdout as summary AND rawOutput — no truncation
+          resolve({ summary, changes, toolResults, tokensUsed: 0, errors, rawOutput: stdout });
         });
 
-        child.on("error", (err) => { reject(err); });
+        child.on("error", (err) => {
+          try { fs.unlinkSync(tmpPromptFile); } catch {}
+          reject(err);
+        });
 
         // Allow abort
         const checkAbort = setInterval(() => {
@@ -697,8 +747,9 @@ const server = http.createServer(async (req, res) => {
         attempts++;
         const start = Date.now();
         try {
+          // [FIX #4] Retry includes full previous output + errors, not just error list
           const retryPrompt = attempts > 1
-            ? `${prompt}\n\n[RETRY ${attempts}/${maxRetries+1}] Previous attempt failed. Try a different approach.\nErrors: ${result?.errors?.join("; ") || "unknown"}`
+            ? `${prompt}\n\n[RETRY ${attempts}/${maxRetries+1}] Previous attempt failed. Try a different approach.\n\n## Previous Attempt Errors\n${(result?.errors || []).map(e => `- ${e}`).join("\n") || "unknown"}\n\n## Previous Attempt Output\n${result?.summary || "(no output)"}`
             : prompt;
 
           const output = await executeStep(retryPrompt, step.mode, step.maxTurns);
@@ -707,7 +758,9 @@ const server = http.createServer(async (req, res) => {
             stepId: step.id,
             type: step.type,
             status: (output.errors.length === 0 || step.type === "verify") ? "completed" : "failed",
+            // [FIX #1, #10] Full summary and rawOutput — no truncation
             summary: output.summary,
+            rawOutput: output.rawOutput,
             changes: output.changes,
             toolResults: output.toolResults,
             durationMs: Date.now() - start,
@@ -743,16 +796,28 @@ const server = http.createServer(async (req, res) => {
           }
         }
 
-        // Extract decisions
+        // [FIX #5] Extract decisions — comprehensive pattern matching, no truncation
         if ((step.type === "analyze" || step.type === "design") && result.status === "completed") {
-          const dm = (result.summary || "").match(/(?:decision|chose|selected|will use|architecture):\s*([^\n]+)/gi);
-          if (dm) ctx.decisions.push(...dm.map(d => d.slice(0, 200)));
+          const decisionPatterns = [
+            /(?:decision|chose|selected|will use|architecture|approach|strategy|recommendation|concluded|determined|opted for|going with|picked|prefer|using)[:.\-—]\s*([^\n]+)/gi,
+            /(?:we (?:will|should|need to|must|decided to|chose to))\s+([^\n]+)/gi,
+            /(?:the (?:best|recommended|chosen|selected|optimal) (?:approach|solution|strategy|architecture|pattern|framework|tool|library) (?:is|was|will be))\s+([^\n]+)/gi,
+          ];
+          for (const pattern of decisionPatterns) {
+            const matches = (result.summary || "").matchAll(pattern);
+            for (const m of matches) {
+              const decision = m[0]; // Full match — no truncation
+              if (!ctx.decisions.includes(decision)) ctx.decisions.push(decision);
+            }
+          }
         }
 
         const evtType = result.status === "completed" ? "agi.step.complete" : "agi.step.fail";
         sendAgi(evtType, {
           stepId: step.id, stepType: step.type, stepTitle: step.title,
-          status: result.status, summary: (result.summary || "").slice(0, 500),
+          status: result.status,
+          // SSE event gets a short summary for UI display; full data is in ctx.stepResults
+          summary: (result.summary || "").slice(-2000),
           totalSteps: steps.length,
           completedSteps: ctx.stepResults.filter(r => r.status === "completed").length,
           filesCreated: ctx.allFiles.length,
