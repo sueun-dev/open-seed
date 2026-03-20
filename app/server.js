@@ -273,6 +273,397 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── AGI Pipeline (server-orchestrated) ──
+  if (url.pathname === "/api/agi/run" && req.method === "POST") {
+    const body = await readBody(req);
+    const { task, projectDir } = safeJsonParse(body) || {};
+    if (!task) { res.writeHead(400); res.end("Missing task"); return; }
+
+    // Workspace setup
+    const projName = projectDir || "agi-" + Date.now().toString(36);
+    const workspaceRoot = path.join(CWD, "workspace");
+    const childCwd = path.join(workspaceRoot, projName);
+    if (!fs.existsSync(childCwd)) fs.mkdirSync(childCwd, { recursive: true });
+
+    // Copy config with unlimited timeouts
+    const srcConfig = path.join(CWD, ".agent", "config.json");
+    const dstConfigDir = path.join(childCwd, ".agent");
+    const dstConfig = path.join(dstConfigDir, "config.json");
+    if (fs.existsSync(srcConfig)) {
+      if (!fs.existsSync(dstConfigDir)) fs.mkdirSync(dstConfigDir, { recursive: true });
+      try {
+        const cfg = JSON.parse(fs.readFileSync(srcConfig, "utf8"));
+        for (const p of ["openai", "anthropic", "gemini"]) {
+          if (cfg.providers?.[p]) cfg.providers[p].timeoutMs = 0;
+        }
+        fs.writeFileSync(dstConfig, JSON.stringify(cfg, null, 2), "utf8");
+      } catch { if (fs.existsSync(srcConfig)) fs.copyFileSync(srcConfig, dstConfig); }
+    }
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive"
+    });
+
+    const sendAgi = (type, data) => {
+      try { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); } catch {}
+    };
+
+    let aborted = false;
+    req.on("close", () => { aborted = true; });
+
+    // Assess complexity
+    const words = task.split(/\s+/).length;
+    const isFullApp = /full.*app|complete.*project|entire.*system|from.*scratch/i.test(task);
+    const isSimple = /fix.*bug|rename|add.*comment|update.*version|change.*color/i.test(task);
+    const needsDebate = /architect|design|pattern|approach|strategy|tradeoff|choose|select|compare|migrate/i.test(task);
+    let complexity = "moderate";
+    if (isSimple && words < 20) complexity = "simple";
+    else if (isFullApp || words > 100) complexity = "massive";
+    else if (words > 40) complexity = "complex";
+
+    // Generate dynamic plan
+    const steps = [];
+    let stepNum = 0;
+    const mkId = (t) => `step-${++stepNum}-${t}`;
+
+    // Always: analyze
+    steps.push({ id: mkId("analyze"), type: "analyze", title: "Analyze & Understand", mode: "run", maxTurns: 30, maxRetries: 1, useStrategyBranching: false });
+
+    // Conditional: debate
+    if (needsDebate && complexity !== "simple") {
+      steps.push({ id: mkId("debate"), type: "debate", title: "Multi-Agent Design Debate", mode: "team", maxTurns: 50, maxRetries: 0, useStrategyBranching: false });
+    }
+
+    // Conditional: design
+    if (complexity !== "simple") {
+      steps.push({ id: mkId("design"), type: "design", title: "Architecture & Design", mode: "run", maxTurns: 40, maxRetries: 1, useStrategyBranching: false });
+    }
+
+    // Always: build
+    steps.push({ id: mkId("build"), type: "build", title: "Build & Implement", mode: "team", maxTurns: 200, maxRetries: 2, useStrategyBranching: true });
+
+    // Always: verify
+    steps.push({ id: mkId("verify"), type: "verify", title: "Verify & Test", mode: "run", maxTurns: 50, maxRetries: 0, useStrategyBranching: false });
+
+    // Fix is dynamically inserted on verify failure
+
+    // Conditional: improve
+    if (complexity !== "simple") {
+      steps.push({ id: mkId("improve"), type: "improve", title: "Improve & Harden", mode: "team", maxTurns: 80, maxRetries: 1, useStrategyBranching: false });
+    }
+
+    // Always: review
+    steps.push({ id: mkId("review"), type: "review", title: "Final Review", mode: complexity === "simple" ? "run" : "team", maxTurns: 40, maxRetries: 0, useStrategyBranching: false });
+
+    sendAgi("agi.pipeline.start", { plan: { steps }, complexity, projectDir: projName, totalSteps: steps.length });
+
+    // Shared context — passed between steps
+    const ctx = {
+      task,
+      projectDir: projName,
+      stepResults: [],
+      allFiles: [],
+      errorLog: [],
+      decisions: [],
+      totalTokens: 0,
+    };
+
+    // Build step prompt with full inter-step memory
+    function buildStepPrompt(step) {
+      const sections = [];
+      sections.push(`# AGI Pipeline — ${step.title}`);
+      sections.push(`## Original Task\n${task}`);
+
+      // Inter-step memory: all prior results
+      if (ctx.stepResults.length > 0) {
+        sections.push(`## Prior Step Results (${ctx.stepResults.length} completed)`);
+        for (const r of ctx.stepResults) {
+          const icon = r.status === "completed" ? "PASS" : r.status === "failed" ? "FAIL" : "SKIP";
+          sections.push(`### [${icon}] ${r.type.toUpperCase()}\n${(r.summary || "").slice(0, 2000)}`);
+          if (r.changes && r.changes.length) sections.push(`Files: ${r.changes.join(", ")}`);
+          if (r.errors && r.errors.length) sections.push(`Errors: ${r.errors.join("; ")}`);
+        }
+      }
+
+      if (ctx.decisions.length) sections.push(`## Architecture Decisions\n${ctx.decisions.map((d,i) => `${i+1}. ${d}`).join("\n")}`);
+      if (ctx.allFiles.length) sections.push(`## Project Files\n${ctx.allFiles.map(f => `- ${f}`).join("\n")}`);
+
+      const unresolved = ctx.errorLog.filter(e => !e.resolved);
+      if (unresolved.length) sections.push(`## Unresolved Errors\n${unresolved.map(e => `- [${e.category}] ${e.error}`).join("\n")}`);
+
+      // Step-type instructions
+      sections.push(`## Your Task: ${step.title}`);
+      sections.push(getStepInstructions(step.type));
+
+      // Scaffold for new projects
+      if (ctx.allFiles.length === 0 && (step.type === "build" || step.type === "design")) {
+        sections.push(`\nCRITICAL PROJECT STRUCTURE RULES:\n- STANDALONE project in workspace/${projName}/\n- MUST create: package.json (with "start" script), src/, tests/\n- Write EVERY file with COMPLETE content. No placeholders.\n- Runnable with: npm install && npm start`);
+      }
+
+      return sections.join("\n\n");
+    }
+
+    function getStepInstructions(type) {
+      const m = {
+        analyze: "Perform deep analysis: intent, requirements, risks, technology choices, complexity estimate.",
+        debate: "Multi-agent design debate. Present architecture positions with reasoning, risks, alternatives.",
+        design: "Detailed implementation plan: file structure, architecture, API design, component breakdown, data model.",
+        build: "IMPLEMENT EVERYTHING. Write ALL files with COMPLETE content. NO placeholders. Use write tool for every file. DO NOT STOP until done.",
+        verify: "Run ALL checks: type-check, lint, tests, build. Report ALL errors with file paths and line numbers. Do NOT fix — just report.",
+        fix: "Fix ALL reported errors. Read each file, find root cause, apply minimal fix, verify the fix.",
+        improve: "Security audit, performance optimization, add missing tests, documentation. Only improve what exists.",
+        review: "Final quality review: correctness, completeness, security, performance, code quality, testing. Verdict: pass or fail.",
+      };
+      return m[type] || "";
+    }
+
+    // Execute one step via the engine CLI
+    async function executeStep(prompt, mode, maxTurns) {
+      return new Promise((resolve, reject) => {
+        if (aborted) { reject(new Error("Aborted")); return; }
+        const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
+        const child = spawn("node", [agentCli, mode || "run", prompt], {
+          cwd: childCwd,
+          env: { ...process.env },
+          stdio: ["ignore", "pipe", "pipe"]
+        });
+
+        let stdout = "", stderr = "";
+        let summary = "", changes = [], errors = [], toolResults = [];
+
+        child.stdout.on("data", (chunk) => {
+          const text = chunk.toString();
+          stdout += text;
+          // Parse events and forward ALL to client — full transparency
+          for (const line of text.split("\n")) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            const parsed = parseEventLine(trimmed);
+            if (parsed) {
+              // LLM streaming text → forward as llm event
+              if (parsed.eventType === "provider.stream") {
+                const c = parsed.payload?.chunk || parsed.payload?.delta || "";
+                if (c) sendAgi("llm", { text: typeof c === "string" ? c : "" });
+                continue;
+              }
+              // Tool streaming output (bash stdout/stderr) → forward for real-time visibility
+              if (parsed.eventType === "tool.stream") {
+                const streamChunk = parsed.payload?.chunk || "";
+                if (streamChunk) sendAgi("stdout", { text: typeof streamChunk === "string" ? streamChunk.slice(0, 500) : "" });
+                continue;
+              }
+              // Provider retry → show as warning
+              if (parsed.eventType === "provider.retry") {
+                sendAgi("event", parsed);
+                continue;
+              }
+              // Everything else: forward with full payload
+              sendAgi("event", parsed);
+              // Track tool results
+              if (parsed.eventType === "tool.completed") {
+                const ok = parsed.payload?.ok !== false;
+                const name = parsed.payload?.tool || "unknown";
+                toolResults.push({ name, ok, output: (parsed.payload?.output?.path || "").toString().slice(0, 200) });
+                if (ok && name === "write" && parsed.payload?.output?.path) {
+                  changes.push("created " + parsed.payload.output.path);
+                }
+              }
+            } else {
+              sendAgi("stdout", { text: trimmed });
+            }
+          }
+        });
+
+        child.stderr.on("data", (chunk) => {
+          const text = chunk.toString();
+          stderr += text;
+          // Forward stderr to UI — important for debugging visibility
+          sendAgi("stderr", { text: text.slice(0, 500) });
+        });
+
+        child.on("close", (code) => {
+          // Extract summary from stdout
+          summary = stdout.slice(-3000);
+          if (code !== 0) errors.push(`Exit code ${code}`);
+
+          // Detect errors in output
+          const errorPatterns = [/error/i, /failed/i, /TypeError/i, /SyntaxError/i, /FAIL/i];
+          for (const line of stderr.split("\n")) {
+            for (const p of errorPatterns) {
+              if (p.test(line)) { errors.push(line.trim().slice(0, 200)); break; }
+            }
+          }
+
+          resolve({ summary, changes, toolResults, tokensUsed: 0, errors, rawOutput: stdout.slice(-5000) });
+        });
+
+        child.on("error", (err) => { reject(err); });
+
+        // Allow abort
+        const checkAbort = setInterval(() => {
+          if (aborted) { child.kill("SIGTERM"); clearInterval(checkAbort); }
+        }, 1000);
+        child.on("close", () => clearInterval(checkAbort));
+      });
+    }
+
+    // Run the pipeline
+    let stepIdx = 0;
+    let replanCount = 0;
+    const MAX_REPLANS = 10;
+
+    while (stepIdx < steps.length && !aborted) {
+      if (replanCount > MAX_REPLANS) {
+        sendAgi("agi.pipeline.fail", { error: `Max replans (${MAX_REPLANS}) exceeded` });
+        break;
+      }
+
+      const step = steps[stepIdx];
+      const prompt = buildStepPrompt(step);
+
+      sendAgi("agi.step.start", { stepId: step.id, stepType: step.type, stepTitle: step.title, stepIndex: stepIdx, totalSteps: steps.length, completedSteps: ctx.stepResults.filter(r => r.status === "completed").length });
+
+      let result = null;
+      let attempts = 0;
+      const maxRetries = step.maxRetries || 0;
+
+      while (attempts <= maxRetries) {
+        attempts++;
+        const start = Date.now();
+        try {
+          const retryPrompt = attempts > 1
+            ? `${prompt}\n\n[RETRY ${attempts}/${maxRetries+1}] Previous attempt failed. Try a different approach.\nErrors: ${result?.errors?.join("; ") || "unknown"}`
+            : prompt;
+
+          const output = await executeStep(retryPrompt, step.mode, step.maxTurns);
+
+          result = {
+            stepId: step.id,
+            type: step.type,
+            status: (output.errors.length === 0 || step.type === "verify") ? "completed" : "failed",
+            summary: output.summary,
+            changes: output.changes,
+            toolResults: output.toolResults,
+            durationMs: Date.now() - start,
+            tokensUsed: output.tokensUsed,
+            errors: output.errors,
+          };
+
+          if (step.type === "verify") result.status = "completed";
+          if (result.status === "completed") break;
+        } catch (e) {
+          result = {
+            stepId: step.id, type: step.type, status: "failed",
+            summary: `Step failed: ${e.message}`, changes: [], toolResults: [],
+            durationMs: Date.now() - start, tokensUsed: 0, errors: [e.message],
+          };
+          ctx.errorLog.push({ stepId: step.id, error: e.message, category: "runtime", resolved: false });
+        }
+      }
+
+      // Record result
+      if (result) {
+        ctx.stepResults.push(result);
+        ctx.totalTokens += result.tokensUsed;
+        for (const c of (result.changes || [])) {
+          const clean = c.replace(/^(created|modified|updated|deleted)\s+/i, "").trim();
+          if (!ctx.allFiles.includes(clean)) ctx.allFiles.push(clean);
+        }
+
+        // Mark errors resolved on success
+        if (result.status === "completed") {
+          for (const e of ctx.errorLog) {
+            if (e.stepId === step.id && !e.resolved) { e.resolved = true; e.resolution = "Step completed"; }
+          }
+        }
+
+        // Extract decisions
+        if ((step.type === "analyze" || step.type === "design") && result.status === "completed") {
+          const dm = (result.summary || "").match(/(?:decision|chose|selected|will use|architecture):\s*([^\n]+)/gi);
+          if (dm) ctx.decisions.push(...dm.map(d => d.slice(0, 200)));
+        }
+
+        const evtType = result.status === "completed" ? "agi.step.complete" : "agi.step.fail";
+        sendAgi(evtType, {
+          stepId: step.id, stepType: step.type, stepTitle: step.title,
+          status: result.status, summary: (result.summary || "").slice(0, 500),
+          totalSteps: steps.length,
+          completedSteps: ctx.stepResults.filter(r => r.status === "completed").length,
+          filesCreated: ctx.allFiles.length,
+        });
+
+        // REPLAN: verify failed → insert fix + re-verify
+        if (result.type === "verify" && result.errors.length > 0) {
+          const nextStep = steps[stepIdx + 1];
+          if (!nextStep || nextStep.type !== "fix") {
+            const fixId = mkId("fix");
+            const reVerifyId = mkId("reverify");
+            steps.splice(stepIdx + 1, 0,
+              { id: fixId, type: "fix", title: "Fix Errors (auto)", mode: "run", maxTurns: 100, maxRetries: 3, useStrategyBranching: true },
+              { id: reVerifyId, type: "verify", title: "Re-verify (auto)", mode: "run", maxTurns: 50, maxRetries: 0, useStrategyBranching: false }
+            );
+            replanCount++;
+            sendAgi("agi.replan", { reason: "Verify found errors — inserting fix + re-verify", replanCount, totalSteps: steps.length, insertedSteps: ["fix", "re-verify"] });
+          }
+        }
+
+        // REPLAN: fix failed too many times → rebuild with different strategy
+        if (result.type === "fix" && result.status === "failed") {
+          const fixCount = ctx.stepResults.filter(r => r.type === "fix").length;
+          if (fixCount >= 2) {
+            const rebuildId = mkId("rebuild");
+            steps.splice(stepIdx + 1, 0,
+              { id: rebuildId, type: "build", title: "Rebuild (alt strategy)", mode: "team", maxTurns: 200, maxRetries: 1, useStrategyBranching: true }
+            );
+            replanCount++;
+            sendAgi("agi.replan", { reason: `Fix failed ${fixCount} times — trying alternative build`, replanCount, totalSteps: steps.length, insertedSteps: ["rebuild"] });
+          }
+        }
+
+        // REPLAN: review failed → fix + re-review
+        if (result.type === "review" && result.status === "failed") {
+          const reviewFails = ctx.stepResults.filter(r => r.type === "review" && r.status === "failed").length;
+          if (reviewFails < 3) {
+            const fixId = mkId("reviewfix");
+            const reReviewId = mkId("rereview");
+            steps.splice(stepIdx + 1, 0,
+              { id: fixId, type: "fix", title: "Fix Review Issues", mode: "run", maxTurns: 80, maxRetries: 2, useStrategyBranching: false },
+              { id: reReviewId, type: "review", title: "Re-review", mode: "run", maxTurns: 40, maxRetries: 0, useStrategyBranching: false }
+            );
+            replanCount++;
+            sendAgi("agi.replan", { reason: "Review failed — inserting fix + re-review", replanCount, totalSteps: steps.length });
+          }
+        }
+      }
+
+      stepIdx++;
+    }
+
+    // Pipeline complete
+    const completed = ctx.stepResults.filter(r => r.status === "completed").length;
+    const failed = ctx.stepResults.filter(r => r.status === "failed").length;
+    const success = !aborted && failed === 0;
+
+    sendAgi("agi.pipeline.complete", {
+      success,
+      totalSteps: steps.length,
+      completedSteps: completed,
+      failedSteps: failed,
+      filesCreated: ctx.allFiles.length,
+      totalTokens: ctx.totalTokens,
+      projectDir: projName,
+      replanCount,
+      durationMs: Date.now() - Date.now(), // will be calculated client-side
+      summary: `${completed}/${ctx.stepResults.length} steps completed, ${ctx.allFiles.length} files created`,
+    });
+
+    res.write("data: [DONE]\n\n");
+    res.end();
+    return;
+  }
+
   // ── Git Status API ──
   if (url.pathname === "/api/git/status" && req.method === "GET") {
     try {

@@ -145,6 +145,82 @@ const TOOL_DEFINITIONS: Record<ToolName, ToolDefinition> = {
     name: "task_update", description: "Update a task's status, priority, or assignment.", approvalAction: "write", sideEffect: true,
     toolCategory: "analysis",
     inputSchema: { type: "object", properties: { id: { type: "string" }, status: { type: "string", enum: ["pending", "in_progress", "completed", "failed", "blocked"] }, priority: { type: "string", enum: ["low", "medium", "high", "critical"] }, assignee: { type: "string" }, output: { type: "string" } }, required: ["id"] }
+  },
+  // ── OpenCode + OpenClaw Tools ──────────────────────────────────────────────
+  ls: {
+    name: "ls", description: "List directory contents as a tree structure. Auto-skips hidden/build dirs.", approvalAction: "read", sideEffect: false,
+    toolCategory: "file",
+    inputSchema: { type: "object", properties: { path: { type: "string", description: "Relative directory path (default: workspace root)" }, depth: { type: "number", description: "Max depth (default: 3)" } } }
+  },
+  fetch: {
+    name: "fetch", description: "Download content from a URL. Returns text, markdown, or HTML.", approvalAction: "search", sideEffect: false,
+    toolCategory: "network",
+    inputSchema: { type: "object", properties: { url: { type: "string", description: "URL to fetch" }, format: { type: "string", enum: ["text", "markdown", "html"], description: "Output format (default: text)" }, maxBytes: { type: "number", description: "Max response size in bytes (default: 1MB)" } }, required: ["url"] }
+  },
+  multi_patch: {
+    name: "multi_patch", description: "Apply patches to multiple files atomically. All patches succeed or all are rolled back.", approvalAction: "edit", sideEffect: true,
+    toolCategory: "file",
+    inputSchema: { type: "object", properties: { patches: { type: "array", items: { type: "object", properties: { path: { type: "string", description: "File path" }, operation: { type: "string", enum: ["create", "update", "delete"], description: "Operation type" }, content: { type: "string", description: "New file content (for create/update)" }, hunks: { type: "array", items: { type: "object", properties: { search: { type: "string", description: "Text to find" }, replace: { type: "string", description: "Text to replace with" } }, required: ["search", "replace"] }, description: "Search-replace hunks (for update)" } }, required: ["path", "operation"] } } }, required: ["patches"] }
+  },
+  process_list: {
+    name: "process_list", description: "List running background processes managed by the agent.", approvalAction: "read", sideEffect: false,
+    toolCategory: "shell",
+    inputSchema: { type: "object", properties: {} }
+  },
+  process_start: {
+    name: "process_start", description: "Start a background process and return its ID.", approvalAction: "bash_side_effect", sideEffect: true,
+    toolCategory: "shell",
+    inputSchema: { type: "object", properties: { command: { type: "string", description: "Command to run in background" }, name: { type: "string", description: "Human-readable process name" } }, required: ["command"] }
+  },
+  process_stop: {
+    name: "process_stop", description: "Stop a background process by ID.", approvalAction: "bash_side_effect", sideEffect: true,
+    toolCategory: "shell",
+    inputSchema: { type: "object", properties: { processId: { type: "string", description: "Process ID to stop" } }, required: ["processId"] }
+  },
+  diagnostics: {
+    name: "diagnostics", description: "Get LSP diagnostics (errors, warnings) for a file or directory.", approvalAction: "lsp_diagnostics", sideEffect: false,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { path: { type: "string", description: "File or directory path" }, severity: { type: "string", enum: ["error", "warning", "all"], description: "Filter by severity (default: all)" } }, required: ["path"] }
+  },
+  memory_search: {
+    name: "memory_search", description: "Search long-term project memory for past learnings, decisions, and patterns.", approvalAction: "read", sideEffect: false,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { query: { type: "string", description: "Search query" }, limit: { type: "number", description: "Max results (default: 10)" } }, required: ["query"] }
+  },
+  memory_save: {
+    name: "memory_save", description: "Save a learning, decision, or pattern to long-term project memory.", approvalAction: "write", sideEffect: true,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { key: { type: "string", description: "Memory key/topic" }, content: { type: "string", description: "Content to remember" }, category: { type: "string", enum: ["learning", "decision", "convention", "gotcha", "command"], description: "Category" } }, required: ["key", "content"] }
+  },
+  session_list: {
+    name: "session_list", description: "List all agent sessions with status and metadata.", approvalAction: "read", sideEffect: false,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { limit: { type: "number", description: "Max sessions (default: 20)" } } }
+  },
+  session_send: {
+    name: "session_send", description: "Send a message to another agent session for inter-agent communication.", approvalAction: "bash_side_effect", sideEffect: true,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { sessionId: { type: "string", description: "Target session ID" }, message: { type: "string", description: "Message to send" } }, required: ["sessionId", "message"] }
+  },
+  cron_create: {
+    name: "cron_create", description: "Schedule a recurring task with cron syntax.", approvalAction: "bash_side_effect", sideEffect: true,
+    toolCategory: "automation",
+    inputSchema: { type: "object", properties: { name: { type: "string", description: "Job name" }, schedule: { type: "string", description: "Cron expression (e.g. '0 */6 * * *' for every 6 hours)" }, command: { type: "string", description: "Command or task to execute" } }, required: ["name", "schedule", "command"] }
+  },
+  cron_list: {
+    name: "cron_list", description: "List all scheduled cron jobs.", approvalAction: "read", sideEffect: false,
+    toolCategory: "automation",
+    inputSchema: { type: "object", properties: {} }
+  },
+  cron_delete: {
+    name: "cron_delete", description: "Delete a scheduled cron job.", approvalAction: "bash_side_effect", sideEffect: true,
+    toolCategory: "automation",
+    inputSchema: { type: "object", properties: { name: { type: "string", description: "Job name to delete" } }, required: ["name"] }
+  },
+  doctor: {
+    name: "doctor", description: "Run diagnostics on the agent system. Check config, providers, tools, dependencies.", approvalAction: "read", sideEffect: false,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { verbose: { type: "boolean", description: "Show detailed output" } } }
   }
 };
 
@@ -295,7 +371,9 @@ export class ToolRuntime {
       });
     }
 
-    await this.emitEvent("tool.called", { tool: call.name, reason: call.reason, action: approval.action });
+    // Include input summary in events for full UI visibility
+    const inputSummary = summarizeToolInput(call.name, call.input);
+    await this.emitEvent("tool.called", { tool: call.name, reason: call.reason, action: approval.action, input: inputSummary });
 
     try {
       const output = await this.dispatch(call);
@@ -311,7 +389,9 @@ export class ToolRuntime {
         });
       }
 
-      await this.emitEvent("tool.completed", { tool: call.name, ok: true, durationMs });
+      // Include both input and output summary in completed event for full UI transparency
+      const outputSummary = summarizeToolOutput(call.name, output);
+      await this.emitEvent("tool.completed", { tool: call.name, ok: true, durationMs, input: inputSummary, output: outputSummary });
       return {
         name: call.name,
         ok: true,
@@ -335,7 +415,8 @@ export class ToolRuntime {
         });
       }
 
-      await this.emitEvent("tool.completed", { tool: call.name, ok: false, error: message, durationMs });
+      const failOutputSummary = output ? summarizeToolOutput(call.name, output) : undefined;
+      await this.emitEvent("tool.completed", { tool: call.name, ok: false, error: message, durationMs, input: inputSummary, output: failOutputSummary });
       return {
         name: call.name,
         ok: false,
@@ -485,6 +566,37 @@ export class ToolRuntime {
         return this.taskListTool(call.input);
       case "task_update":
         return this.taskUpdateTool(call.input);
+      // OpenCode + OpenClaw tools
+      case "ls":
+        return this.lsTool(call.input);
+      case "fetch":
+        return this.fetchTool(call.input);
+      case "multi_patch":
+        return this.multiPatchTool(call.input);
+      case "process_list":
+        return this.processListTool();
+      case "process_start":
+        return this.processStartTool(call.input);
+      case "process_stop":
+        return this.processStopTool(call.input);
+      case "diagnostics":
+        return this.diagnosticsTool(call.input);
+      case "memory_search":
+        return this.memorySearchTool(call.input);
+      case "memory_save":
+        return this.memorySaveTool(call.input);
+      case "session_list":
+        return this.sessionListTool(call.input);
+      case "session_send":
+        return this.sessionSendTool(call.input);
+      case "cron_create":
+        return this.cronCreateTool(call.input);
+      case "cron_list":
+        return this.cronListTool();
+      case "cron_delete":
+        return this.cronDeleteTool(call.input);
+      case "doctor":
+        return this.doctorTool(call.input);
       default:
         throw new Error(`Unknown tool: ${call.name}`);
     }
@@ -600,6 +712,13 @@ export class ToolRuntime {
 
   private async bashTool(input: Record<string, unknown>): Promise<unknown> {
     const command = this.getString(input.command);
+
+    // Permission system: banned commands (OpenCode pattern)
+    const bannedCheck = checkBannedCommand(command);
+    if (bannedCheck) {
+      throw new Error(`Blocked: ${bannedCheck}. This command is not allowed for security reasons.`);
+    }
+
     const timeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 0;
     const shell = process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "/bin/sh";
     const shellArgs = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
@@ -1145,6 +1264,412 @@ export class ToolRuntime {
       });
     }
   }
+
+  // ═══ OpenCode + OpenClaw Tool Implementations ═══
+
+  /** LS tool — directory tree listing (OpenCode) */
+  private async lsTool(input: Record<string, unknown>): Promise<unknown> {
+    const dirPath = this.resolveWorkspacePath(typeof input.path === "string" ? input.path : ".");
+    const maxDepth = typeof input.depth === "number" ? input.depth : 3;
+    const SKIP = new Set([".git", "node_modules", "dist", ".agent", "coverage", "__pycache__", ".pytest_cache", ".next", ".nuxt", "build", ".cache"]);
+    const lines: string[] = [];
+    let fileCount = 0;
+
+    const visit = async (dir: string, prefix: string, depth: number) => {
+      if (depth > maxDepth || fileCount > 1000) return;
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        entries.sort((a, b) => {
+          if (a.isDirectory() && !b.isDirectory()) return -1;
+          if (!a.isDirectory() && b.isDirectory()) return 1;
+          return a.name.localeCompare(b.name);
+        });
+        for (let i = 0; i < entries.length; i++) {
+          const e = entries[i];
+          if (e.name.startsWith(".") && SKIP.has(e.name)) continue;
+          if (SKIP.has(e.name)) continue;
+          const isLast = i === entries.length - 1;
+          const connector = isLast ? "└── " : "├── ";
+          const childPrefix = isLast ? "    " : "│   ";
+          lines.push(`${prefix}${connector}${e.name}${e.isDirectory() ? "/" : ""}`);
+          fileCount++;
+          if (e.isDirectory()) {
+            await visit(path.join(dir, e.name), prefix + childPrefix, depth + 1);
+          }
+        }
+      } catch { /* permission denied */ }
+    };
+
+    const relDir = path.relative(this.options.cwd, dirPath) || ".";
+    lines.push(relDir + "/");
+    await visit(dirPath, "", 0);
+    if (fileCount >= 1000) lines.push(`... (truncated at 1000 entries)`);
+    return { tree: lines.join("\n"), totalEntries: fileCount };
+  }
+
+  /** Fetch tool — download URL content (OpenCode) */
+  private async fetchTool(input: Record<string, unknown>): Promise<unknown> {
+    const url = this.getString(input.url);
+    const format = (typeof input.format === "string" ? input.format : "text") as "text" | "markdown" | "html";
+    const maxBytes = typeof input.maxBytes === "number" ? input.maxBytes : 1_048_576; // 1MB
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { "User-Agent": "OpenSeed/1.0" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const buffer = await response.arrayBuffer();
+      const bytes = Math.min(buffer.byteLength, maxBytes);
+      let text = new TextDecoder().decode(buffer.slice(0, bytes));
+
+      if (format === "markdown" || format === "text") {
+        // Strip HTML tags for text/markdown format
+        text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
+      return { url, format, contentLength: bytes, content: text.slice(0, 50000) };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /** Multi-patch tool — atomic multi-file patches (OpenClaw) */
+  private async multiPatchTool(input: Record<string, unknown>): Promise<unknown> {
+    const patches = (input.patches as Array<{ path: string; operation: string; content?: string; hunks?: Array<{ search: string; replace: string }> }>) ?? [];
+    if (!Array.isArray(patches) || patches.length === 0) {
+      throw new Error("multi_patch requires a non-empty patches array");
+    }
+
+    const results: Array<{ path: string; operation: string; ok: boolean; error?: string }> = [];
+    const backups = new Map<string, string | null>(); // path → original content (null if new file)
+
+    // Phase 1: Backup all affected files
+    for (const p of patches) {
+      const filePath = this.resolveWorkspacePath(p.path);
+      try {
+        const content = await fs.readFile(filePath, "utf8");
+        backups.set(p.path, content);
+      } catch {
+        backups.set(p.path, null);
+      }
+    }
+
+    // Phase 2: Apply patches
+    let allOk = true;
+    for (const p of patches) {
+      const filePath = this.resolveWorkspacePath(p.path);
+      try {
+        if (p.operation === "create") {
+          await ensureDir(path.dirname(filePath));
+          await fs.writeFile(filePath, p.content ?? "", "utf8");
+          results.push({ path: p.path, operation: "create", ok: true });
+        } else if (p.operation === "delete") {
+          await fs.unlink(filePath);
+          results.push({ path: p.path, operation: "delete", ok: true });
+        } else if (p.operation === "update") {
+          let content = await fs.readFile(filePath, "utf8");
+          if (p.content !== undefined) {
+            content = p.content;
+          } else if (p.hunks && p.hunks.length > 0) {
+            for (const hunk of p.hunks) {
+              if (!content.includes(hunk.search)) {
+                throw new Error(`Search text not found in ${p.path}: "${hunk.search.slice(0, 50)}..."`);
+              }
+              content = content.replace(hunk.search, hunk.replace);
+            }
+          }
+          await fs.writeFile(filePath, content, "utf8");
+          results.push({ path: p.path, operation: "update", ok: true });
+        }
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        results.push({ path: p.path, operation: p.operation, ok: false, error });
+        allOk = false;
+      }
+    }
+
+    // Phase 3: Rollback if any failed
+    if (!allOk) {
+      for (const [relPath, original] of backups) {
+        const filePath = this.resolveWorkspacePath(relPath);
+        try {
+          if (original === null) {
+            try { await fs.unlink(filePath); } catch { /* file may not exist */ }
+          } else {
+            await fs.writeFile(filePath, original, "utf8");
+          }
+        } catch { /* best-effort rollback */ }
+      }
+    }
+
+    return { atomic: true, allOk, patchCount: patches.length, results };
+  }
+
+  // Background process management (OpenClaw)
+  private static bgProcesses = new Map<string, { name: string; pid: number; startedAt: string; command: string; process: ReturnType<typeof spawn> }>();
+
+  private async processListTool(): Promise<unknown> {
+    const list = Array.from(ToolRuntime.bgProcesses.entries()).map(([id, p]) => ({
+      id, name: p.name, pid: p.pid, startedAt: p.startedAt, command: p.command,
+      alive: !p.process.killed
+    }));
+    return { processes: list, count: list.length };
+  }
+
+  private async processStartTool(input: Record<string, unknown>): Promise<unknown> {
+    const command = this.getString(input.command);
+    const name = typeof input.name === "string" ? input.name : command.slice(0, 30);
+    const id = `proc-${createId("bg").slice(0, 12)}`;
+
+    const child = spawn("bash", ["-c", command], {
+      cwd: this.options.cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+
+    ToolRuntime.bgProcesses.set(id, {
+      name, pid: child.pid ?? 0, startedAt: new Date().toISOString(),
+      command, process: child
+    });
+
+    child.on("close", () => {
+      const p = ToolRuntime.bgProcesses.get(id);
+      if (p) ToolRuntime.bgProcesses.delete(id);
+    });
+
+    return { processId: id, pid: child.pid, name, command };
+  }
+
+  private async processStopTool(input: Record<string, unknown>): Promise<unknown> {
+    const processId = this.getString(input.processId);
+    const proc = ToolRuntime.bgProcesses.get(processId);
+    if (!proc) throw new Error(`Process not found: ${processId}`);
+    proc.process.kill("SIGTERM");
+    ToolRuntime.bgProcesses.delete(processId);
+    return { processId, stopped: true, name: proc.name };
+  }
+
+  /** Diagnostics tool — LSP errors/warnings (OpenCode) */
+  private async diagnosticsTool(input: Record<string, unknown>): Promise<unknown> {
+    const targetPath = this.getString(input.path);
+    const severity = typeof input.severity === "string" ? input.severity : "all";
+    const filePath = this.resolveWorkspacePath(targetPath);
+
+    try {
+      const diags = await getTypeScriptDiagnostics(filePath);
+      let filtered = diags;
+      if (severity === "error") {
+        filtered = diags.filter(d => d.category === "error" || d.category === "Error");
+      } else if (severity === "warning") {
+        filtered = diags.filter(d => d.category === "warning" || d.category === "Warning" || d.category === "Suggestion");
+      }
+      const errors = filtered.filter(d => d.category === "error" || d.category === "Error").length;
+      const warnings = filtered.filter(d => d.category !== "error" && d.category !== "Error").length;
+      return { path: targetPath, diagnostics: filtered, totalErrors: errors, totalWarnings: warnings };
+    } catch (e) {
+      return { path: targetPath, diagnostics: [], error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** Memory search tool — search project memory (OpenClaw) */
+  private async memorySearchTool(input: Record<string, unknown>): Promise<unknown> {
+    const query = this.getString(input.query).toLowerCase();
+    const limit = typeof input.limit === "number" ? input.limit : 10;
+    const memoryDir = path.join(this.options.cwd, ".agent", "memory");
+
+    try {
+      const entries: Array<{ key: string; content: string; category: string; score: number }> = [];
+      const files = await fs.readdir(memoryDir).catch(() => [] as string[]);
+      for (const file of files) {
+        if (!file.endsWith(".json")) continue;
+        try {
+          const data = JSON.parse(await fs.readFile(path.join(memoryDir, file), "utf8"));
+          const content = typeof data.content === "string" ? data.content : JSON.stringify(data);
+          const key = typeof data.key === "string" ? data.key : file.replace(".json", "");
+          const score = content.toLowerCase().includes(query) ? 1 : key.toLowerCase().includes(query) ? 0.5 : 0;
+          if (score > 0) entries.push({ key, content: content.slice(0, 500), category: data.category || "unknown", score });
+        } catch { /* skip corrupt files */ }
+      }
+      entries.sort((a, b) => b.score - a.score);
+      return { query, results: entries.slice(0, limit), totalMatches: entries.length };
+    } catch {
+      return { query, results: [], totalMatches: 0 };
+    }
+  }
+
+  /** Memory save tool — save to project memory (OpenClaw) */
+  private async memorySaveTool(input: Record<string, unknown>): Promise<unknown> {
+    const key = this.getString(input.key);
+    const content = this.getString(input.content);
+    const category = typeof input.category === "string" ? input.category : "learning";
+    const memoryDir = path.join(this.options.cwd, ".agent", "memory");
+    await ensureDir(memoryDir);
+
+    const filename = key.replace(/[^a-z0-9_-]/gi, "_").slice(0, 60) + ".json";
+    const data = { key, content, category, savedAt: new Date().toISOString() };
+    await fs.writeFile(path.join(memoryDir, filename), JSON.stringify(data, null, 2), "utf8");
+    return { saved: true, key, category, file: filename };
+  }
+
+  /** Session list tool — list all sessions (OpenClaw) */
+  private async sessionListTool(input: Record<string, unknown>): Promise<unknown> {
+    const limit = typeof input.limit === "number" ? input.limit : 20;
+    const sessDir = path.join(this.options.cwd, ".agent", "sessions");
+    try {
+      const files = (await fs.readdir(sessDir)).filter(f => f.endsWith(".json")).sort().reverse().slice(0, limit);
+      const sessions: Array<{ id: string; task: string; status: string; createdAt: string }> = [];
+      for (const f of files) {
+        try {
+          const data = JSON.parse(await fs.readFile(path.join(sessDir, f), "utf8"));
+          sessions.push({ id: data.id || f, task: data.task || "", status: data.status || "unknown", createdAt: data.createdAt || "" });
+        } catch { /* skip */ }
+      }
+      return { sessions, count: sessions.length };
+    } catch {
+      return { sessions: [], count: 0 };
+    }
+  }
+
+  /** Session send tool — inter-agent communication (OpenClaw) */
+  private async sessionSendTool(input: Record<string, unknown>): Promise<unknown> {
+    const sessionId = this.getString(input.sessionId);
+    const message = this.getString(input.message);
+    const msgFile = path.join(this.options.cwd, ".agent", "sessions", `${sessionId}-inbox.jsonl`);
+    await ensureDir(path.dirname(msgFile));
+    const entry = JSON.stringify({ from: this.options.sessionId, message, sentAt: new Date().toISOString() }) + "\n";
+    await fs.appendFile(msgFile, entry, "utf8");
+    return { sent: true, to: sessionId, messageLength: message.length };
+  }
+
+  // Cron management (OpenClaw)
+  private static cronJobs = new Map<string, { schedule: string; command: string; createdAt: string; lastRun?: string; timer?: ReturnType<typeof setInterval> }>();
+
+  private async cronCreateTool(input: Record<string, unknown>): Promise<unknown> {
+    const name = this.getString(input.name);
+    const schedule = this.getString(input.schedule);
+    const command = this.getString(input.command);
+
+    // Simple cron: parse interval from schedule (basic support)
+    const intervalMs = parseCronToMs(schedule);
+    if (intervalMs <= 0) throw new Error(`Invalid cron schedule: ${schedule}. Use basic intervals like '*/5 * * * *' or '0 */6 * * *'`);
+
+    const timer = setInterval(async () => {
+      const job = ToolRuntime.cronJobs.get(name);
+      if (!job) return;
+      job.lastRun = new Date().toISOString();
+      try {
+        const { execSync } = await import("node:child_process");
+        execSync(command, { cwd: this.options.cwd, encoding: "utf-8", timeout: 60_000, stdio: ["pipe", "pipe", "pipe"] });
+      } catch { /* cron job failed — non-critical */ }
+    }, intervalMs);
+
+    ToolRuntime.cronJobs.set(name, { schedule, command, createdAt: new Date().toISOString(), timer });
+    return { created: true, name, schedule, command, intervalMs };
+  }
+
+  private async cronListTool(): Promise<unknown> {
+    const jobs = Array.from(ToolRuntime.cronJobs.entries()).map(([name, j]) => ({
+      name, schedule: j.schedule, command: j.command, createdAt: j.createdAt, lastRun: j.lastRun || "never"
+    }));
+    return { jobs, count: jobs.length };
+  }
+
+  private async cronDeleteTool(input: Record<string, unknown>): Promise<unknown> {
+    const name = this.getString(input.name);
+    const job = ToolRuntime.cronJobs.get(name);
+    if (!job) throw new Error(`Cron job not found: ${name}`);
+    if (job.timer) clearInterval(job.timer);
+    ToolRuntime.cronJobs.delete(name);
+    return { deleted: true, name };
+  }
+
+  /** Doctor tool — system diagnostics (OpenCode + OpenClaw) */
+  private async doctorTool(input: Record<string, unknown>): Promise<unknown> {
+    const verbose = input.verbose === true;
+    const checks: Array<{ name: string; status: "ok" | "warn" | "error"; message: string }> = [];
+
+    // Check config
+    try {
+      const configPath = path.join(this.options.cwd, ".agent", "config.json");
+      await fs.access(configPath);
+      checks.push({ name: "config", status: "ok", message: "Config file found" });
+    } catch {
+      checks.push({ name: "config", status: "warn", message: "No .agent/config.json found — using defaults" });
+    }
+
+    // Check providers
+    for (const [provider, envKey] of [["openai", "OPENAI_API_KEY"], ["anthropic", "ANTHROPIC_API_KEY"]] as const) {
+      if (process.env[envKey]) {
+        checks.push({ name: provider, status: "ok", message: `${envKey} is set` });
+      } else {
+        checks.push({ name: provider, status: "warn", message: `${envKey} not set` });
+      }
+    }
+
+    // Check Node.js
+    checks.push({ name: "node", status: "ok", message: `Node.js ${process.version}` });
+
+    // Check git
+    try {
+      const { execSync } = await import("node:child_process");
+      const gitVersion = execSync("git --version", { encoding: "utf-8", timeout: 5000 }).trim();
+      checks.push({ name: "git", status: "ok", message: gitVersion });
+    } catch {
+      checks.push({ name: "git", status: "error", message: "git not found" });
+    }
+
+    // Check TypeScript
+    try {
+      const { execSync } = await import("node:child_process");
+      const tscVersion = execSync("npx tsc --version", { cwd: this.options.cwd, encoding: "utf-8", timeout: 10000 }).trim();
+      checks.push({ name: "typescript", status: "ok", message: tscVersion });
+    } catch {
+      checks.push({ name: "typescript", status: "warn", message: "TypeScript not available" });
+    }
+
+    // Check workspace
+    try {
+      const entries = await fs.readdir(this.options.cwd);
+      checks.push({ name: "workspace", status: "ok", message: `${entries.length} entries in workspace root` });
+    } catch {
+      checks.push({ name: "workspace", status: "error", message: "Cannot read workspace" });
+    }
+
+    // Check sessions dir
+    try {
+      const sessDir = path.join(this.options.cwd, ".agent", "sessions");
+      const sessions = await fs.readdir(sessDir).catch(() => []);
+      checks.push({ name: "sessions", status: "ok", message: `${sessions.length} session files` });
+    } catch {
+      checks.push({ name: "sessions", status: "ok", message: "No sessions yet" });
+    }
+
+    // Check disk space (basic)
+    try {
+      const { execSync } = await import("node:child_process");
+      const df = execSync("df -h .", { cwd: this.options.cwd, encoding: "utf-8", timeout: 5000 });
+      const lines = df.trim().split("\n");
+      if (lines.length > 1) {
+        const parts = lines[1].split(/\s+/);
+        checks.push({ name: "disk", status: "ok", message: `${parts[3] || "?"} available` });
+      }
+    } catch { /* non-critical */ }
+
+    const errors = checks.filter(c => c.status === "error").length;
+    const warnings = checks.filter(c => c.status === "warn").length;
+    return {
+      healthy: errors === 0,
+      checks,
+      summary: `${checks.length} checks: ${checks.length - errors - warnings} ok, ${warnings} warnings, ${errors} errors`
+    };
+  }
 }
 
 function isNotGitRepository(stderr: string): boolean {
@@ -1207,4 +1732,122 @@ function extractPathFromInput(input: Record<string, unknown>): string | undefine
 function buildExitMessage(tool: "bash" | "git", command: string, exitCode: number, stderr: string, stdout: string): string {
   const preview = (stderr || stdout).replace(/\s+/g, " ").trim().slice(0, 200);
   return `${tool} command failed with exit code ${exitCode}: ${command}${preview ? ` :: ${preview}` : ""}`;
+}
+
+/** Summarize tool input for event logging — keep it small but useful */
+function summarizeToolInput(tool: string, input: Record<string, unknown>): Record<string, unknown> {
+  const s: Record<string, unknown> = {};
+  switch (tool) {
+    case "read": s.path = input.path; break;
+    case "write": s.path = input.path; s.bytes = typeof input.content === "string" ? input.content.length : 0; break;
+    case "apply_patch": s.path = input.path; s.editCount = Array.isArray(input.edits) ? input.edits.length : 0; break;
+    case "bash": s.command = typeof input.command === "string" ? input.command.slice(0, 200) : ""; break;
+    case "git": s.args = input.args; break;
+    case "grep": s.pattern = input.pattern; s.glob = input.glob; break;
+    case "glob": s.pattern = input.pattern; break;
+    case "web_search": s.query = input.query; break;
+    case "fetch": s.url = input.url; break;
+    case "ls": s.path = input.path || "."; break;
+    case "multi_patch": s.patchCount = Array.isArray(input.patches) ? input.patches.length : 0; break;
+    case "diagnostics": case "lsp_diagnostics": s.path = input.path; break;
+    case "call_agent": s.agentId = input.agentId; s.task = typeof input.task === "string" ? input.task.slice(0, 100) : ""; break;
+    case "memory_save": s.key = input.key; s.category = input.category; break;
+    case "memory_search": s.query = input.query; break;
+    case "browser": s.action = input.action; s.url = input.url; break;
+    case "process_start": s.command = typeof input.command === "string" ? input.command.slice(0, 100) : ""; s.name = input.name; break;
+    case "cron_create": s.name = input.name; s.schedule = input.schedule; break;
+    default: {
+      // Generic: include first 3 keys
+      const keys = Object.keys(input).slice(0, 3);
+      for (const k of keys) {
+        const v = input[k];
+        s[k] = typeof v === "string" ? v.slice(0, 100) : v;
+      }
+    }
+  }
+  return s;
+}
+
+/** Summarize tool output for event logging — keep it small */
+function summarizeToolOutput(tool: string, output: unknown): Record<string, unknown> | undefined {
+  if (output === null || output === undefined) return undefined;
+  if (typeof output !== "object") return { value: String(output).slice(0, 200) };
+  const o = output as Record<string, unknown>;
+  const s: Record<string, unknown> = {};
+
+  switch (tool) {
+    case "read": s.path = o.path; s.lines = typeof o.content === "string" ? o.content.split("\n").length : 0; break;
+    case "write": s.path = o.path; s.bytes = o.bytes; s.staged = o.staged; break;
+    case "apply_patch": s.path = o.path; s.editsApplied = o.editsApplied; break;
+    case "bash": s.exitCode = o.exitCode; s.stdout = typeof o.stdout === "string" ? o.stdout.slice(-300) : ""; s.stderr = typeof o.stderr === "string" ? o.stderr.slice(-200) : ""; break;
+    case "git": s.exitCode = o.exitCode; s.stdout = typeof o.stdout === "string" ? o.stdout.slice(-200) : ""; break;
+    case "grep": s.matchCount = Array.isArray(o.matches) ? o.matches.length : o.matchCount; break;
+    case "glob": s.count = Array.isArray(o.files) ? o.files.length : o.count; break;
+    case "ls": s.totalEntries = o.totalEntries; break;
+    case "fetch": s.contentLength = o.contentLength; break;
+    case "multi_patch": s.allOk = o.allOk; s.patchCount = o.patchCount; break;
+    case "diagnostics": case "lsp_diagnostics": s.totalErrors = o.totalErrors; s.totalWarnings = o.totalWarnings; break;
+    case "memory_search": s.totalMatches = o.totalMatches; break;
+    case "memory_save": s.saved = o.saved; s.key = o.key; break;
+    case "doctor": s.healthy = o.healthy; s.summary = o.summary; break;
+    case "process_start": s.processId = o.processId; s.pid = o.pid; break;
+    case "process_list": s.count = o.count; break;
+    case "session_list": s.count = o.count; break;
+    default: {
+      // Generic: include first 3 keys
+      const keys = Object.keys(o).slice(0, 3);
+      for (const k of keys) {
+        const v = o[k];
+        s[k] = typeof v === "string" ? v.slice(0, 150) : v;
+      }
+    }
+  }
+  return s;
+}
+
+/**
+ * Permission system: banned commands (OpenCode pattern).
+ * Returns error message if command is banned, null if allowed.
+ */
+function checkBannedCommand(command: string): string | null {
+  const BANNED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+    { pattern: /\bcurl\b.*\|.*\bsh\b/i, reason: "Piping curl to shell is dangerous" },
+    { pattern: /\bwget\b.*\|.*\bsh\b/i, reason: "Piping wget to shell is dangerous" },
+    { pattern: /\brm\s+-rf\s+\/(?!\w)/i, reason: "rm -rf / is destructive" },
+    { pattern: /\brm\s+-rf\s+~\s/i, reason: "rm -rf ~ is destructive" },
+    { pattern: /\b:?\(\)\s*\{\s*:?\|:?&\s*\}\s*;?\s*:?/i, reason: "Fork bomb detected" },
+    { pattern: /\bdd\b.*\bif=\/dev\/\w+\b.*\bof=\/dev\/\w+/i, reason: "Direct disk device write" },
+    { pattern: /\bmkfs\b/i, reason: "Filesystem creation command" },
+    { pattern: /\bshutdown\b/i, reason: "System shutdown command" },
+    { pattern: /\breboot\b/i, reason: "System reboot command" },
+    { pattern: /\bnc\s+-[el]/i, reason: "Netcat listener (potential backdoor)" },
+    { pattern: /\bchmod\s+777\s+\//i, reason: "chmod 777 on root" },
+    { pattern: /\bchown\s+.*\s+\//i, reason: "chown on root" },
+    { pattern: />\s*\/dev\/sd[a-z]/i, reason: "Write to block device" },
+    { pattern: /\beval\b.*\$\(.*\bcurl\b/i, reason: "eval with remote code" },
+  ];
+
+  for (const { pattern, reason } of BANNED_PATTERNS) {
+    if (pattern.test(command)) return reason;
+  }
+  return null;
+}
+
+/** Parse basic cron expressions to millisecond intervals */
+function parseCronToMs(schedule: string): number {
+  const parts = schedule.trim().split(/\s+/);
+  if (parts.length !== 5) return 0;
+  const [min, hour, _dom, _mon, _dow] = parts;
+  // */N minutes
+  const minMatch = min.match(/^\*\/(\d+)$/);
+  if (minMatch) return parseInt(minMatch[1]) * 60_000;
+  // */N hours
+  const hourMatch = hour.match(/^\*\/(\d+)$/);
+  if (hourMatch && min === "0") return parseInt(hourMatch[1]) * 3_600_000;
+  // Fixed minute, every hour
+  if (/^\d+$/.test(min) && hour === "*") return 3_600_000;
+  // Fixed minute and hour (daily)
+  if (/^\d+$/.test(min) && /^\d+$/.test(hour)) return 86_400_000;
+  // Default: every 10 minutes
+  return 600_000;
 }

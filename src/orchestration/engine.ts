@@ -191,9 +191,15 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   // Token budget tracking
   const tokenBudget = createTokenBudget(config.providers.anthropic?.defaultModel ?? "claude-sonnet-4-5");
 
-  // Stream protocol — wire event bus to terminal for real-time output
+  // Stream protocol — wire event bus for real-time output
+  // When running as child process (non-TTY), output NDJSON to stdout for server parsing
+  // When running in terminal (TTY), output human-readable to stderr
   if (process.stdout.isTTY) {
     wireEventBusToStream(eventBus, createTerminalWriter(process.stderr));
+  } else {
+    // Non-TTY: output structured events as timestamp-prefixed lines to stdout
+    // Server's parseEventLine() expects: "HH:MM:SS event_type {json_payload}"
+    wireAllEventsToStdout(eventBus);
   }
 
   // HUD — real-time progress display
@@ -1315,3 +1321,33 @@ async function walkTopLevel(cwd: string): Promise<string[]> {
   await visit(cwd, 0);
   return files;
 }
+
+/**
+ * Wire ALL event bus events to stdout as timestamp-prefixed lines.
+ * Format: "HH:MM:SS event.type {json_payload}"
+ * This is what the server's parseEventLine() expects.
+ */
+function wireAllEventsToStdout(bus: AgentEventBus): void {
+  bus.on("*", async (event) => {
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+
+    // Rate-limit provider.stream to avoid flooding stdout
+    // Only emit every 10th chunk or chunks with newlines
+    if (event.type === "provider.stream") {
+      const chunk = (event.payload.chunk as string) ?? "";
+      if (!chunk.includes("\n")) {
+        streamCounter++;
+        if (streamCounter % 10 !== 0) return;
+      }
+    }
+
+    try {
+      const payload = JSON.stringify(event.payload ?? {});
+      process.stdout.write(`${time} ${event.type} ${payload}\n`);
+    } catch {
+      // JSON stringify failed — skip event
+    }
+  });
+}
+let streamCounter = 0;
