@@ -80,12 +80,17 @@ export function normalizeProviderText(text: string, request: ProviderRequest): s
   const normalized = extractJsonBlock(text);
   try {
     JSON.parse(normalized);
-  } catch (error) {
-    throw new Error(
-      `Provider returned invalid JSON payload: ${error instanceof Error ? error.message : String(error)}`
-    );
+    return normalized;
+  } catch {
+    // If JSON parsing fails, try to salvage by wrapping in a minimal valid JSON
+    // This prevents engine crashes when LLM returns truncated or non-JSON responses
+    try {
+      const wrapped = JSON.stringify({ summary: text.slice(0, 2000), changes: [], suggestedCommands: [], toolCalls: [] });
+      return wrapped;
+    } catch {
+      return JSON.stringify({ summary: "LLM response was not valid JSON", changes: [], suggestedCommands: [], toolCalls: [] });
+    }
   }
-  return normalized;
 }
 
 export interface SseMessage {

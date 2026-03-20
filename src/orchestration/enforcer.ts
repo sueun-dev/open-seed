@@ -120,7 +120,7 @@ export function updateEnforcerAfterExecution(
   satisfyItem(updated, "execution");
 
   // check if execution output mentions build/test success
-  const allText = [execution.summary, ...execution.changes, ...(execution.suggestedCommands ?? [])].join(" ");
+  const allText = [execution.summary, ...(execution.changes ?? []), ...(execution.suggestedCommands ?? [])].join(" ");
   if (/build\s*(pass|succeed|green|ok|success)/i.test(allText)) {
     satisfyItem(updated, "build-green");
   }
