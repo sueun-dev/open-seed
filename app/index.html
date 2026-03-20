@@ -80,6 +80,24 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 @keyframes expandIn{from{opacity:0;max-height:0}to{opacity:1;max-height:5000px}}
 @keyframes collapseOut{from{opacity:1;max-height:5000px}to{opacity:0;max-height:0}}
 
+/* Git status badges */
+.fi .git-badge{margin-left:auto;font-size:9px;font-weight:700;font-family:var(--font);padding:0 4px;border-radius:3px;flex-shrink:0}
+.fi .git-badge.modified{color:#e2b340}
+.fi .git-badge.added{color:#3fb950}
+.fi .git-badge.deleted{color:#f85149}
+.fi .git-badge.untracked{color:#8b949e}
+.fi .git-badge.renamed{color:#bc8cff}
+.fi.git-modified>span:last-of-type{color:#e2b340}
+.fi.git-added>span:last-of-type{color:#3fb950}
+.fi.git-untracked>span:last-of-type{color:#8b949e}
+/* Drag */
+.fi.drag-over{border-top:2px solid var(--accent);margin-top:-2px}
+.fi.dragging{opacity:.4}
+/* Inline rename */
+.fi .rename-input{background:var(--bg);border:1px solid var(--accent);color:var(--fg);font-family:var(--font);font-size:13px;padding:0 4px;outline:none;border-radius:3px;width:100%;margin:-1px 0}
+/* Multi select */
+.fi.selected{background:rgba(88,166,255,.15)}
+
 /* ═══ Content ═══ */
 .content-area{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 
@@ -271,7 +289,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
   <div class="main-area">
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
-      <div class="sb-title"><span id="sbLabel">Explorer</span><div class="btns"><button onclick="promptNewFile()" title="New File">＋</button><button onclick="promptNewFolder()" title="New Folder">📁</button><button onclick="loadFiles()">↻</button></div></div>
+      <div class="sb-title"><span id="sbLabel">Explorer</span><div class="btns"><button onclick="collapseAll()" title="Collapse All">⊟</button><button onclick="promptNewFile()" title="New File">＋</button><button onclick="promptNewFolder()" title="New Folder">📁</button><button onclick="loadFiles()">↻</button></div></div>
+      <div id="explorerFilter" style="padding:4px 8px;display:none"><input id="filterInput" type="text" placeholder="Filter files..." style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--fg);font-family:var(--font);font-size:12px;outline:none" oninput="filterTree(this.value)"></div>
+      <div id="openEditors" style="display:none;border-bottom:1px solid var(--border);padding:4px 0">
+        <div class="sb-title" style="padding:4px 16px 2px;margin:0;font-size:10px;cursor:pointer" onclick="document.getElementById('openEditorsList').style.display=document.getElementById('openEditorsList').style.display==='none'?'':'none'"><span>OPEN EDITORS</span></div>
+        <div id="openEditorsList"></div>
+      </div>
+      <div id="breadcrumb" style="display:none;padding:2px 12px;font-family:var(--font);font-size:11px;color:var(--fg3);border-bottom:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis"></div>
       <div class="sb-body" id="sbBody"></div>
     </div>
 
@@ -746,8 +770,9 @@ function renderTree(container,node,depth){
     const ext=file.name.split('.').pop().toLowerCase();
     const ic=_fileIcons[ext]||ext.slice(0,2).toUpperCase();
     const cl=_fileColors[ext]||'#6b7280';
+    d.dataset.filepath=file.path;
     d.innerHTML='<span class="ic" style="color:'+cl+';font-size:9px">'+ic+'</span><span>'+esc(file.name)+'</span>';
-    d.onclick=()=>{document.querySelectorAll('.fi').forEach(x=>x.classList.remove('on'));d.classList.add('on');openTab(file.path)};
+    d.onclick=(e)=>{handleFileClick(e,d,file.path)};
     d.oncontextmenu=e=>{e.preventDefault();ctxMenu(e,file.path,'file')};
     container.appendChild(d);
   }
@@ -780,8 +805,216 @@ function toggleDir(dirEl,dirPath,childNode,depth){
   }
 }
 
+// ── Git Status ──
+let _gitStatus={};
+async function loadGitStatus(){
+  try{
+    const r=await fetch('/api/git/status');
+    _gitStatus=await r.json();
+    applyGitStatus();
+  }catch{_gitStatus={}}
+}
+function applyGitStatus(){
+  document.querySelectorAll('.fi').forEach(el=>{
+    el.classList.remove('git-modified','git-added','git-untracked','git-deleted');
+    const badge=el.querySelector('.git-badge');
+    if(badge)badge.remove();
+  });
+  document.querySelectorAll('.fi[data-filepath]').forEach(el=>{
+    const fp=el.dataset.filepath;
+    const s=_gitStatus[fp];
+    if(!s)return;
+    el.classList.add('git-'+s);
+    const b=document.createElement('span');
+    b.className='git-badge '+s;
+    b.textContent={modified:'M',added:'A',deleted:'D',untracked:'U',renamed:'R'}[s]||'?';
+    el.appendChild(b);
+  });
+}
+
+// ── Collapse All ──
+function collapseAll(){
+  document.querySelectorAll('.fi.dir.open').forEach(d=>{
+    const dp=d.dataset.dirpath;
+    if(dp)_collapsedDirs.add(dp);
+  });
+  loadFiles();
+}
+
+// ── File Filter (type to search) ──
+let _filterText='';
+function filterTree(text){
+  _filterText=text.toLowerCase();
+  document.querySelectorAll('#sbBody .fi').forEach(el=>{
+    if(!_filterText){el.style.display='';return;}
+    const name=(el.textContent||'').toLowerCase();
+    const match=name.includes(_filterText);
+    el.style.display=match?'':'none';
+    // Show parent dir-children if child matches
+    if(match){
+      let p=el.parentElement;
+      while(p&&p.id!=='sbBody'){
+        p.style.display='';
+        p=p.parentElement;
+      }
+    }
+  });
+  // Also show/hide dir-children
+  document.querySelectorAll('#sbBody .dir-children').forEach(dc=>{
+    if(!_filterText){dc.style.display=_collapsedDirs.has(dc.dataset.dirpath)?'none':'';return;}
+    const hasVisible=[...dc.querySelectorAll('.fi')].some(f=>f.style.display!=='none');
+    dc.style.display=hasVisible?'':'none';
+  });
+}
+
+// ── Keyboard shortcut: Cmd+P to focus filter ──
+document.addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key==='p'){
+    e.preventDefault();
+    const wrap=document.getElementById('explorerFilter');
+    const inp=document.getElementById('filterInput');
+    if(wrap.style.display==='none'){wrap.style.display='';inp.focus();}
+    else{wrap.style.display='none';inp.value='';filterTree('');}
+  }
+});
+
+// ── Inline Rename (double-click) ──
+function startRename(el,filePath,isDir){
+  const name=filePath.split('/').pop();
+  const dir=filePath.split('/').slice(0,-1).join('/');
+  const origHTML=el.innerHTML;
+  const input=document.createElement('input');
+  input.className='rename-input';
+  input.value=name;
+  el.innerHTML='';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+  const finish=async()=>{
+    const newName=input.value.trim();
+    if(newName&&newName!==name){
+      const newPath=dir?dir+'/'+newName:newName;
+      await fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:filePath,to:newPath})});
+      const t=T.find(x=>x.p===filePath);if(t)t.p=newPath;
+      loadFiles();renderTabs();
+    }else{el.innerHTML=origHTML;}
+  };
+  input.onblur=finish;
+  input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();finish();}if(e.key==='Escape'){el.innerHTML=origHTML;}};
+}
+
+// ── Drag and Drop ──
+let _dragPath=null;
+function setupDrag(el,filePath){
+  el.draggable=true;
+  el.ondragstart=e=>{_dragPath=filePath;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';};
+  el.ondragend=()=>{el.classList.remove('dragging');_dragPath=null;document.querySelectorAll('.drag-over').forEach(x=>x.classList.remove('drag-over'));};
+}
+function setupDrop(el,dirPath){
+  el.ondragover=e=>{e.preventDefault();e.dataTransfer.dropEffect='move';el.classList.add('drag-over');};
+  el.ondragleave=()=>el.classList.remove('drag-over');
+  el.ondrop=async e=>{
+    e.preventDefault();el.classList.remove('drag-over');
+    if(!_dragPath)return;
+    const name=_dragPath.split('/').pop();
+    const newPath=dirPath?dirPath+'/'+name:name;
+    if(newPath===_dragPath)return;
+    await fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:_dragPath,to:newPath})});
+    const t=T.find(x=>x.p===_dragPath);if(t)t.p=newPath;
+    _dragPath=null;loadFiles();renderTabs();
+  };
+}
+
+// ── Multi-select ──
+let _selected=new Set();
+let _lastClicked=null;
+function handleFileClick(e,el,filePath){
+  if(e.metaKey||e.ctrlKey){
+    // Toggle select
+    if(_selected.has(filePath)){_selected.delete(filePath);el.classList.remove('selected');}
+    else{_selected.add(filePath);el.classList.add('selected');}
+  }else if(e.shiftKey&&_lastClicked){
+    // Range select
+    const all=[...document.querySelectorAll('.fi[data-filepath]')];
+    const i1=all.findIndex(x=>x.dataset.filepath===_lastClicked);
+    const i2=all.findIndex(x=>x.dataset.filepath===filePath);
+    const [start,end]=[Math.min(i1,i2),Math.max(i1,i2)];
+    _selected.clear();
+    document.querySelectorAll('.fi.selected').forEach(x=>x.classList.remove('selected'));
+    for(let i=start;i<=end;i++){_selected.add(all[i].dataset.filepath);all[i].classList.add('selected');}
+  }else{
+    // Normal click
+    _selected.clear();
+    document.querySelectorAll('.fi.selected,.fi.on').forEach(x=>{x.classList.remove('selected');x.classList.remove('on')});
+    el.classList.add('on');
+    openTab(filePath);
+  }
+  _lastClicked=filePath;
+}
+
+// ── Open Editors Section ──
+function renderOpenEditors(){
+  const sec=document.getElementById('openEditors');
+  const list=document.getElementById('openEditorsList');
+  if(T.length===0){sec.style.display='none';return;}
+  sec.style.display='';
+  list.innerHTML='';
+  for(const t of T){
+    const d=document.createElement('div');
+    d.className='fi'+(t===AT?' on':'');
+    d.style.paddingLeft='24px';
+    const ext=t.p.split('.').pop().toLowerCase();
+    const ic=_fileIcons[ext]||ext.slice(0,2).toUpperCase();
+    const cl=_fileColors[ext]||'#6b7280';
+    d.innerHTML='<span class="ic" style="color:'+cl+';font-size:9px">'+ic+'</span><span>'+esc(t.p.split('/').pop())+'</span>'+(t.d?'<span style="color:var(--yellow);margin-left:auto;font-size:14px">●</span>':'');
+    d.onclick=()=>{AT=t;renderTabs();renderEd();renderOpenEditors();};
+    list.appendChild(d);
+  }
+}
+
+// ── Breadcrumb ──
+function updateBreadcrumb(filePath){
+  const bc=document.getElementById('breadcrumb');
+  if(!filePath){bc.style.display='none';return;}
+  bc.style.display='';
+  const parts=filePath.split('/');
+  bc.innerHTML=parts.map((p,i)=>{
+    const path=parts.slice(0,i+1).join('/');
+    const isLast=i===parts.length-1;
+    return '<span style="cursor:pointer;color:'+(isLast?'var(--fg)':'var(--fg3)')+'" onclick="'+(isLast?'':'openTab(\''+path+'\')')+'">'+esc(p)+'</span>';
+  }).join('<span style="color:var(--fg3);margin:0 4px">›</span>');
+}
+
+// ── Auto-refresh (poll every 5s) ──
+setInterval(()=>{loadGitStatus();},5000);
+// Initial load + refresh files every 10s
+setInterval(()=>{loadFiles();},10000);
+
+// ── Override loadFiles to add features ──
+const _origLoadFiles=loadFiles;
+loadFiles=async function(){
+  await _origLoadFiles();
+  await loadGitStatus();
+  renderOpenEditors();
+  // Add drag/drop + inline rename + multi-select to all file entries
+  document.querySelectorAll('.fi:not(.dir)').forEach(el=>{
+    const fp=el.dataset?.filepath;
+    if(!fp)return;
+    setupDrag(el,fp);
+    el.ondblclick=()=>startRename(el,fp,false);
+    const origClick=el.onclick;
+    el.onclick=e=>{handleFileClick(e,el,fp);};
+  });
+  document.querySelectorAll('.fi.dir').forEach(el=>{
+    const dp=el.dataset?.dirpath;
+    if(!dp)return;
+    setupDrop(el,dp);
+    el.ondblclick=e=>{e.stopPropagation();startRename(el,dp,true);};
+  });
+};
+
 /* ═══ TABS ═══ */
-function openTab(p){let t=T.find(x=>x.p===p);if(!t){t={p,c:'',d:false,o:''};T.push(t)}AT=t;fetch('/api/file?path='+encodeURIComponent(p)).then(r=>r.json()).then(data=>{t.c=data.content;t.o=data.content;t.d=false;renderTabs();renderEd();document.getElementById('sbF').textContent=p})}
+function openTab(p){let t=T.find(x=>x.p===p);if(!t){t={p,c:'',d:false,o:''};T.push(t)}AT=t;fetch('/api/file?path='+encodeURIComponent(p)).then(r=>r.json()).then(data=>{t.c=data.content;t.o=data.content;t.d=false;renderTabs();renderEd();document.getElementById('sbF').textContent=p;updateBreadcrumb(p);renderOpenEditors()})}
 function renderTabs(){const bar=document.getElementById('tabs');bar.innerHTML='';for(const t of T){const el=document.createElement('div');el.className='tab'+(t===AT?' on':'')+(t.d?' dirty':'');el.innerHTML='<span>'+esc(t.p.split('/').pop())+'</span><span class="x" onclick="event.stopPropagation();closeTab(\''+t.p+'\')">×</span>';el.onclick=()=>{AT=t;renderTabs();renderEd()};bar.appendChild(el)}}
 function closeTab(p){const i=T.findIndex(t=>t.p===p);if(i<0)return;if(T[i].d&&!confirm('Discard?'))return;T.splice(i,1);if(AT?.p===p)AT=T[Math.min(i,T.length-1)]||null;renderTabs();AT?renderEd():showWelcome()}
 
