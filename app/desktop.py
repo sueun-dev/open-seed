@@ -81,11 +81,9 @@ def main():
 
     set_dock_icon()
     kill_existing_server()
-
     server = start_server()
 
     if not wait_for_server():
-        print("Server failed to start")
         server.terminate()
         sys.exit(1)
 
@@ -106,6 +104,19 @@ def main():
         text_select=True,
     )
     window.events.closing += on_closing
+    # Force window to appear in front
+
+    def on_shown():
+        """Force the app to come to front after window is shown."""
+        try:
+            from AppKit import NSApplication, NSApplicationActivationPolicyRegular
+            app = NSApplication.sharedApplication()
+            app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+            app.activateIgnoringOtherApps_(True)
+        except Exception:
+            pass
+
+    window.events.shown += on_shown
     webview.start(debug=False)
     server.terminate()
 
