@@ -290,7 +290,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
   <div class="main-area">
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
-      <div class="sb-title"><span id="sbLabel">Explorer</span><div class="btns"><button onclick="collapseAll()" title="Collapse All">⊟</button><button onclick="promptNewFile()" title="New File">＋</button><button onclick="promptNewFolder()" title="New Folder">📁</button><button onclick="loadFiles()">↻</button></div></div>
+      <div class="sb-title"><span id="sbLabel">Explorer</span><div class="btns"><button onclick="cycleSortMode()" title="Sort" id="sortBtn">A↓</button><button onclick="collapseAll()" title="Collapse All">⊟</button><button onclick="promptNewFile()" title="New File">＋</button><button onclick="promptNewFolder()" title="New Folder">📁</button><button onclick="loadFiles()">↻</button></div></div>
       <div id="explorerFilter" style="padding:4px 8px;display:none"><input id="filterInput" type="text" placeholder="Filter files..." style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--fg);font-family:var(--font);font-size:12px;outline:none" oninput="filterTree(this.value)"></div>
       <div id="openEditors" style="display:none;border-bottom:1px solid var(--border);padding:4px 0">
         <div class="sb-title" style="padding:4px 16px 2px;margin:0;font-size:10px;cursor:pointer" onclick="document.getElementById('openEditorsList').style.display=document.getElementById('openEditorsList').style.display==='none'?'':'none'"><span>OPEN EDITORS</span></div>
@@ -298,6 +298,16 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
       </div>
       <div id="breadcrumb" style="display:none;padding:2px 12px;font-family:var(--font);font-size:11px;color:var(--fg3);border-bottom:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis"></div>
       <div class="sb-body" id="sbBody"></div>
+      <!-- Outline Section (VSCode) -->
+      <div style="border-top:1px solid var(--border)">
+        <div class="sb-title" style="padding:4px 16px 2px;margin:0;font-size:10px;cursor:pointer" onclick="toggleOutline()"><span>OUTLINE</span><span id="outlineToggle" style="margin-left:auto;font-size:9px">▶</span></div>
+        <div id="outlineBody" style="display:none;max-height:200px;overflow-y:auto;padding:2px 0;font-size:11px"></div>
+      </div>
+      <!-- Timeline Section (VSCode) -->
+      <div style="border-top:1px solid var(--border)">
+        <div class="sb-title" style="padding:4px 16px 2px;margin:0;font-size:10px;cursor:pointer" onclick="toggleTimeline()"><span>TIMELINE</span><span id="timelineToggle" style="margin-left:auto;font-size:9px">▶</span></div>
+        <div id="timelineBody" style="display:none;max-height:200px;overflow-y:auto;padding:2px 0;font-size:11px"></div>
+      </div>
     </div>
 
     <!-- Content -->
@@ -735,40 +745,146 @@ async function loadFiles(){
 }
 const _fileIcons={ts:'TS',tsx:'TX',js:'JS',jsx:'JX',json:'{}',md:'MD',py:'PY',html:'<>',css:'#',toml:'TM',yml:'YM',yaml:'YM',sh:'$',txt:'TX',svg:'SV',png:'IM',jpg:'IM',gif:'IM',lock:'LK',gitignore:'GI',env:'EN',sql:'DB',rs:'RS',go:'GO',java:'JA',rb:'RB',php:'PH',vue:'VU',svelte:'SV'};
 const _fileColors={ts:'#3b82f6',tsx:'#3b82f6',js:'#eab308',jsx:'#eab308',json:'#22c55e',md:'#a855f7',py:'#22c55e',html:'#ef4444',css:'#a855f7',toml:'#eab308',yml:'#ef4444',yaml:'#ef4444',sh:'#22c55e',txt:'#6b7280',svg:'#f97316',lock:'#6b7280',gitignore:'#6b7280',env:'#eab308'};
+// Sort mode: 'name' | 'modified' | 'type' | 'size'
+let _sortMode='name';
+
 function renderTree(container,node,depth){
-  const dirNames=Object.keys(node.children).sort();
-  const files=(node.files||[]).sort((a,b)=>a.name.localeCompare(b.name));
+  let dirNames=Object.keys(node.children).sort();
+  let files=(node.files||[]).slice();
+
+  // Apply sort
+  if(_sortMode==='type'){
+    files.sort((a,b)=>{const ea=a.name.split('.').pop(),eb=b.name.split('.').pop();return ea.localeCompare(eb)||a.name.localeCompare(b.name);});
+  }else{
+    files.sort((a,b)=>a.name.localeCompare(b.name));
+  }
+
   for(const dn of dirNames){
     const child=node.children[dn];
     const dirPath=child.path||dn;
-    const collapsed=_collapsedDirs.has(dirPath);
+
+    // Compact folders: if dir has exactly 1 child dir and 0 files, merge into single line
+    let compactLabel=dn;
+    let compactChild=child;
+    let compactPath=dirPath;
+    while(Object.keys(compactChild.children).length===1&&(!compactChild.files||compactChild.files.length===0)){
+      const subName=Object.keys(compactChild.children)[0];
+      compactChild=compactChild.children[subName];
+      compactLabel+='/'+subName;
+      compactPath=compactChild.path||compactPath+'/'+subName;
+    }
+
+    const collapsed=_collapsedDirs.has(compactPath);
     const d=document.createElement('div');
     d.className='fi dir'+(collapsed?'':' open');
     d.style.paddingLeft=(4+depth*16)+'px';
-    d.dataset.dirpath=dirPath;
-    d.innerHTML='<span class="arrow">▶</span><span class="ic" style="color:#e2b55a">📁</span><span>'+esc(dn)+'</span>';
-    d.onclick=(e)=>{e.stopPropagation();if(e.altKey){recursiveCollapse(dirPath);}else{toggleDir(d,dirPath,child,depth);}};
-    d.oncontextmenu=e=>{e.preventDefault();ctxMenu(e,dirPath,'dir')};
+    d.dataset.dirpath=compactPath;
+    // Git status for folder: show badge if any child modified
+    const dirGit=getDirGitStatus(compactPath);
+    const gitBadge=dirGit?`<span class="git-badge" style="margin-left:auto;font-size:9px;padding:0 4px;border-radius:3px;color:${dirGit.color}">${dirGit.count}</span>`:'';
+    d.innerHTML=`<span class="arrow">\u25B6</span><span class="ic" style="color:#e2b55a">\uD83D\uDCC1</span><span>${esc(compactLabel)}</span>${gitBadge}`;
+    d.style.display='flex';d.style.alignItems='center';d.style.gap='4px';
+    d.onclick=(e)=>{e.stopPropagation();if(e.altKey){recursiveCollapse(compactPath);}else{toggleDir(d,compactPath,compactChild,depth);}};
+    d.oncontextmenu=e=>{e.preventDefault();ctxMenu(e,compactPath,'dir')};
     container.appendChild(d);
     const cc=document.createElement('div');
     cc.className='dir-children';
-    cc.dataset.dirpath=dirPath;
-    if(!collapsed){renderTree(cc,child,depth+1)}else{cc.style.display='none'}
+    cc.dataset.dirpath=compactPath;
+    if(!collapsed){renderTree(cc,compactChild,depth+1)}else{cc.style.display='none'}
     container.appendChild(cc);
   }
+
+  // File nesting: group nested files under parent
+  const nestedMap=new Map(); // parent -> [nested files]
+  const topFiles=[];
   for(const file of files){
-    const d=document.createElement('div');
-    d.className='fi'+(AT?.p===file.path?' on':'');
-    d.style.paddingLeft=(4+depth*16+16)+'px';
-    const ext=file.name.split('.').pop().toLowerCase();
-    const ic=_fileIcons[ext]||ext.slice(0,2).toUpperCase();
-    const cl=_fileColors[ext]||'#6b7280';
-    d.dataset.filepath=file.path;
-    d.innerHTML='<span class="ic" style="color:'+cl+';font-size:9px">'+ic+'</span><span>'+esc(file.name)+'</span>';
-    d.onclick=(e)=>{handleFileClick(e,d,file.path)};
-    d.oncontextmenu=e=>{e.preventDefault();ctxMenu(e,file.path,'file')};
-    container.appendChild(d);
+    let isNested=false;
+    for(const [parent,patterns] of Object.entries(_nestingPatterns)){
+      if(patterns.some(p=>p.includes('*')?file.name.match(new RegExp('^'+p.replace('*','.*')+'$')):file.name===p)){
+        // Check if parent exists in this dir
+        if(files.some(f=>f.name===parent)){
+          if(!nestedMap.has(parent))nestedMap.set(parent,[]);
+          nestedMap.get(parent).push(file);
+          isNested=true;break;
+        }
+      }
+    }
+    if(!isNested)topFiles.push(file);
   }
+
+  for(const file of topFiles){
+    const nested=nestedMap.get(file.name)||[];
+    renderFileItem(container,file,depth,nested);
+  }
+}
+
+function renderFileItem(container,file,depth,nestedFiles){
+  const d=document.createElement('div');
+  d.className='fi'+(AT?.p===file.path?' on':'');
+  d.style.cssText=`padding-left:${4+depth*16+16}px;display:flex;align-items:center;gap:4px`;
+  const ext=file.name.split('.').pop().toLowerCase();
+  const ic=_fileIcons[ext]||ext.slice(0,2).toUpperCase();
+  const cl=_fileColors[ext]||'#6b7280';
+  d.dataset.filepath=file.path;
+
+  // Git status badge
+  const gs=_gitStatus[file.path];
+  const gsBadge=gs?`<span style="margin-left:auto;font-size:9px;padding:0 3px;border-radius:2px;color:${gs==='modified'?'var(--yellow)':gs==='added'?'var(--green)':gs==='deleted'?'var(--red)':'var(--accent)'}">${gs[0].toUpperCase()}</span>`:'';
+
+  // Nesting indicator
+  const nestBadge=nestedFiles.length>0?`<span style="margin-left:2px;font-size:9px;color:var(--fg3);cursor:pointer" class="nest-toggle" title="${nestedFiles.length} nested">+${nestedFiles.length}</span>`:'';
+
+  // Tooltip with file info
+  const tooltip=`${file.path}${gs?' ('+gs+')':''}`;
+  d.title=tooltip;
+
+  d.innerHTML=`<span class="ic" style="color:${cl};font-size:9px">${ic}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(file.name)}</span>${nestBadge}${gsBadge}`;
+
+  // Single click = preview (italic tab), double click = permanent
+  d.onclick=(e)=>{handleFileClick(e,d,file.path)};
+  d.ondblclick=(e)=>{e.stopPropagation();openTabPermanent(file.path)};
+  d.oncontextmenu=e=>{e.preventDefault();ctxMenu(e,file.path,'file')};
+  container.appendChild(d);
+
+  // Nested files (collapsed by default)
+  if(nestedFiles.length>0){
+    const nestContainer=document.createElement('div');
+    nestContainer.className='dir-children nested-files';
+    nestContainer.style.display='none';
+    for(const nf of nestedFiles){
+      renderFileItem(nestContainer,nf,depth+1,[]);
+    }
+    container.appendChild(nestContainer);
+    // Toggle nesting on badge click
+    const toggle=d.querySelector('.nest-toggle');
+    if(toggle){
+      toggle.onclick=(e)=>{
+        e.stopPropagation();
+        nestContainer.style.display=nestContainer.style.display==='none'?'':'none';
+        toggle.textContent=nestContainer.style.display==='none'?`+${nestedFiles.length}`:`-${nestedFiles.length}`;
+      };
+    }
+  }
+}
+
+// Preview mode: single click opens in italic preview tab, double click makes permanent
+let _previewTab=null;
+function openTabPermanent(p){
+  // Remove preview flag
+  if(_previewTab===p)_previewTab=null;
+  openTab(p);
+}
+
+// Get aggregated git status for a directory
+function getDirGitStatus(dirPath){
+  let count=0;let color='var(--yellow)';
+  for(const [file,status] of Object.entries(_gitStatus)){
+    if(file.startsWith(dirPath+'/')){
+      count++;
+      if(status==='added')color='var(--green)';
+    }
+  }
+  return count>0?{count,color}:null;
 }
 function toggleDir(dirEl,dirPath,childNode,depth){
   const collapsed=_collapsedDirs.has(dirPath);
@@ -797,6 +913,149 @@ function toggleDir(dirEl,dirPath,childNode,depth){
     },{once:true});
   }
 }
+
+// ── Sort Mode Cycling (VSCode) ──
+function cycleSortMode(){
+  const modes=['name','type','modified'];
+  const idx=modes.indexOf(_sortMode);
+  _sortMode=modes[(idx+1)%modes.length];
+  const labels={name:'A↓',type:'T↓',modified:'D↓'};
+  document.getElementById('sortBtn').textContent=labels[_sortMode]||'A↓';
+  document.getElementById('sortBtn').title='Sort by: '+_sortMode;
+  loadFiles();
+}
+
+// ── Outline Section (VSCode: symbols in current file) ──
+let _outlineOpen=false;
+function toggleOutline(){
+  _outlineOpen=!_outlineOpen;
+  document.getElementById('outlineBody').style.display=_outlineOpen?'':'none';
+  document.getElementById('outlineToggle').textContent=_outlineOpen?'▼':'▶';
+  if(_outlineOpen)updateOutline();
+}
+function updateOutline(){
+  const body=document.getElementById('outlineBody');
+  if(!body||!_outlineOpen)return;
+  if(!AT||!AT.c){body.innerHTML='<div style="padding:4px 16px;color:var(--fg3)">No file open</div>';return;}
+  const symbols=extractSymbols(AT.c,AT.p);
+  if(symbols.length===0){body.innerHTML='<div style="padding:4px 16px;color:var(--fg3)">No symbols found</div>';return;}
+  body.innerHTML='';
+  for(const sym of symbols){
+    const d=document.createElement('div');
+    d.style.cssText='padding:2px 16px;cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--fg2)';
+    d.style.paddingLeft=(16+sym.depth*12)+'px';
+    const icons={function:'fn',class:'C',interface:'I',type:'T',const:'c',let:'l',var:'v',export:'E',import:'→',method:'m',property:'p',enum:'E'};
+    const colors={function:'#dcdcaa',class:'#4ec9b0',interface:'#4ec9b0',type:'#4ec9b0',const:'#4fc1ff',method:'#dcdcaa',enum:'#4ec9b0'};
+    d.innerHTML=`<span style="color:${colors[sym.kind]||'var(--fg3)'};font-size:9px;width:14px;text-align:center">${icons[sym.kind]||'?'}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sym.name)}</span><span style="color:var(--fg3);font-size:9px;margin-left:auto">${sym.line}</span>`;
+    d.onclick=()=>{
+      // Scroll editor to this line
+      const ce=document.getElementById('ce');
+      if(ce){
+        const lines=ce.value.split('\n');
+        let pos=0;for(let i=0;i<sym.line-1&&i<lines.length;i++)pos+=lines[i].length+1;
+        ce.focus();ce.setSelectionRange(pos,pos);
+        // Scroll to line
+        const lineH=ce.scrollHeight/Math.max(1,lines.length);
+        ce.scrollTop=Math.max(0,(sym.line-5)*lineH);
+      }
+    };
+    d.onmouseover=()=>d.style.background='var(--bg3)';
+    d.onmouseout=()=>d.style.background='';
+    body.appendChild(d);
+  }
+}
+
+function extractSymbols(code,filePath){
+  const symbols=[];
+  const ext=(filePath||'').split('.').pop().toLowerCase();
+  const isTS=ext==='ts'||ext==='tsx'||ext==='js'||ext==='jsx';
+  const isPy=ext==='py';
+
+  const lines=code.split('\n');
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];const ln=i+1;
+    const indent=line.match(/^(\s*)/)[1].length;
+    const depth=Math.floor(indent/2);
+
+    if(isTS){
+      let m;
+      if((m=line.match(/^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)/)))symbols.push({name:m[1],kind:'function',line:ln,depth});
+      else if((m=line.match(/^\s*(?:export\s+)?class\s+(\w+)/)))symbols.push({name:m[1],kind:'class',line:ln,depth:0});
+      else if((m=line.match(/^\s*(?:export\s+)?interface\s+(\w+)/)))symbols.push({name:m[1],kind:'interface',line:ln,depth:0});
+      else if((m=line.match(/^\s*(?:export\s+)?type\s+(\w+)/)))symbols.push({name:m[1],kind:'type',line:ln,depth:0});
+      else if((m=line.match(/^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=/)))symbols.push({name:m[1],kind:line.includes('const')?'const':'let',line:ln,depth});
+      else if((m=line.match(/^\s*(?:export\s+)?enum\s+(\w+)/)))symbols.push({name:m[1],kind:'enum',line:ln,depth:0});
+      else if((m=line.match(/^\s+(?:async\s+)?(\w+)\s*\([^)]*\)\s*[:{]/))&&!line.includes('if')&&!line.includes('for')&&!line.includes('while'))symbols.push({name:m[1],kind:'method',line:ln,depth:1});
+    }
+    if(isPy){
+      let m;
+      if((m=line.match(/^(\s*)def\s+(\w+)/)))symbols.push({name:m[2],kind:'function',line:ln,depth:Math.floor(m[1].length/4)});
+      else if((m=line.match(/^(\s*)class\s+(\w+)/)))symbols.push({name:m[2],kind:'class',line:ln,depth:Math.floor(m[1].length/4)});
+      else if((m=line.match(/^(\w+)\s*=/)))symbols.push({name:m[1],kind:'const',line:ln,depth:0});
+    }
+  }
+  return symbols;
+}
+
+// ── Timeline Section (VSCode: git history for current file) ──
+let _timelineOpen=false;
+function toggleTimeline(){
+  _timelineOpen=!_timelineOpen;
+  document.getElementById('timelineBody').style.display=_timelineOpen?'':'none';
+  document.getElementById('timelineToggle').textContent=_timelineOpen?'▼':'▶';
+  if(_timelineOpen)updateTimeline();
+}
+async function updateTimeline(){
+  const body=document.getElementById('timelineBody');
+  if(!body||!_timelineOpen)return;
+  if(!AT||!AT.p||AT.p.startsWith('__diff__')){body.innerHTML='<div style="padding:4px 16px;color:var(--fg3)">No file open</div>';return;}
+  body.innerHTML='<div style="padding:4px 16px;color:var(--fg3)">Loading...</div>';
+  try{
+    const r=await fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:`git log --oneline --follow -20 -- "${AT.p}" 2>/dev/null || echo "No git history"`})});
+    const reader=r.body.getReader();const decoder=new TextDecoder();let buf='',output='';
+    while(true){const{done,value}=await reader.read();if(done)break;buf+=decoder.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';for(const l of lines){if(!l.startsWith('data: '))continue;const d=l.slice(6);if(d==='[DONE]')break;try{const ev=JSON.parse(d);if(ev.type==='stdout')output+=ev.text;}catch{}}}
+
+    body.innerHTML='';
+    const commits=output.trim().split('\n').filter(l=>l.trim());
+    if(commits.length===0||commits[0].includes('No git history')){
+      body.innerHTML='<div style="padding:4px 16px;color:var(--fg3)">No git history</div>';return;
+    }
+    for(const commit of commits){
+      const d=document.createElement('div');
+      d.style.cssText='padding:3px 16px;cursor:pointer;color:var(--fg2);display:flex;gap:6px;align-items:baseline';
+      const hash=commit.slice(0,7);
+      const msg=commit.slice(8);
+      d.innerHTML=`<span style="color:var(--accent);font-size:9px;font-family:monospace;flex-shrink:0">${esc(hash)}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(msg)}</span>`;
+      d.title=commit;
+      d.onclick=()=>{
+        // Show diff for this commit
+        showCommitDiff(hash,AT.p);
+      };
+      d.onmouseover=()=>d.style.background='var(--bg3)';
+      d.onmouseout=()=>d.style.background='';
+      body.appendChild(d);
+    }
+  }catch(err){
+    body.innerHTML='<div style="padding:4px 16px;color:var(--red)">'+esc(err.message)+'</div>';
+  }
+}
+
+async function showCommitDiff(hash,filePath){
+  try{
+    const r=await fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:`git diff ${hash}~1 ${hash} -- "${filePath}" 2>/dev/null || git show ${hash} -- "${filePath}" 2>/dev/null || echo "No diff available"`})});
+    const reader=r.body.getReader();const decoder=new TextDecoder();let buf='',output='';
+    while(true){const{done,value}=await reader.read();if(done)break;buf+=decoder.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';for(const l of lines){if(!l.startsWith('data: '))continue;const d=l.slice(6);if(d==='[DONE]')break;try{const ev=JSON.parse(d);if(ev.type==='stdout')output+=ev.text;}catch{}}}
+    const diffPath=`__diff__/${hash} ${filePath.split('/').pop()}`;
+    let t=T.find(x=>x.p===diffPath);
+    if(!t){t={p:diffPath,c:output,d:false,o:output};T.push(t);}
+    else{t.c=output;t.o=output;}
+    AT=t;renderTabs();renderEd();
+  }catch{}
+}
+
+// Update outline + timeline when switching tabs
+const _origOpenTab=openTab;
+// (outline/timeline auto-update is handled by renderEd override below)
 
 // ── Alt+Click: Recursive Collapse (VSCode) ──
 function recursiveCollapse(dirPath){
@@ -1169,7 +1428,7 @@ function renderTabs(){const bar=document.getElementById('tabs');bar.innerHTML=''
 function closeTab(p){const i=T.findIndex(t=>t.p===p);if(i<0)return;if(T[i].d&&!confirm('Discard?'))return;T.splice(i,1);if(AT?.p===p)AT=T[Math.min(i,T.length-1)]||null;renderTabs();AT?renderEd():showWelcome()}
 
 /* ═══ EDITOR with Syntax Highlighting ═══ */
-function renderEd(){if(!AT){showWelcome();return}const z=document.getElementById('edZone');z.querySelector('.welcome-screen')?.remove();let w=z.querySelector('.code-wrap');if(!w){w=document.createElement('div');w.className='code-wrap';w.innerHTML='<div class="line-gutter" id="lg"></div><div class="code-edit"><textarea id="ce" spellcheck="false"></textarea></div>';z.appendChild(w);const ce=document.getElementById('ce');ce.oninput=()=>{AT.c=ce.value;AT.d=ce.value!==AT.o;renderTabs();updateGutter()};ce.onscroll=()=>{document.getElementById('lg').scrollTop=ce.scrollTop};ce.onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();const s=ce.selectionStart;ce.value=ce.value.substring(0,s)+'  '+ce.value.substring(ce.selectionEnd);ce.selectionStart=ce.selectionEnd=s+2;ce.oninput()}}}document.getElementById('ce').value=AT.c;updateGutter()}
+function renderEd(){if(!AT){showWelcome();return}const z=document.getElementById('edZone');z.querySelector('.welcome-screen')?.remove();let w=z.querySelector('.code-wrap');if(!w){w=document.createElement('div');w.className='code-wrap';w.innerHTML='<div class="line-gutter" id="lg"></div><div class="code-edit"><textarea id="ce" spellcheck="false"></textarea></div>';z.appendChild(w);const ce=document.getElementById('ce');ce.oninput=()=>{AT.c=ce.value;AT.d=ce.value!==AT.o;renderTabs();updateGutter()};ce.onscroll=()=>{document.getElementById('lg').scrollTop=ce.scrollTop};ce.onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();const s=ce.selectionStart;ce.value=ce.value.substring(0,s)+'  '+ce.value.substring(ce.selectionEnd);ce.selectionStart=ce.selectionEnd=s+2;ce.oninput()}}}document.getElementById('ce').value=AT.c;updateGutter();updateOutline();updateTimeline()}
 function updateHighlight(){const hl=document.getElementById('hl');if(!hl||!AT)return;const ext=AT.p.split('.').pop();const lang={ts:'typescript',tsx:'typescript',js:'javascript',json:'json',css:'css',html:'xml',md:'markdown',py:'python',sh:'bash'}[ext]||'';let html;if(lang&&hljs.getLanguage(lang)){html=hljs.highlight(AT.c,{language:lang}).value}else{html=esc(AT.c)}hl.innerHTML='<code>'+html+'</code>'}
 function updateGutter(){const g=document.getElementById('lg'),ce=document.getElementById('ce');if(!g||!ce)return;const n=ce.value.split('\n').length;g.innerHTML=Array.from({length:n},(_,i)=>'<div>'+(i+1)+'</div>').join('')}
 function showWelcome(){const z=document.getElementById('edZone');z.querySelector('.code-wrap')?.remove();if(!z.querySelector('.welcome-screen'))z.innerHTML='<div class="welcome-screen" id="welc"><h1>Open <b>Seed</b></h1><p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Prometheus Engine<br><br><kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer<br><kbd>⌘S</kbd> Save &nbsp; <kbd>⌘\`</kbd> Terminal</p></div>'}
