@@ -1,138 +1,188 @@
 /**
- * Open Seed — Electron Desktop App
+ * Open Seed | Desktop App Entry Point
  *
- * Runs the web server internally and opens a native window.
- * Usage: npx electron app/
- *   or:  cd app && npm run electron
+ * Detects environment:
+ * - Electron: opens native window with embedded web server
+ * - Node.js: starts web server only (http://localhost:4040)
+ *
+ * Usage:
+ *   Desktop: cd app && npx electron .
+ *   Web:     node app/main.js
  */
 
 const path = require("path");
-const { fork } = require("child_process");
 
-// Parse CLI args
-const args = process.argv.slice(2);
-const CWD = args.find((a, i) => args[i - 1] === "--cwd") || process.cwd();
-const PORT = parseInt(args.find((a, i) => args[i - 1] === "--port") || "4040", 10);
+// ── Parse CLI args ──
+const cliArgs = process.argv.slice(2);
+const CWD = cliArgs.find((a, i) => cliArgs[i - 1] === "--cwd") || process.cwd();
+const PORT = parseInt(cliArgs.find((a, i) => cliArgs[i - 1] === "--port") || "4040", 10);
 
-let app, BrowserWindow, shell, globalShortcut;
+// ── Detect Electron ──
+const IS_ELECTRON = Boolean(process.versions.electron);
+
+if (!IS_ELECTRON) {
+  // Running under plain Node.js — start web server only
+  require("./server.js");
+  // Early return from module scope
+  return;
+}
+
+// ── Electron Main Process ──
+// Workaround: node_modules/electron/index.js returns the binary path (a string),
+// which shadows the built-in "electron" module. Temporarily override the resolver
+// so that require("electron") hits Electron's internal module, not the npm package.
+const Module = require("module");
+const _origResolve = Module._resolveFilename;
+Module._resolveFilename = function(request, parent, isMain, options) {
+  if (request === "electron") {
+    // Return a sentinel that Electron's own loader can intercept.
+    // This prevents node_modules/electron/index.js from being loaded.
+    try {
+      return _origResolve.call(this, request, parent, isMain, options);
+    } catch {
+      return request; // Let Electron handle it
+    }
+  }
+  return _origResolve.call(this, request, parent, isMain, options);
+};
+
+// Try to load Electron APIs
+let app, BrowserWindow, shell, globalShortcut, Menu, dialog;
 try {
   const electron = require("electron");
-  if (typeof electron === "string" || !electron.app) {
-    // Not running as Electron main process — launch ourselves properly
-    const electronPath = typeof electron === "string" ? electron : require("electron/index.js");
-    if (typeof electronPath === "string") {
-      const { execSync } = require("child_process");
-      const args = process.argv.slice(2).map(a => `"${a}"`).join(" ");
-      try {
-        execSync(`"${electronPath}" "${__dirname}" ${args}`, { stdio: "inherit" });
-      } catch {}
-      process.exit(0);
-    }
-    console.error("Cannot start Electron. Use web mode: node app/server.js");
-    process.exit(1);
+  if (electron && typeof electron === "object" && electron.app) {
+    ({ app, BrowserWindow, shell, globalShortcut, Menu, dialog } = electron);
   }
-  ({ app, BrowserWindow, shell, globalShortcut } = electron);
-} catch (e) {
-  console.error("Electron error:", e.message);
-  console.error("Use web mode instead: node app/server.js");
-  process.exit(1);
+} catch { /* fallback below */ }
+
+// Restore original resolver
+Module._resolveFilename = _origResolve;
+
+if (!app) {
+  // Electron APIs not available — fall back to web server
+  console.log("[Open Seed] Electron APIs not available. Starting web server...");
+  require("./server.js");
+  return;
 }
 
 let mainWindow;
 let serverProcess;
 
-// Start the web server as a child process
-function startServer() {
-  const serverPath = path.join(__dirname, "server.js");
-  const { spawn: cpSpawn } = require("child_process");
+// ── App Menu ──
+function buildMenu() {
+  const isMac = process.platform === "darwin";
+  const template = [
+    ...(isMac ? [{
+      label: "Open Seed",
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { label: "Settings", accelerator: "Cmd+,", click: () => mainWindow?.webContents.executeJavaScript("nav('settings')") },
+        { type: "separator" },
+        { role: "hide" }, { role: "hideOthers" }, { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" }
+      ]
+    }] : []),
+    {
+      label: "File",
+      submenu: [
+        { label: "New File", accelerator: "CmdOrCtrl+N", click: () => mainWindow?.webContents.executeJavaScript("promptNewFile()") },
+        { label: "Save", accelerator: "CmdOrCtrl+S", click: () => mainWindow?.webContents.executeJavaScript("saveActive()") },
+        { type: "separator" },
+        { label: "Open Workspace...", accelerator: "CmdOrCtrl+O", click: openWorkspace },
+        { type: "separator" },
+        ...(isMac ? [] : [{ role: "quit" }])
+      ]
+    },
+    { label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
+    {
+      label: "View",
+      submenu: [
+        { label: "Explorer", accelerator: "CmdOrCtrl+Shift+E", click: () => mainWindow?.webContents.executeJavaScript("nav('files')") },
+        { label: "AI Chat", accelerator: "CmdOrCtrl+Shift+A", click: () => mainWindow?.webContents.executeJavaScript("nav('chat')") },
+        { label: "AGI Mode", accelerator: "CmdOrCtrl+Shift+G", click: () => mainWindow?.webContents.executeJavaScript("nav('agi')") },
+        { label: "Terminal", accelerator: "CmdOrCtrl+J", click: () => mainWindow?.webContents.executeJavaScript("toggleTerm()") },
+        { type: "separator" },
+        { role: "reload" }, { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "zoomIn" }, { role: "zoomOut" }, { role: "resetZoom" },
+        { type: "separator" },
+        { role: "togglefullscreen" }
+      ]
+    },
+    {
+      label: "Agent",
+      submenu: [
+        { label: "Run Task...", accelerator: "CmdOrCtrl+Enter", click: () => mainWindow?.webContents.executeJavaScript("document.getElementById('chIn')?.focus()") },
+        { label: "AGI Mode", accelerator: "CmdOrCtrl+Shift+G", click: () => mainWindow?.webContents.executeJavaScript("nav('agi')") },
+        { type: "separator" },
+        { label: "Doctor", click: () => mainWindow?.webContents.executeJavaScript("nav('doctor')") },
+        { label: "Sessions", click: () => mainWindow?.webContents.executeJavaScript("nav('sessions')") },
+      ]
+    },
+    { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }, ...(isMac ? [{ type: "separator" }, { role: "front" }] : [{ role: "close" }])] },
+    {
+      label: "Help",
+      submenu: [
+        { label: "GitHub", click: () => shell.openExternal("https://github.com/sueun-dev/open-seed") },
+        { type: "separator" },
+        { label: "About", click: () => dialog.showMessageBox(mainWindow, { type: "info", title: "Open Seed", message: "Open Seed", detail: "Autonomous AGI Coding Engine\n49 subsystems | 40 neural roles | Prometheus Engine" }) }
+      ]
+    }
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
-  // Use spawn (not fork) for better compatibility with Electron's node
-  serverProcess = cpSpawn(process.execPath, [serverPath, "--port", String(PORT), "--cwd", CWD], {
+function openWorkspace() {
+  const result = dialog.showOpenDialogSync(mainWindow, { properties: ["openDirectory"], title: "Open Project" });
+  if (result?.[0]) {
+    if (serverProcess) serverProcess.kill("SIGTERM");
+    setTimeout(() => startServer(result[0]), 500);
+  }
+}
+
+function startServer(cwd) {
+  const { spawn } = require("child_process");
+  serverProcess = spawn(process.execPath, [path.join(__dirname, "server.js"), "--port", String(PORT), "--cwd", cwd || CWD], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env }
   });
-
   serverProcess.stdout?.on("data", (data) => {
-    const text = data.toString();
-    console.log("[server]", text.trim());
-    if (text.includes("http://localhost")) {
-      createWindow();
-    }
+    if (data.toString().includes("http://localhost") && !mainWindow) createWindow();
   });
-
-  serverProcess.stderr?.on("data", (data) => {
-    console.error("[server]", data.toString().trim());
-  });
-
-  serverProcess.on("exit", (code) => {
-    if (code !== 0) console.error(`Server exited with code ${code}`);
-  });
-
-  // Fallback: create window after 3 seconds
-  setTimeout(() => {
-    if (!mainWindow) createWindow();
-  }, 3000);
+  serverProcess.stderr?.on("data", () => {});
+  serverProcess.on("exit", (code) => { if (code && code !== 0) console.error(`Server exited: ${code}`); });
+  setTimeout(() => { if (!mainWindow) createWindow(); }, 3000);
 }
 
 function createWindow() {
-  if (mainWindow) return;
-
+  if (mainWindow) { mainWindow.loadURL(`http://localhost:${PORT}`); return; }
+  const isMac = process.platform === "darwin";
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    width: 1440, height: 900, minWidth: 900, minHeight: 600,
     title: "Open Seed",
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 12, y: 10 },
-    backgroundColor: "#0a0a0a",
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true
-    },
+    titleBarStyle: isMac ? "hiddenInset" : "default",
+    trafficLightPosition: isMac ? { x: 12, y: 10 } : undefined,
+    backgroundColor: "#0d1117",
+    webPreferences: { nodeIntegration: false, contextIsolation: true, preload: path.join(__dirname, "preload.js") },
     show: false
   });
-
   mainWindow.loadURL(`http://localhost:${PORT}`);
-
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
-    mainWindow.focus();
-  });
-
-  // Open external links in browser
+  mainWindow.once("ready-to-show", () => { mainWindow.show(); mainWindow.focus(); });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: "deny" };
+    if (url.startsWith("http") && !url.includes("localhost")) { shell.openExternal(url); return { action: "deny" }; }
+    return { action: "allow" };
   });
-
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
+  mainWindow.on("closed", () => { mainWindow = null; });
+  mainWindow.webContents.on("did-finish-load", () => { mainWindow.setTitle(`Open Seed | ${CWD}`); });
 }
 
+app.setName("Open Seed");
 app.whenReady().then(() => {
+  buildMenu();
   startServer();
-
-  // Register global shortcuts
-  globalShortcut.register("CommandOrControl+Shift+A", () => {
-    mainWindow?.webContents.executeJavaScript("nav('chat')");
-  });
-
-  app.on("activate", () => {
-    if (!mainWindow) createWindow();
-  });
+  app.on("activate", () => { if (!mainWindow) createWindow(); });
 });
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
-
-app.on("before-quit", () => {
-  // Kill server process
-  if (serverProcess) {
-    serverProcess.kill("SIGTERM");
-  }
-});
+app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+app.on("before-quit", () => { if (serverProcess) serverProcess.kill("SIGTERM"); });
