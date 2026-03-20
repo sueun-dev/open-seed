@@ -15,15 +15,41 @@ ICON_PATH = os.path.join(APP_DIR, "icon.png")
 
 
 def set_dock_icon():
-    """Set the Dock icon on macOS using pyobjc."""
+    """Set the Dock icon and app name on macOS using pyobjc."""
     try:
-        from AppKit import NSApplication, NSImage
+        import ctypes
+        import ctypes.util
+        # Change the process name at the OS level
+        libc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("c"))
+        # Set argv[0] so Activity Monitor / Dock shows "Open Seed"
+        name = b"Open Seed"
+        try:
+            libc.setprogname(name)
+        except Exception:
+            pass
+
+        from AppKit import NSApplication, NSImage, NSRunningApplication, NSProcessInfo
+        from Foundation import NSBundle
+
         app = NSApplication.sharedApplication()
+
+        # Set icon
         icon = NSImage.alloc().initWithContentsOfFile_(ICON_PATH)
         if icon:
             app.setApplicationIconImage_(icon)
+
+        # Set process name
+        NSProcessInfo.processInfo().setValue_forKey_("Open Seed", "processName")
+
+        # Set bundle info
+        bundle = NSBundle.mainBundle()
+        info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+        if info:
+            info["CFBundleName"] = "Open Seed"
+            info["CFBundleDisplayName"] = "Open Seed"
+            info["CFBundleExecutable"] = "Open Seed"
     except Exception:
-        pass  # Non-critical
+        pass
 
 
 def start_server():
