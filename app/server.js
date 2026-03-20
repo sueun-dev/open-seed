@@ -440,6 +440,17 @@ const server = http.createServer(async (req, res) => {
       } catch { if (fs.existsSync(srcConfig)) fs.copyFileSync(srcConfig, dstConfig); }
     }
 
+    // Write AGENTS.md to guide the inner engine — especially for empty projects
+    const agentsMd = path.join(childCwd, "AGENTS.md");
+    if (!fs.existsSync(agentsMd)) {
+      const existingFilesForAgents = fs.readdirSync(childCwd).filter(f => !f.startsWith(".") && f !== "node_modules");
+      const isNew = existingFilesForAgents.length === 0;
+      const agentsContent = isNew
+        ? `# Project Context\nThis is a NEW empty project. The directory has NO source files yet.\nDo NOT try to read package.json or any source file — they don't exist.\nYour job is to CREATE files using the write tool.\nAlways create package.json first, then source files, then tests.\n`
+        : `# Project Context\nExisting project with files: ${existingFilesForAgents.slice(0, 30).join(", ")}\n`;
+      try { fs.writeFileSync(agentsMd, agentsContent, "utf8"); } catch {}
+    }
+
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -453,15 +464,19 @@ const server = http.createServer(async (req, res) => {
     let aborted = false;
     req.on("close", () => { aborted = true; });
 
-    // Assess complexity
+    // Assess complexity — detect empty/new project
+    const existingFiles = fs.readdirSync(childCwd).filter(f => !f.startsWith(".") && f !== "node_modules");
+    const isEmptyProject = existingFiles.length === 0;
     const words = task.split(/\s+/).length;
-    const isFullApp = /full.*app|complete.*project|entire.*system|from.*scratch/i.test(task);
-    const isSimple = /fix.*bug|rename|add.*comment|update.*version|change.*color/i.test(task);
-    const needsDebate = /architect|design|pattern|approach|strategy|tradeoff|choose|select|compare|migrate/i.test(task);
+    const isFullApp = /full.*app|complete.*project|entire.*system|from.*scratch|만들어|생성|구현|개발해|빌드/i.test(task) || isEmptyProject;
+    const isSimple = !isFullApp && /fix.*bug|rename|add.*comment|update.*version|change.*color/i.test(task);
+    const needsDebate = /architect|design|pattern|approach|strategy|tradeoff|choose|select|compare|migrate|아키텍처|설계/i.test(task);
     let complexity = "moderate";
     if (isSimple && words < 20) complexity = "simple";
     else if (isFullApp || words > 100) complexity = "massive";
     else if (words > 40) complexity = "complex";
+    // New project from scratch → at least complex
+    if (isEmptyProject && complexity === "moderate") complexity = "complex";
 
     // Generate dynamic plan
     const steps = [];
@@ -570,9 +585,16 @@ const server = http.createServer(async (req, res) => {
         sections.push(`## User Preferences\nPreferred tech: ${ctx.userProfile.techStack.join(", ")}`);
       }
 
+      // Project context — critical for LLM to know what exists
+      if (isEmptyProject) {
+        sections.push(`## Project State\nThis is a BRAND NEW empty project directory. No files exist yet. Do NOT try to read package.json or any other file — they will all fail. You must CREATE everything from scratch.`);
+      } else {
+        sections.push(`## Project State\nThis is an EXISTING project with ${existingFiles.length} files/folders: ${existingFiles.slice(0, 20).join(", ")}${existingFiles.length > 20 ? "..." : ""}`);
+      }
+
       // Scaffold instructions
       if (step.type === "build" || step.type === "design") {
-        if (ctx.allFiles.length === 0) {
+        if (isEmptyProject || ctx.allFiles.length === 0) {
           sections.push(`\nCRITICAL PROJECT STRUCTURE RULES:\n- Write files DIRECTLY in the current working directory.\n- MUST create: package.json (with "start" script), src/, tests/\n- Write EVERY file with COMPLETE content. No placeholders.\n- Runnable with: npm install && npm start`);
         } else {
           sections.push(`\nIMPORTANT:\n- You are working in the user's EXISTING workspace.\n- Create/modify files relative to the current directory.\n- If the user mentions a specific folder (e.g. "Test 폴더에"), create files inside that folder.\n- Do NOT create unnecessary wrapper directories.`);
@@ -583,15 +605,56 @@ const server = http.createServer(async (req, res) => {
     }
 
     function getStepInstructions(type) {
+      const isNew = isEmptyProject;
       const m = {
-        analyze: "Perform deep analysis: intent, requirements, risks, technology choices, complexity estimate.",
-        debate: "Multi-agent design debate. Present architecture positions with reasoning, risks, alternatives.",
-        design: "Detailed implementation plan: file structure, architecture, API design, component breakdown, data model.",
-        build: "IMPLEMENT EVERYTHING. Write ALL files with COMPLETE content. NO placeholders. Use write tool for every file. DO NOT STOP until done.",
-        verify: "Run ALL checks: type-check, lint, tests, build. Report ALL errors with file paths and line numbers. Do NOT fix — just report.",
-        fix: "Fix ALL reported errors. Read each file, find root cause, apply minimal fix, verify the fix.",
-        improve: "Security audit, performance optimization, add missing tests, documentation. Only improve what exists.",
-        review: "Final quality review: correctness, completeness, security, performance, code quality, testing. Verdict: pass or fail.",
+        analyze: isNew
+          ? `This is a NEW PROJECT in an EMPTY directory. Do NOT try to read package.json or existing files — they don't exist yet.
+Your job:
+1. Analyze the user's request and determine EXACTLY what needs to be built
+2. List the required technologies, frameworks, and libraries
+3. Identify the core features and requirements
+4. Output a clear technical specification with:
+   - Technology stack decision (with reasoning)
+   - Feature list (prioritized)
+   - Architecture approach (monolith/microservice, client/server, etc.)
+   - File structure plan
+DO NOT create any files. DO NOT try to read non-existent files. Just ANALYZE and OUTPUT your findings as text.`
+          : "Perform deep analysis of the existing codebase: intent, requirements, risks, technology choices, complexity estimate. Read key files to understand the current state.",
+        debate: "Multi-agent design debate. Present architecture positions with reasoning, risks, alternatives. Consider scalability, maintainability, and performance tradeoffs.",
+        design: isNew
+          ? `Based on the analysis from the previous step, create a DETAILED implementation plan.
+Output a clear design document with:
+1. EXACT file structure (every file path)
+2. Architecture diagram (described in text)
+3. API endpoints (if any)
+4. Data models / schemas
+5. Component breakdown with responsibilities
+6. Dependencies list (npm packages needed)
+7. Implementation order (which files to create first)
+DO NOT create any files yet. Just DESIGN and OUTPUT the plan as text.`
+          : "Detailed implementation plan: file structure, architecture, API design, component breakdown, data model. Based on the analysis of the existing code.",
+        build: isNew
+          ? `IMPLEMENT THE ENTIRE PROJECT from scratch based on the design from previous steps.
+CRITICAL RULES:
+- Use the WRITE tool to create EVERY file with COMPLETE, WORKING content
+- NO placeholders, NO "TODO", NO "..." — every file must be COMPLETE
+- Create package.json FIRST with all dependencies and a "start" script
+- Create ALL source files, config files, and at least basic tests
+- The project must be RUNNABLE with: npm install && npm start
+- Write EVERY SINGLE LINE of code — do not skip anything
+- If it's a web app, include HTML/CSS/JS. If it has a server, include the server code.
+DO NOT STOP until every file from the design plan is created.`
+          : "IMPLEMENT all changes. Write ALL modified files with COMPLETE content. NO placeholders. Use write tool for every file. DO NOT STOP until done.",
+        verify: "Run ALL checks: type-check, lint, tests, build using the bash tool. Report ALL errors with file paths and line numbers. Do NOT fix — just report. If no test/build scripts exist, try: npm install && npm run build (or npm start --dry-run).",
+        fix: "Fix ALL reported errors. Read each file mentioned in errors, find root cause, apply minimal targeted fix using write tool, then verify the fix by running the failing command again.",
+        improve: "Security audit, performance optimization, add missing tests, documentation. Only improve what exists — do not rewrite from scratch.",
+        review: `Final quality review. Read the key source files and check:
+1. Correctness: Does the code match the original task requirements?
+2. Completeness: Are all features implemented? Any missing files?
+3. Code quality: Clean code, no dead code, proper error handling?
+4. Security: No obvious vulnerabilities?
+5. Runnability: Can it actually start with npm install && npm start?
+Output verdict: PASS or FAIL with specific reasons.`,
       };
       return m[type] || "";
     }
