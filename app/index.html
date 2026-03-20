@@ -294,7 +294,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
   <div class="main-area">
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
-      <div class="sb-title"><span id="sbLabel">Explorer</span><div class="btns"><button onclick="cycleSortMode()" title="Sort" id="sortBtn">A↓</button><button onclick="collapseAll()" title="Collapse All">⊟</button><button onclick="promptNewFile()" title="New File">＋</button><button onclick="promptNewFolder()" title="New Folder">📁</button><button onclick="loadFiles()">↻</button></div></div>
+      <div class="sb-title"><span id="sbLabel">Explorer</span><div class="btns"><button onclick="cycleSortMode()" title="Sort" id="sortBtn">A↓</button><button onclick="collapseAll()" title="Collapse All">⊟</button><button onclick="promptNewFile()" title="New File">＋</button><button onclick="promptNewFolder()" title="New Folder">📁</button><button onclick="forceReloadFiles()">↻</button></div></div>
       <div id="explorerFilter" style="padding:4px 8px;display:none"><input id="filterInput" type="text" placeholder="Filter files..." style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--fg);font-family:var(--font);font-size:12px;outline:none" oninput="filterTree(this.value)"></div>
       <div id="openEditors" style="display:none;border-bottom:1px solid var(--border);padding:4px 0">
         <div class="sb-title" style="padding:4px 16px 2px;margin:0;font-size:10px;cursor:pointer" onclick="document.getElementById('openEditorsList').style.display=document.getElementById('openEditorsList').style.display==='none'?'':'none'"><span>OPEN EDITORS</span></div>
@@ -1205,7 +1205,7 @@ function collapseAll(){
     const dp=d.dataset.dirpath;
     if(dp)_collapsedDirs.add(dp);
   });
-  loadFiles();
+  forceReloadFiles();
 }
 
 // ── File Filter (type to search) ──
@@ -1263,7 +1263,7 @@ function startRename(el,filePath,isDir){
       const newPath=dir?dir+'/'+newName:newName;
       await fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:filePath,to:newPath})});
       const t=T.find(x=>x.p===filePath);if(t)t.p=newPath;
-      loadFiles();renderTabs();
+      forceReloadFiles();renderTabs();
     }else{el.innerHTML=origHTML;}
   };
   input.onblur=finish;
@@ -1296,7 +1296,7 @@ function setupDrop(el,dirPath){
     if(newPath===_dragPath)return;
     await fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:_dragPath,to:newPath})});
     const t=T.find(x=>x.p===_dragPath);if(t)t.p=newPath;
-    _dragPath=null;loadFiles();renderTabs();
+    _dragPath=null;forceReloadFiles();renderTabs();
   };
 }
 
@@ -1448,6 +1448,13 @@ let _gitStatusTimer=null;
 function debouncedLoadFiles(delayMs){
   if(_loadFilesTimer)clearTimeout(_loadFilesTimer);
   _loadFilesTimer=setTimeout(()=>{_loadFilesTimer=null;loadFiles();},delayMs||200);
+}
+
+/** Force reload — invalidates cache so next loadFiles() always re-renders */
+function forceReloadFiles(){
+  _lastFileHash='';
+  _lastGitHash='';
+  return loadFiles();
 }
 
 // Poll: git status every 15s, files every 30s (much less aggressive)
@@ -1776,8 +1783,8 @@ function showWelcome(){const z=document.getElementById('edZone');z.querySelector
 async function saveActive(){if(!AT||!AT.d)return;const r=await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:AT.p,content:AT.c})});if((await r.json()).ok){AT.o=AT.c;AT.d=false;renderTabs();setSB('Saved '+AT.p)}}
 
 /* ═══ FILE OPS ═══ */
-async function promptNewFile(){const p=prompt('New file:');if(!p)return;await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p,content:''})});loadFiles();setTimeout(()=>openTab(p),200)}
-async function promptNewFolder(){const p=prompt('New folder:');if(!p)return;await fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});loadFiles()}
+async function promptNewFile(){const p=prompt('New file:');if(!p)return;await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p,content:''})});forceReloadFiles();setTimeout(()=>openTab(p),200)}
+async function promptNewFolder(){const p=prompt('New folder:');if(!p)return;await fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});forceReloadFiles()}
 // Clipboard for copy/cut/paste
 let _clipboard={path:null,op:null}; // op: 'copy'|'cut'
 
@@ -1790,10 +1797,10 @@ function ctxMenu(e,p,type){
   const items=[];
 
   if(type==='dir'){
-    items.push(['New File...',()=>{const n=prompt('File name:');if(n)fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n,content:''})}).then(()=>{loadFiles();setTimeout(()=>openTab(p+'/'+n),200)})},'']);
-    items.push(['New Folder...',()=>{const n=prompt('Folder name:');if(n)fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n})}).then(loadFiles)},'']);
+    items.push(['New File...',()=>{const n=prompt('File name:');if(n)fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n,content:''})}).then(()=>{forceReloadFiles();setTimeout(()=>openTab(p+'/'+n),200)})},'']);
+    items.push(['New Folder...',()=>{const n=prompt('Folder name:');if(n)fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n})}).then(()=>forceReloadFiles())},'']);
     items.push(['---']);
-    items.push(['Rename...',()=>{const el=document.querySelector(`.fi.dir[data-dirpath="${p}"]`);if(el)startRename(el,p,true);else{const n=prompt('Rename:',p.split('/').pop());if(n){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(loadFiles)}}},'F2']);
+    items.push(['Rename...',()=>{const el=document.querySelector(`.fi.dir[data-dirpath="${p}"]`);if(el)startRename(el,p,true);else{const n=prompt('Rename:',p.split('/').pop());if(n){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(()=>forceReloadFiles())}}},'F2']);
     items.push(['---']);
     items.push(['Cut',()=>{_clipboard={path:p,op:'cut'}},'Cmd+X']);
     items.push(['Copy',()=>{_clipboard={path:p,op:'copy'}},'Cmd+C']);
@@ -1805,12 +1812,12 @@ function ctxMenu(e,p,type){
     items.push(['Reveal in Finder',()=>{fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'open "'+p+'"'})})},'']);
     items.push(['Open in Terminal',()=>{document.getElementById('tIn').value='cd '+p;runCmd()},'']);
     items.push(['---']);
-    items.push(['Delete',()=>{if(confirm('Delete folder "'+p.split('/').pop()+'" and all contents?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(loadFiles)},'']);
+    items.push(['Delete',()=>{if(confirm('Delete folder "'+p.split('/').pop()+'" and all contents?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>forceReloadFiles())},'']);
   } else {
     items.push(['Open',()=>openTab(p),'Enter']);
     items.push(['Open to the Side',()=>{openTab(p)},'Cmd+Enter']);
     items.push(['---']);
-    items.push(['Rename...',()=>{const el=document.querySelector(`.fi[data-filepath="${p}"]`);if(el)startRename(el,p,false);else{const n=prompt('Rename:',p.split('/').pop());if(n&&n!==p.split('/').pop()){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(()=>{const t=T.find(x=>x.p===p);if(t)t.p=np;loadFiles();renderTabs()})}}},'F2']);
+    items.push(['Rename...',()=>{const el=document.querySelector(`.fi[data-filepath="${p}"]`);if(el)startRename(el,p,false);else{const n=prompt('Rename:',p.split('/').pop());if(n&&n!==p.split('/').pop()){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(()=>{const t=T.find(x=>x.p===p);if(t)t.p=np;forceReloadFiles();renderTabs()})}}},'F2']);
     items.push(['---']);
     items.push(['Cut',()=>{_clipboard={path:p,op:'cut'}},'Cmd+X']);
     items.push(['Copy',()=>{_clipboard={path:p,op:'copy'}},'Cmd+C']);
@@ -1825,7 +1832,7 @@ function ctxMenu(e,p,type){
     }
     items.push(['Reveal in Finder',()=>{fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'open -R "'+p+'"'})})},'']);
     items.push(['---']);
-    items.push(['Delete',()=>{if(confirm('Delete "'+p.split('/').pop()+'"?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>{closeTab(p);loadFiles()})},'Del']);
+    items.push(['Delete',()=>{if(confirm('Delete "'+p.split('/').pop()+'"?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>{closeTab(p);forceReloadFiles()})},'Del']);
   }
 
   for(const item of items){
@@ -1858,7 +1865,7 @@ async function pasteFile(targetDir){
       await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:newPath,content:data.content||''})});
     }catch(err){showDropNotification('Copy failed: '+err.message,true);}
   }
-  loadFiles();renderTabs();
+  forceReloadFiles();renderTabs();
 }
 
 // Compare two files (diff view)
@@ -1917,7 +1924,7 @@ document.addEventListener('keydown',e=>{
     e.preventDefault();
     const paths=[..._selected];
     if(confirm('Delete '+paths.length+' item(s)?')){
-      Promise.all(paths.map(p=>fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>closeTab(p)))).then(()=>{_selected.clear();loadFiles()});
+      Promise.all(paths.map(p=>fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>closeTab(p)))).then(()=>{_selected.clear();forceReloadFiles()});
     }
   }
   // F2: Rename focused file
@@ -1969,7 +1976,7 @@ document.addEventListener('keydown',e=>{
 /* ═══ TERMINAL ═══ */
 const TH=[];let THI=-1;
 function toggleTerm(){document.getElementById('termP').classList.toggle('shut')}
-async function runCmd(){const i=document.getElementById('tIn');const c=i.value.trim();if(!c)return;i.value='';TH.unshift(c);THI=-1;const o=document.getElementById('tOut');o.innerHTML+='<div style="color:var(--green)">$ '+esc(c)+'</div>';document.getElementById('tSt').textContent='Running...';document.getElementById('tSt').style.color='var(--accent)';try{const r=await fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:c})});const rd=r.body.getReader();const dc=new TextDecoder();let buf='';while(true){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';for(const l of lines){if(!l.startsWith('data: '))continue;const d=l.slice(6);if(d==='[DONE]')break;try{const ev=JSON.parse(d);if(ev.type==='stdout')o.innerHTML+='<span>'+esc(ev.text)+'</span>';else if(ev.type==='stderr')o.innerHTML+='<span style="color:var(--red)">'+esc(ev.text)+'</span>';else if(ev.type==='exit'){const code=parseInt(ev.text);o.innerHTML+='<div style="color:'+(code===0?'var(--green)':'var(--red)')+';font-size:10px">exit '+ev.text+'</div>'}o.scrollTop=o.scrollHeight}catch{}}}}catch(e){o.innerHTML+='<div style="color:var(--red)">'+esc(e.message)+'</div>'}document.getElementById('tSt').textContent='Ready';document.getElementById('tSt').style.color='var(--fg3)';loadFiles()}
+async function runCmd(){const i=document.getElementById('tIn');const c=i.value.trim();if(!c)return;i.value='';TH.unshift(c);THI=-1;const o=document.getElementById('tOut');o.innerHTML+='<div style="color:var(--green)">$ '+esc(c)+'</div>';document.getElementById('tSt').textContent='Running...';document.getElementById('tSt').style.color='var(--accent)';try{const r=await fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:c})});const rd=r.body.getReader();const dc=new TextDecoder();let buf='';while(true){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';for(const l of lines){if(!l.startsWith('data: '))continue;const d=l.slice(6);if(d==='[DONE]')break;try{const ev=JSON.parse(d);if(ev.type==='stdout')o.innerHTML+='<span>'+esc(ev.text)+'</span>';else if(ev.type==='stderr')o.innerHTML+='<span style="color:var(--red)">'+esc(ev.text)+'</span>';else if(ev.type==='exit'){const code=parseInt(ev.text);o.innerHTML+='<div style="color:'+(code===0?'var(--green)':'var(--red)')+';font-size:10px">exit '+ev.text+'</div>'}o.scrollTop=o.scrollHeight}catch{}}}}catch(e){o.innerHTML+='<div style="color:var(--red)">'+esc(e.message)+'</div>'}document.getElementById('tSt').textContent='Ready';document.getElementById('tSt').style.color='var(--fg3)';forceReloadFiles()}
 setTimeout(()=>{const ti=document.getElementById('tIn');if(ti){ti.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();runCmd()}if(e.key==='ArrowUp'){e.preventDefault();if(THI<TH.length-1){THI++;ti.value=TH[THI]}}if(e.key==='ArrowDown'){e.preventDefault();if(THI>0){THI--;ti.value=TH[THI]}else{THI=-1;ti.value=''}}})}},100);
 
 /* ═══ CHAT ═══ */
@@ -2368,7 +2375,7 @@ async function startAgiV2(){
   AGI_PROJECT_DIR=null;
   document.getElementById('agiStartBtn').style.display='';
   document.getElementById('agiStopBtn').style.display='none';
-  loadFiles();
+  forceReloadFiles();
 }
 
 // Legacy compat
@@ -2517,7 +2524,7 @@ async function processAgiStream(response){
   }
   return fullOutput;
 }
-async function send(){const i=document.getElementById('chIn');const t=i.value.trim();if(!t||R)return;i.value='';i.style.height='auto';const bd=document.getElementById('chBody');bd.innerHTML+='<div class="ch-msg user"><div class="bbl">'+esc(t)+'</div></div>';const ag=document.createElement('div');ag.className='ch-msg agent';ag.innerHTML='<div class="tag">open seed</div><div class="think"><div class="ds"><i></i><i></i><i></i></div>Thinking...</div><div class="bd"></div>';bd.appendChild(ag);bd.scrollTop=bd.scrollHeight;R=true;document.getElementById('goBtn').disabled=true;setSB('Thinking...',true);const b=ag.querySelector('.bd');const url=M==='ask'?'/api/ask':'/api/run/stream';const pl=M==='ask'?{question:t}:M==='agi'?{task:'[AGI MODE] '+t,mode:'team'}:{task:t,mode:'run'};let thk=true;try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pl)});const rd=r.body.getReader();const dc=new TextDecoder();let buf='';while(true){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';for(const l of lines){if(!l.startsWith('data: '))continue;const d=l.slice(6);if(d==='[DONE]')break;try{const ev=JSON.parse(d);if(thk&&ev.type!=='status'){ag.querySelector('.think')?.remove();thk=false}if(ev.type==='status'){if(ev.status==='started'){const th=ag.querySelector('.think');if(th)th.lastChild.textContent='Working...'}if(ev.status==='completed'){ag.querySelector('.think')?.remove();const ok=ev.exitCode===0;b.innerHTML+='<div class="done-badge '+(ok?'ok':'fail')+'">● '+(ok?'Completed':'Failed')+' (exit '+ev.exitCode+')</div>'}}else if(ev.type==='llm'){b.textContent+=ev.text||''}else if(ev.type==='event'){const cls=ev.eventType?.includes('tool')?'tool':ev.eventType?.includes('error')?'error':ev.eventType?.includes('review')?'review':'phase';b.innerHTML+='<details class="ev"><summary><span class="t '+cls+'">'+cls+'</span>'+esc(ev.eventType||'')+(ev.time?' <span style="color:var(--fg3)">'+ev.time+'</span>':'')+'</summary><pre>'+esc(typeof ev.payload==='object'?JSON.stringify(ev.payload,null,2):String(ev.payload||''))+'</pre></details>'}else if(ev.type==='stdout'&&ev.text&&!/^\d{2}:\d{2}:\d{2}/.test(ev.text)){b.innerHTML+='<div style="color:var(--fg2);border-left:2px solid var(--border2);padding-left:8px;margin:2px 0;font-family:var(--font);font-size:11px">'+esc(ev.text)+'</div>'}else if(ev.type==='stderr'){b.innerHTML+='<div style="color:var(--red);font-family:var(--font);font-size:11px">'+esc(ev.text)+'</div>'}bd.scrollTop=bd.scrollHeight}catch{}}}}catch(e){ag.querySelector('.think')?.remove();b.innerHTML+='<div style="color:var(--red)">Error: '+esc(e.message)+'</div>'}R=false;document.getElementById('goBtn').disabled=false;setSB('Ready');loadFiles()}
+async function send(){const i=document.getElementById('chIn');const t=i.value.trim();if(!t||R)return;i.value='';i.style.height='auto';const bd=document.getElementById('chBody');bd.innerHTML+='<div class="ch-msg user"><div class="bbl">'+esc(t)+'</div></div>';const ag=document.createElement('div');ag.className='ch-msg agent';ag.innerHTML='<div class="tag">open seed</div><div class="think"><div class="ds"><i></i><i></i><i></i></div>Thinking...</div><div class="bd"></div>';bd.appendChild(ag);bd.scrollTop=bd.scrollHeight;R=true;document.getElementById('goBtn').disabled=true;setSB('Thinking...',true);const b=ag.querySelector('.bd');const url=M==='ask'?'/api/ask':'/api/run/stream';const pl=M==='ask'?{question:t}:M==='agi'?{task:'[AGI MODE] '+t,mode:'team'}:{task:t,mode:'run'};let thk=true;try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pl)});const rd=r.body.getReader();const dc=new TextDecoder();let buf='';while(true){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';for(const l of lines){if(!l.startsWith('data: '))continue;const d=l.slice(6);if(d==='[DONE]')break;try{const ev=JSON.parse(d);if(thk&&ev.type!=='status'){ag.querySelector('.think')?.remove();thk=false}if(ev.type==='status'){if(ev.status==='started'){const th=ag.querySelector('.think');if(th)th.lastChild.textContent='Working...'}if(ev.status==='completed'){ag.querySelector('.think')?.remove();const ok=ev.exitCode===0;b.innerHTML+='<div class="done-badge '+(ok?'ok':'fail')+'">● '+(ok?'Completed':'Failed')+' (exit '+ev.exitCode+')</div>'}}else if(ev.type==='llm'){b.textContent+=ev.text||''}else if(ev.type==='event'){const cls=ev.eventType?.includes('tool')?'tool':ev.eventType?.includes('error')?'error':ev.eventType?.includes('review')?'review':'phase';b.innerHTML+='<details class="ev"><summary><span class="t '+cls+'">'+cls+'</span>'+esc(ev.eventType||'')+(ev.time?' <span style="color:var(--fg3)">'+ev.time+'</span>':'')+'</summary><pre>'+esc(typeof ev.payload==='object'?JSON.stringify(ev.payload,null,2):String(ev.payload||''))+'</pre></details>'}else if(ev.type==='stdout'&&ev.text&&!/^\d{2}:\d{2}:\d{2}/.test(ev.text)){b.innerHTML+='<div style="color:var(--fg2);border-left:2px solid var(--border2);padding-left:8px;margin:2px 0;font-family:var(--font);font-size:11px">'+esc(ev.text)+'</div>'}else if(ev.type==='stderr'){b.innerHTML+='<div style="color:var(--red);font-family:var(--font);font-size:11px">'+esc(ev.text)+'</div>'}bd.scrollTop=bd.scrollHeight}catch{}}}}catch(e){ag.querySelector('.think')?.remove();b.innerHTML+='<div style="color:var(--red)">Error: '+esc(e.message)+'</div>'}R=false;document.getElementById('goBtn').disabled=false;setSB('Ready');forceReloadFiles()}
 
 /* ═══ SETTINGS ═══ */
 const ALL_ROLES=['orchestrator','planner','executor','reviewer','researcher','repo-mapper','search-specialist','dependency-analyst',
