@@ -1,5 +1,5 @@
 const path = require("path");
-const { app, BrowserWindow, shell, Menu, dialog } = require("electron");
+const { app, BrowserWindow, shell, Menu } = require("electron");
 
 const cliArgs = process.argv.slice(2);
 const CWD = cliArgs.find((a, i) => cliArgs[i - 1] === "--cwd") || process.cwd();
