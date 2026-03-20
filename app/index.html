@@ -747,7 +747,7 @@ function renderTree(container,node,depth){
     d.style.paddingLeft=(4+depth*16)+'px';
     d.dataset.dirpath=dirPath;
     d.innerHTML='<span class="arrow">▶</span><span class="ic" style="color:#e2b55a">📁</span><span>'+esc(dn)+'</span>';
-    d.onclick=(e)=>{e.stopPropagation();toggleDir(d,dirPath,child,depth)};
+    d.onclick=(e)=>{e.stopPropagation();if(e.altKey){recursiveCollapse(dirPath);}else{toggleDir(d,dirPath,child,depth);}};
     d.oncontextmenu=e=>{e.preventDefault();ctxMenu(e,dirPath,'dir')};
     container.appendChild(d);
     const cc=document.createElement('div');
@@ -796,6 +796,53 @@ function toggleDir(dirEl,dirPath,childNode,depth){
       childContainer.innerHTML='';
     },{once:true});
   }
+}
+
+// ── Alt+Click: Recursive Collapse (VSCode) ──
+function recursiveCollapse(dirPath){
+  // Collapse this dir and ALL nested dirs
+  document.querySelectorAll('.dir-children').forEach(dc=>{
+    const dp=dc.dataset.dirpath;
+    if(dp&&(dp===dirPath||dp.startsWith(dirPath+'/'))){
+      _collapsedDirs.add(dp);
+      dc.style.display='none';
+      dc.innerHTML='';
+      const dirEl=dc.previousElementSibling;
+      if(dirEl&&dirEl.classList.contains('dir'))dirEl.classList.remove('open');
+    }
+  });
+}
+
+// ── File Nesting (VSCode: package-lock under package.json) ──
+const _nestingPatterns={
+  'package.json':['package-lock.json','yarn.lock','pnpm-lock.yaml','.npmrc'],
+  'tsconfig.json':['tsconfig.*.json'],
+  '.gitignore':['.gitattributes','.editorconfig','.prettierrc','.eslintrc','.eslintrc.json','.eslintrc.js'],
+  'vite.config.ts':['vite.config.js','vitest.config.ts','vitest.config.js'],
+  'README.md':['CHANGELOG.md','CONTRIBUTING.md','LICENSE','LICENSE.md'],
+};
+
+// ── Auto-Reveal Active File ──
+function revealFileInExplorer(filePath){
+  if(!filePath)return;
+  // Expand all parent directories
+  const parts=filePath.split('/');
+  let current='';
+  for(let i=0;i<parts.length-1;i++){
+    current=current?current+'/'+parts[i]:parts[i];
+    _collapsedDirs.delete(current);
+  }
+  // Reload and scroll to file
+  loadFiles().then(()=>{
+    setTimeout(()=>{
+      const el=document.querySelector(`.fi[data-filepath="${filePath}"]`);
+      if(el){
+        document.querySelectorAll('.fi.on').forEach(x=>x.classList.remove('on'));
+        el.classList.add('on');
+        el.scrollIntoView({block:'center',behavior:'smooth'});
+      }
+    },100);
+  });
 }
 
 // ── Git Status ──
@@ -1117,7 +1164,7 @@ function setupExternalDropZone(el,targetDir){
 }
 
 /* ═══ TABS ═══ */
-function openTab(p){let t=T.find(x=>x.p===p);if(!t){t={p,c:'',d:false,o:''};T.push(t)}AT=t;fetch('/api/file?path='+encodeURIComponent(p)).then(r=>r.json()).then(data=>{t.c=data.content;t.o=data.content;t.d=false;renderTabs();renderEd();document.getElementById('sbF').textContent=p;updateBreadcrumb(p);renderOpenEditors()})}
+function openTab(p){if(p.startsWith('__diff__/')){/* diff pseudo-tab */let t=T.find(x=>x.p===p);if(t){AT=t;renderTabs();renderEd();}return;}let t=T.find(x=>x.p===p);if(!t){t={p,c:'',d:false,o:''};T.push(t)}AT=t;fetch('/api/file?path='+encodeURIComponent(p)).then(r=>r.json()).then(data=>{t.c=data.content;t.o=data.content;t.d=false;renderTabs();renderEd();document.getElementById('sbF').textContent=p;updateBreadcrumb(p);renderOpenEditors();/* Auto-reveal in explorer */const el=document.querySelector(`.fi[data-filepath="${p}"]`);if(el){document.querySelectorAll('.fi.on').forEach(x=>x.classList.remove('on'));el.classList.add('on');el.scrollIntoView({block:'nearest'})}})}
 function renderTabs(){const bar=document.getElementById('tabs');bar.innerHTML='';for(const t of T){const el=document.createElement('div');el.className='tab'+(t===AT?' on':'')+(t.d?' dirty':'');el.innerHTML='<span>'+esc(t.p.split('/').pop())+'</span><span class="x" onclick="event.stopPropagation();closeTab(\''+t.p+'\')">×</span>';el.onclick=()=>{AT=t;renderTabs();renderEd()};bar.appendChild(el)}}
 function closeTab(p){const i=T.findIndex(t=>t.p===p);if(i<0)return;if(T[i].d&&!confirm('Discard?'))return;T.splice(i,1);if(AT?.p===p)AT=T[Math.min(i,T.length-1)]||null;renderTabs();AT?renderEd():showWelcome()}
 
@@ -1133,7 +1180,193 @@ async function saveActive(){if(!AT||!AT.d)return;const r=await fetch('/api/file'
 /* ═══ FILE OPS ═══ */
 async function promptNewFile(){const p=prompt('New file:');if(!p)return;await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p,content:''})});loadFiles();setTimeout(()=>openTab(p),200)}
 async function promptNewFolder(){const p=prompt('New folder:');if(!p)return;await fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});loadFiles()}
-function ctxMenu(e,p,type){document.querySelectorAll('.ctx').forEach(m=>m.remove());const m=document.createElement('div');m.className='ctx';m.style.left=e.clientX+'px';m.style.top=e.clientY+'px';const items=type==='dir'?[['New file...',()=>{const n=prompt('Name:');if(n)fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n,content:''})}).then(()=>{loadFiles();setTimeout(()=>openTab(p+'/'+n),200)})}],['Delete',()=>{if(confirm('Delete?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(loadFiles)}]]:[['Open',()=>openTab(p)],['Rename',()=>{const n=prompt('Rename:',p);if(n&&n!==p)fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:n})}).then(()=>{const t=T.find(x=>x.p===p);if(t)t.p=n;loadFiles();renderTabs()})}],['---'],['Delete',()=>{if(confirm('Delete?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>{closeTab(p);loadFiles()})}]];for(const[l,fn]of items){if(l==='---'){const s=document.createElement('div');s.className='hr';m.appendChild(s);continue}const d=document.createElement('div');d.textContent=l;d.onclick=()=>{m.remove();fn()};m.appendChild(d)}document.body.appendChild(m);setTimeout(()=>document.addEventListener('click',()=>m.remove(),{once:true}),10)}
+// Clipboard for copy/cut/paste
+let _clipboard={path:null,op:null}; // op: 'copy'|'cut'
+
+function ctxMenu(e,p,type){
+  document.querySelectorAll('.ctx').forEach(m=>m.remove());
+  const m=document.createElement('div');m.className='ctx';
+  m.style.left=Math.min(e.clientX,window.innerWidth-200)+'px';
+  m.style.top=Math.min(e.clientY,window.innerHeight-300)+'px';
+
+  const items=[];
+
+  if(type==='dir'){
+    items.push(['New File...',()=>{const n=prompt('File name:');if(n)fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n,content:''})}).then(()=>{loadFiles();setTimeout(()=>openTab(p+'/'+n),200)})},'']);
+    items.push(['New Folder...',()=>{const n=prompt('Folder name:');if(n)fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+'/'+n})}).then(loadFiles)},'']);
+    items.push(['---']);
+    items.push(['Rename...',()=>{const el=document.querySelector(`.fi.dir[data-dirpath="${p}"]`);if(el)startRename(el,p,true);else{const n=prompt('Rename:',p.split('/').pop());if(n){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(loadFiles)}}},'F2']);
+    items.push(['---']);
+    items.push(['Cut',()=>{_clipboard={path:p,op:'cut'}},'Cmd+X']);
+    items.push(['Copy',()=>{_clipboard={path:p,op:'copy'}},'Cmd+C']);
+    if(_clipboard.path)items.push(['Paste',()=>pasteFile(p),'Cmd+V']);
+    items.push(['---']);
+    items.push(['Copy Path',()=>{navigator.clipboard.writeText(p);showDropNotification('Copied: '+p,false)},'Cmd+Shift+C']);
+    items.push(['Copy Relative Path',()=>{navigator.clipboard.writeText(p);showDropNotification('Copied: '+p,false)},'']);
+    items.push(['---']);
+    items.push(['Reveal in Finder',()=>{fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'open "'+p+'"'})})},'']);
+    items.push(['Open in Terminal',()=>{document.getElementById('tIn').value='cd '+p;runCmd()},'']);
+    items.push(['---']);
+    items.push(['Delete',()=>{if(confirm('Delete folder "'+p.split('/').pop()+'" and all contents?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(loadFiles)},'']);
+  } else {
+    items.push(['Open',()=>openTab(p),'Enter']);
+    items.push(['Open to the Side',()=>{openTab(p)},'Cmd+Enter']);
+    items.push(['---']);
+    items.push(['Rename...',()=>{const el=document.querySelector(`.fi[data-filepath="${p}"]`);if(el)startRename(el,p,false);else{const n=prompt('Rename:',p.split('/').pop());if(n&&n!==p.split('/').pop()){const dir=p.split('/').slice(0,-1).join('/');const np=dir?dir+'/'+n:n;fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:p,to:np})}).then(()=>{const t=T.find(x=>x.p===p);if(t)t.p=np;loadFiles();renderTabs()})}}},'F2']);
+    items.push(['---']);
+    items.push(['Cut',()=>{_clipboard={path:p,op:'cut'}},'Cmd+X']);
+    items.push(['Copy',()=>{_clipboard={path:p,op:'copy'}},'Cmd+C']);
+    items.push(['---']);
+    items.push(['Copy Path',()=>{navigator.clipboard.writeText(p);showDropNotification('Copied: '+p,false)},'Cmd+Shift+C']);
+    items.push(['Copy Relative Path',()=>{navigator.clipboard.writeText(p);showDropNotification('Copied: '+p,false)},'']);
+    items.push(['---']);
+    // Compare with selected (if 2 files selected)
+    if(_selected.size===1){
+      const other=[..._selected][0];
+      if(other!==p)items.push(['Compare with Selected',()=>compareFiles(other,p),'']);
+    }
+    items.push(['Reveal in Finder',()=>{fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'open -R "'+p+'"'})})},'']);
+    items.push(['---']);
+    items.push(['Delete',()=>{if(confirm('Delete "'+p.split('/').pop()+'"?'))fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>{closeTab(p);loadFiles()})},'Del']);
+  }
+
+  for(const item of items){
+    if(item[0]==='---'){const s=document.createElement('div');s.className='hr';m.appendChild(s);continue;}
+    const [label,fn,shortcut]=item;
+    const d=document.createElement('div');
+    d.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:16px';
+    d.innerHTML='<span>'+esc(label)+'</span>'+(shortcut?'<span style="color:var(--fg3);font-size:10px;opacity:.6">'+esc(shortcut)+'</span>':'');
+    d.onclick=()=>{m.remove();fn()};
+    m.appendChild(d);
+  }
+  document.body.appendChild(m);
+  setTimeout(()=>document.addEventListener('click',()=>m.remove(),{once:true}),10);
+}
+
+// Copy/Cut/Paste file operations
+async function pasteFile(targetDir){
+  if(!_clipboard.path)return;
+  const name=_clipboard.path.split('/').pop();
+  const newPath=targetDir?targetDir+'/'+name:name;
+  if(_clipboard.op==='cut'){
+    await fetch('/api/file/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:_clipboard.path,to:newPath})});
+    const t=T.find(x=>x.p===_clipboard.path);if(t)t.p=newPath;
+    _clipboard={path:null,op:null};
+  }else{
+    // Copy: read then write
+    try{
+      const r=await fetch('/api/file?path='+encodeURIComponent(_clipboard.path));
+      const data=await r.json();
+      await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:newPath,content:data.content||''})});
+    }catch(err){showDropNotification('Copy failed: '+err.message,true);}
+  }
+  loadFiles();renderTabs();
+}
+
+// Compare two files (diff view)
+async function compareFiles(pathA,pathB){
+  try{
+    const [a,b]=await Promise.all([
+      fetch('/api/file?path='+encodeURIComponent(pathA)).then(r=>r.json()),
+      fetch('/api/file?path='+encodeURIComponent(pathB)).then(r=>r.json())
+    ]);
+    // Open both in tabs and show diff
+    openTab(pathA);
+    showDropNotification('Compare: '+pathA.split('/').pop()+' vs '+pathB.split('/').pop(),false);
+    // Simple diff display in a new "tab"
+    const diffContent='--- '+pathA+'\n+++ '+pathB+'\n\n'+simpleDiff(a.content||'',b.content||'');
+    const diffPath='__diff__/'+pathA.split('/').pop()+' ↔ '+pathB.split('/').pop();
+    let t=T.find(x=>x.p===diffPath);
+    if(!t){t={p:diffPath,c:diffContent,d:false,o:diffContent};T.push(t);}
+    else{t.c=diffContent;t.o=diffContent;}
+    AT=t;renderTabs();renderEd();
+  }catch(err){showDropNotification('Compare failed: '+err.message,true);}
+}
+
+function simpleDiff(a,b){
+  const linesA=a.split('\n'),linesB=b.split('\n');
+  const result=[];
+  const max=Math.max(linesA.length,linesB.length);
+  for(let i=0;i<max;i++){
+    const la=linesA[i],lb=linesB[i];
+    if(la===lb)result.push('  '+la);
+    else{
+      if(la!==undefined)result.push('- '+la);
+      if(lb!==undefined)result.push('+ '+lb);
+    }
+  }
+  return result.join('\n');
+}
+
+// Keyboard shortcuts for explorer
+document.addEventListener('keydown',e=>{
+  // Cmd+C: Copy selected file
+  if((e.metaKey||e.ctrlKey)&&e.key==='c'&&_selected.size>0&&!e.target.matches('input,textarea')){
+    const p=[..._selected][0];
+    _clipboard={path:p,op:'copy'};
+  }
+  // Cmd+X: Cut selected file
+  if((e.metaKey||e.ctrlKey)&&e.key==='x'&&_selected.size>0&&!e.target.matches('input,textarea')){
+    const p=[..._selected][0];
+    _clipboard={path:p,op:'cut'};
+  }
+  // Cmd+V: Paste file
+  if((e.metaKey||e.ctrlKey)&&e.key==='v'&&_clipboard.path&&!e.target.matches('input,textarea')){
+    pasteFile('');
+  }
+  // Delete/Backspace: delete selected
+  if((e.key==='Delete'||e.key==='Backspace')&&_selected.size>0&&!e.target.matches('input,textarea')){
+    e.preventDefault();
+    const paths=[..._selected];
+    if(confirm('Delete '+paths.length+' item(s)?')){
+      Promise.all(paths.map(p=>fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>closeTab(p)))).then(()=>{_selected.clear();loadFiles()});
+    }
+  }
+  // F2: Rename focused file
+  if(e.key==='F2'&&!e.target.matches('input,textarea')){
+    const focused=document.querySelector('.fi.on[data-filepath],.fi.selected[data-filepath]');
+    if(focused){
+      e.preventDefault();
+      const fp=focused.dataset.filepath;
+      startRename(focused,fp,focused.classList.contains('dir'));
+    }
+  }
+  // Arrow key navigation in explorer
+  if(!e.target.matches('input,textarea')&&(e.key==='ArrowUp'||e.key==='ArrowDown')&&document.getElementById('sidebar').contains(document.activeElement||document.querySelector('.fi.on'))){
+    e.preventDefault();
+    const allItems=[...document.querySelectorAll('#sbBody .fi:not([style*="display: none"])')];
+    if(allItems.length===0)return;
+    const current=document.querySelector('.fi.on')||allItems[0];
+    const idx=allItems.indexOf(current);
+    const next=e.key==='ArrowDown'?allItems[Math.min(idx+1,allItems.length-1)]:allItems[Math.max(idx-1,0)];
+    if(next){
+      document.querySelectorAll('.fi.on').forEach(x=>x.classList.remove('on'));
+      next.classList.add('on');
+      next.scrollIntoView({block:'nearest'});
+      // Auto-reveal: update breadcrumb
+      const fp=next.dataset?.filepath||next.dataset?.dirpath;
+      if(fp)updateBreadcrumb(fp);
+    }
+  }
+  // Enter: open focused file
+  if(e.key==='Enter'&&!e.target.matches('input,textarea')){
+    const focused=document.querySelector('.fi.on[data-filepath]');
+    if(focused){e.preventDefault();openTab(focused.dataset.filepath);}
+  }
+  // Space: toggle folder or preview file
+  if(e.key===' '&&!e.target.matches('input,textarea')){
+    const focused=document.querySelector('.fi.on');
+    if(focused){
+      e.preventDefault();
+      if(focused.classList.contains('dir')){
+        focused.click(); // toggle folder
+      }else{
+        const fp=focused.dataset?.filepath;
+        if(fp)openTab(fp);
+      }
+    }
+  }
+});
 
 /* ═══ TERMINAL ═══ */
 const TH=[];let THI=-1;
