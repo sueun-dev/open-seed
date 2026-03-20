@@ -731,13 +731,16 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── Raw File (binary — images, videos, PDFs served with correct MIME) ──
+  // Supports HTTP Range requests for video/audio streaming
   if (url.pathname === "/api/file/raw" && req.method === "GET") {
     const filePath = url.searchParams.get("path");
     if (!filePath) { res.writeHead(400); res.end("Missing path"); return; }
     const abs = require("node:path").resolve(CWD, filePath);
-    if (!safePath(filePath)) { res.writeHead(403); res.end("Forbidden"); return; }
+    const checked = safePath(filePath);
+    if (!checked) { res.writeHead(403); res.end("Forbidden"); return; }
     try {
       const stat = require("node:fs").statSync(abs);
+      if (!stat.isFile()) { res.writeHead(404); res.end("Not a file"); return; }
       const ext = require("node:path").extname(abs).toLowerCase();
       const mimeTypes = {
         ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -752,16 +755,46 @@ const server = http.createServer(async (req, res) => {
         ".zip": "application/zip", ".tar": "application/x-tar", ".gz": "application/gzip",
       };
       const contentType = mimeTypes[ext] || "application/octet-stream";
-      const content = require("node:fs").readFileSync(abs);
-      res.writeHead(200, {
-        "Content-Type": contentType,
-        "Content-Length": stat.size,
-        "Accept-Ranges": "bytes",
-        "Cache-Control": "private, max-age=60"
-      });
-      res.end(content);
+      const fileSize = stat.size;
+
+      // HTTP Range support (required for video/audio seeking)
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunkSize = end - start + 1;
+        const stream = require("node:fs").createReadStream(abs, { start, end });
+        res.writeHead(206, {
+          "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+          "Accept-Ranges": "bytes",
+          "Content-Length": chunkSize,
+          "Content-Type": contentType,
+        });
+        stream.pipe(res);
+      } else {
+        // Small files (<10MB): read into memory. Large files: stream.
+        if (fileSize < 10 * 1024 * 1024) {
+          const content = require("node:fs").readFileSync(abs);
+          res.writeHead(200, {
+            "Content-Type": contentType,
+            "Content-Length": fileSize,
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=60"
+          });
+          res.end(content);
+        } else {
+          res.writeHead(200, {
+            "Content-Type": contentType,
+            "Content-Length": fileSize,
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=60"
+          });
+          require("node:fs").createReadStream(abs).pipe(res);
+        }
+      }
     } catch (e) {
-      res.writeHead(404); res.end("Not found");
+      res.writeHead(404); res.end("Not found: " + e.message);
     }
     return;
   }
