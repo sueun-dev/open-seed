@@ -50,6 +50,8 @@ export interface ProviderResponse {
   provider: ProviderId;
   model: string;
   text: string;
+  /** Native tool calls returned by the provider (OpenAI function calling / Anthropic tool_use) */
+  toolCalls?: NativeToolCall[];
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
@@ -181,7 +183,17 @@ export type ToolName =
   | "repo_map"
   | "session_history"
   | "ast_grep"
-  | "web_search";
+  | "web_search"
+  // OMO additional tools
+  | "call_agent"
+  | "look_at"
+  | "interactive_bash"
+  | "background_output"
+  | "background_cancel"
+  | "task_create"
+  | "task_get"
+  | "task_list"
+  | "task_update";
 
 /**
  * Goose-inspired tool definition with full JSON schema.
@@ -417,6 +429,38 @@ export interface PromptTemplateConfig {
   overrides?: Record<string, string>;
 }
 
+/** OMO-style tmux configuration */
+export interface TmuxConfig {
+  enabled: boolean;
+  layout?: "main-vertical" | "tiled" | "even-horizontal";
+  mainPaneSize?: number;
+}
+
+/** OMO-style disable lists — everything ON by default, disable explicitly */
+export interface DisableLists {
+  hooks?: string[];
+  agents?: string[];
+  tools?: string[];
+  skills?: string[];
+  mcps?: string[];
+  commands?: string[];
+}
+
+/** Experimental features (opt-in) */
+export interface ExperimentalConfig {
+  taskSystem?: boolean;
+  preemptiveCompaction?: boolean;
+  safeHookCreation?: boolean;
+  dynamicContextPruning?: boolean;
+}
+
+/** Notification config */
+export interface NotificationConfig {
+  enabled: boolean;
+  /** Only notify for tasks longer than this (ms) */
+  minDurationMs?: number;
+}
+
 export interface AgentConfig {
   providers: Record<Exclude<ProviderId, "mock">, ProviderConfig>;
   routing: RoutingPolicy;
@@ -443,6 +487,18 @@ export interface AgentConfig {
   prompts: PromptTemplateConfig;
   /** Cline-inspired rules */
   rules: AgentRule[];
+  /** OMO-style tmux config */
+  tmux?: TmuxConfig;
+  /** OMO-style disable lists — everything ON by default */
+  disabled?: DisableLists;
+  /** Experimental features */
+  experimental?: ExperimentalConfig;
+  /** Desktop notification settings */
+  notification?: NotificationConfig;
+  /** Web search provider: exa | tavily */
+  websearchProvider?: string;
+  /** Background task concurrency per model */
+  backgroundConcurrency?: number;
 }
 
 // ─── Reviews ─────────────────────────────────────────────────────────────────
@@ -712,3 +768,34 @@ export type RoleArtifact =
   | ResearchArtifact
   | ReviewResult
   | SpecialistArtifact;
+
+// ─── One-Prompt-to-App (Full-Stack Orchestration) ────────────────────────────
+
+export type CreateMode = "interactive" | "auto" | "dry-run";
+
+export interface CreateOptions {
+  prompt: string;
+  mode: CreateMode;
+  /** Override project directory */
+  outputDir?: string;
+  /** Skip interactive questions (use all defaults) */
+  skipQuestions?: boolean;
+  /** Max retries per build phase */
+  maxRetries?: number;
+  /** Run quality gate at the end */
+  qualityGate?: boolean;
+}
+
+export interface CreateResult {
+  projectDir: string;
+  projectName: string;
+  success: boolean;
+  /** Total files created */
+  filesCreated: number;
+  /** Total build duration in ms */
+  durationMs: number;
+  /** Quality gate score (0-100) */
+  qualityScore: number;
+  /** Quality gate grade */
+  qualityGrade: "A" | "B" | "C" | "D" | "F";
+}

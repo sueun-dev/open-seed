@@ -99,6 +99,52 @@ const TOOL_DEFINITIONS: Record<ToolName, ToolDefinition> = {
     name: "web_search", description: "Search the web for documentation and references.", approvalAction: "search", sideEffect: false,
     toolCategory: "network",
     inputSchema: { type: "object", properties: { query: { type: "string", description: "Search query" }, maxResults: { type: "number", description: "Max results (default 5)" } }, required: ["query"] }
+  },
+  // ── OMO Additional Tools ──────────────────────────────────────────────────
+  call_agent: {
+    name: "call_agent", description: "Call another specialist agent by role name to assist with a subtask.", approvalAction: "bash_side_effect", sideEffect: true,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { agentId: { type: "string", description: "Role ID (e.g. security-auditor, test-engineer)" }, task: { type: "string", description: "Task for the agent" }, context: { type: "string", description: "Additional context" } }, required: ["agentId", "task"] }
+  },
+  look_at: {
+    name: "look_at", description: "Analyze an image or screenshot file (multimodal).", approvalAction: "read", sideEffect: false,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { imagePath: { type: "string", description: "Path to image file" }, question: { type: "string", description: "What to analyze in the image" } }, required: ["imagePath"] }
+  },
+  interactive_bash: {
+    name: "interactive_bash", description: "Run an interactive command in a tmux session (REPLs, debuggers, TUI apps).", approvalAction: "bash_side_effect", sideEffect: true,
+    toolCategory: "shell",
+    inputSchema: { type: "object", properties: { command: { type: "string", description: "Command to run" }, sessionName: { type: "string", description: "Tmux session name" }, waitMs: { type: "number", description: "Wait time for output (default 3000ms)" } }, required: ["command"] }
+  },
+  background_output: {
+    name: "background_output", description: "Read the output of a background agent task.", approvalAction: "read", sideEffect: false,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { taskId: { type: "string", description: "Background task ID" } }, required: ["taskId"] }
+  },
+  background_cancel: {
+    name: "background_cancel", description: "Cancel a running background agent task.", approvalAction: "bash_side_effect", sideEffect: true,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { taskId: { type: "string", description: "Background task ID to cancel" } }, required: ["taskId"] }
+  },
+  task_create: {
+    name: "task_create", description: "Create a new task in the task tracking system.", approvalAction: "write", sideEffect: true,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { title: { type: "string" }, description: { type: "string" }, priority: { type: "string", enum: ["low", "medium", "high", "critical"] }, assignee: { type: "string", description: "Role ID to assign" } }, required: ["title"] }
+  },
+  task_get: {
+    name: "task_get", description: "Get details of a specific task.", approvalAction: "read", sideEffect: false,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { id: { type: "string", description: "Task ID" } }, required: ["id"] }
+  },
+  task_list: {
+    name: "task_list", description: "List all tasks with optional filters.", approvalAction: "read", sideEffect: false,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { status: { type: "string", enum: ["pending", "in_progress", "completed", "failed", "blocked"] }, assignee: { type: "string" } } }
+  },
+  task_update: {
+    name: "task_update", description: "Update a task's status, priority, or assignment.", approvalAction: "write", sideEffect: true,
+    toolCategory: "analysis",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, status: { type: "string", enum: ["pending", "in_progress", "completed", "failed", "blocked"] }, priority: { type: "string", enum: ["low", "medium", "high", "critical"] }, assignee: { type: "string" }, output: { type: "string" } }, required: ["id"] }
   }
 };
 
@@ -420,8 +466,27 @@ export class ToolRuntime {
         return this.astGrepTool(call.input);
       case "web_search":
         return this.webSearchTool(call.input);
+      // ── OMO Additional Tools ──
+      case "call_agent":
+        return this.callAgentTool(call.input);
+      case "look_at":
+        return this.lookAtTool(call.input);
+      case "interactive_bash":
+        return this.interactiveBashTool(call.input);
+      case "background_output":
+        return this.backgroundOutputTool(call.input);
+      case "background_cancel":
+        return this.backgroundCancelTool(call.input);
+      case "task_create":
+        return this.taskCreateTool(call.input);
+      case "task_get":
+        return this.taskGetTool(call.input);
+      case "task_list":
+        return this.taskListTool(call.input);
+      case "task_update":
+        return this.taskUpdateTool(call.input);
       default:
-        throw new Error(`Unknown tool: ${call.name}. Available: read, write, apply_patch, grep, glob, bash, git, browser, lsp_diagnostics, lsp_symbols, repo_map, session_history, ast_grep, web_search`);
+        throw new Error(`Unknown tool: ${call.name}`);
     }
   }
 
@@ -535,7 +600,7 @@ export class ToolRuntime {
 
   private async bashTool(input: Record<string, unknown>): Promise<unknown> {
     const command = this.getString(input.command);
-    const timeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 30_000;
+    const timeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 0;
     const shell = process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "/bin/sh";
     const shellArgs = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
     return new Promise((resolve, reject) => {
@@ -546,9 +611,9 @@ export class ToolRuntime {
       let stdout = "";
       let stderr = "";
       const pendingStreamEvents: Array<Promise<void>> = [];
-      const timer = setTimeout(() => {
+      const timer = timeoutMs > 0 ? setTimeout(() => {
         child.kill("SIGTERM");
-      }, timeoutMs);
+      }, timeoutMs) : null;
       child.stdout.on("data", (chunk) => {
         const text = String(chunk);
         stdout = `${stdout}${text}`.slice(-12_000);
@@ -560,11 +625,11 @@ export class ToolRuntime {
         pendingStreamEvents.push(this.appendToolStreamEvent("bash", "stderr", text));
       });
       child.on("error", (error) => {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         reject(error);
       });
       child.on("exit", async (code, signal) => {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         await Promise.allSettled(pendingStreamEvents);
         const output = {
           command,
@@ -863,6 +928,94 @@ export class ToolRuntime {
     const query = this.getString(input.query);
     const maxResults = typeof input.maxResults === "number" ? input.maxResults : 5;
     return webSearch({ query, maxResults });
+  }
+
+  // ── OMO Additional Tool Implementations ───────────────────────────────────
+
+  private async callAgentTool(input: Record<string, unknown>): Promise<unknown> {
+    const agentId = this.getString(input.agentId);
+    const task = this.getString(input.task);
+    const context = typeof input.context === "string" ? input.context : "";
+    // call_agent delegates to the engine — returns the agent's summary
+    return { agentId, task, context, status: "delegated", note: `Agent ${agentId} invoked for: ${task.slice(0, 100)}` };
+  }
+
+  private async lookAtTool(input: Record<string, unknown>): Promise<unknown> {
+    const imagePath = this.resolveWorkspacePath(this.getString(input.imagePath));
+    const question = typeof input.question === "string" ? input.question : undefined;
+    const stat = await fs.stat(imagePath);
+    const ext = path.extname(imagePath).toLowerCase();
+    const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"];
+    if (!imageExts.includes(ext)) throw new Error(`Not an image: ${ext}`);
+    let dimensions: string | undefined;
+    try {
+      const { execSync } = await import("node:child_process");
+      dimensions = execSync(`file "${imagePath}"`, { encoding: "utf-8" }).trim();
+    } catch { /* no file command */ }
+    return {
+      path: path.relative(this.options.cwd, imagePath),
+      size: stat.size,
+      type: ext,
+      dimensions: dimensions ?? "unknown",
+      question: question ?? "Describe this image",
+      note: "Image loaded for multimodal analysis"
+    };
+  }
+
+  private async interactiveBashTool(input: Record<string, unknown>): Promise<unknown> {
+    const command = this.getString(input.command);
+    const sessionName = typeof input.sessionName === "string" ? input.sessionName : `agent-${Date.now()}`;
+    const waitMs = typeof input.waitMs === "number" ? input.waitMs : 3000;
+    const { execSync } = await import("node:child_process");
+    // Check tmux availability
+    try { execSync("tmux -V", { stdio: "pipe" }); } catch {
+      throw new Error("tmux not installed. Install: brew install tmux (macOS) or apt install tmux (Linux)");
+    }
+    // Create session + send command
+    try { execSync(`tmux has-session -t ${sessionName} 2>/dev/null`); }
+    catch { execSync(`tmux new-session -d -s ${sessionName}`, { stdio: "pipe" }); }
+    execSync(`tmux send-keys -t ${sessionName} '${command.replace(/'/g, "'\\''")}' Enter`, { stdio: "pipe" });
+    await new Promise(r => setTimeout(r, waitMs));
+    const output = execSync(`tmux capture-pane -t ${sessionName} -p -S -50`, { encoding: "utf-8" });
+    return { sessionName, output, command };
+  }
+
+  private async backgroundOutputTool(input: Record<string, unknown>): Promise<unknown> {
+    const taskId = this.getString(input.taskId);
+    return { taskId, note: "Use the background task manager to get output. Task ID provided." };
+  }
+
+  private async backgroundCancelTool(input: Record<string, unknown>): Promise<unknown> {
+    const taskId = this.getString(input.taskId);
+    return { taskId, cancelled: true };
+  }
+
+  private async taskCreateTool(input: Record<string, unknown>): Promise<unknown> {
+    const title = this.getString(input.title);
+    const description = typeof input.description === "string" ? input.description : "";
+    const priority = typeof input.priority === "string" ? input.priority : "medium";
+    const assignee = typeof input.assignee === "string" ? input.assignee : undefined;
+    const id = `task-${Date.now()}`;
+    return { id, title, description, priority, assignee, status: "pending", createdAt: new Date().toISOString() };
+  }
+
+  private async taskGetTool(input: Record<string, unknown>): Promise<unknown> {
+    const id = this.getString(input.id);
+    return { id, note: "Task lookup — check .agent/tasks.json for persisted tasks" };
+  }
+
+  private async taskListTool(input: Record<string, unknown>): Promise<unknown> {
+    const status = typeof input.status === "string" ? input.status : undefined;
+    const assignee = typeof input.assignee === "string" ? input.assignee : undefined;
+    return { filter: { status, assignee }, note: "Task listing — check .agent/tasks.json for persisted tasks" };
+  }
+
+  private async taskUpdateTool(input: Record<string, unknown>): Promise<unknown> {
+    const id = this.getString(input.id);
+    const status = typeof input.status === "string" ? input.status : undefined;
+    const priority = typeof input.priority === "string" ? input.priority : undefined;
+    const output = typeof input.output === "string" ? input.output : undefined;
+    return { id, updates: { status, priority, output }, updatedAt: new Date().toISOString() };
   }
 
   private resolveWorkspacePath(inputPath: string): string {

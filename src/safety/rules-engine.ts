@@ -88,30 +88,51 @@ export class RulesEngine {
   }
 
   private matchesRule(rule: AgentRule, call: ToolCall, filePath?: string): boolean {
+    // A rule must have at least one condition to match.
+    // If no conditions match the call, the rule does NOT apply.
+    let hasCondition = false;
+    let conditionsMet = 0;
+
     // Check tool name match
     if (rule.toolNames?.length) {
-      if (!rule.toolNames.includes(call.name)) return false;
+      hasCondition = true;
+      if (rule.toolNames.includes(call.name)) conditionsMet++;
+      else return false; // tool name doesn't match
     }
 
     // Check file pattern match
-    if (rule.filePatterns?.length && filePath) {
-      const matched = rule.filePatterns.some((pattern) => {
-        const regex = globToRegex(pattern);
-        return regex.test(filePath);
-      });
-      if (!matched) return false;
+    if (rule.filePatterns?.length) {
+      hasCondition = true;
+      if (filePath) {
+        const matched = rule.filePatterns.some((pattern) => {
+          const regex = globToRegex(pattern);
+          return regex.test(filePath);
+        });
+        if (matched) conditionsMet++;
+        else return false; // file pattern doesn't match
+      }
+      // No filePath provided — this condition is not evaluable, skip it
     }
 
-    // Check command pattern match (for bash tools)
-    if (rule.commandPatterns?.length && call.name === "bash") {
-      const command = typeof call.input.command === "string" ? call.input.command : "";
-      const matched = rule.commandPatterns.some((pattern) =>
-        new RegExp(pattern, "i").test(command)
-      );
-      if (!matched) return false;
+    // Check command pattern match (only for bash/git tools)
+    if (rule.commandPatterns?.length) {
+      hasCondition = true;
+      if (call.name === "bash" || call.name === "git") {
+        const command = typeof call.input.command === "string" ? call.input.command
+          : Array.isArray(call.input.args) ? (call.input.args as string[]).join(" ") : "";
+        const matched = rule.commandPatterns.some((pattern) =>
+          new RegExp(pattern, "i").test(command)
+        );
+        if (matched) conditionsMet++;
+        else return false; // command pattern doesn't match
+      } else {
+        // Rule has commandPatterns but this tool is not bash/git — rule doesn't apply
+        return false;
+      }
     }
 
-    return true;
+    // Rule only matches if it has at least one condition and all conditions were met
+    return hasCondition && conditionsMet > 0;
   }
 }
 

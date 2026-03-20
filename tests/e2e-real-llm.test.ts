@@ -334,5 +334,5 @@ describe.skipIf(!hasOpenAIAuth)("E2E Real LLM — OpenAI via OAuth", () => {
     // Cost should be tracked (real LLM returns usage)
     expect(result.costs.totalInputTokens).toBeGreaterThan(0);
     expect(result.costs.totalOutputTokens).toBeGreaterThan(0);
-  }, 120_000); // 2 min timeout for real API calls
+  }, 600_000); // 10 min timeout for real API calls
 });

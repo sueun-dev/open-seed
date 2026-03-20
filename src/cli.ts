@@ -6,7 +6,9 @@ import { runInitCommand } from "./commands/init.js";
 import { runInitDeepCommand } from "./commands/init-deep.js";
 import { runCheckCommentsCommand } from "./commands/check-comments.js";
 import { runRunCommand } from "./commands/run.js";
+import { runCreateCommand } from "./commands/create.js";
 import { runTeamCommand } from "./commands/team.js";
+import { runRalphLoopCommand, runStartWorkCommand, runRefactorCommand, runHandoffCommand, runStopContinuationCommand, runCancelRalphCommand } from "./commands/omo-commands.js";
 import { runResumeCommand } from "./commands/resume.js";
 import { runStatusCommand } from "./commands/status.js";
 import { runDoctorCommand } from "./commands/doctor.js";
@@ -23,6 +25,12 @@ program.command("init").description("Initialize .agent config").action(runInitCo
 program.command("init-deep").description("Generate hierarchical AGENTS.md files for the repository").action(runInitDeepCommand);
 
 program
+  .command("create")
+  .description("One-Prompt-to-App: build a complete app from a single prompt")
+  .argument("<prompt>", "What to build (e.g. 'Todo 앱 만들어줘')")
+  .action(runCreateCommand);
+
+program
   .command("run")
   .description("Run a task through the orchestration loop")
   .argument("<task>", "Task to execute")
@@ -33,6 +41,39 @@ program
   .description("Run a task through the team worker runtime")
   .argument("<task>", "Task to execute")
   .action(runTeamCommand);
+
+program
+  .command("ralph-loop")
+  .description("OMO: Run task in a loop until 100% complete")
+  .argument("<task>", "Task to complete")
+  .action(runRalphLoopCommand);
+
+program
+  .command("start-work")
+  .description("OMO: Planning → Execution pipeline (Prometheus + Atlas)")
+  .argument("<task>", "Task to plan and execute")
+  .action(runStartWorkCommand);
+
+program
+  .command("refactor")
+  .description("OMO: Safe refactoring with verification")
+  .argument("<target>", "What to refactor")
+  .action(runRefactorCommand);
+
+program
+  .command("handoff")
+  .description("OMO: Generate context handoff document for session transfer")
+  .action(runHandoffCommand);
+
+program
+  .command("stop")
+  .description("OMO: Stop all continuation loops")
+  .action(runStopContinuationCommand);
+
+program
+  .command("cancel-ralph")
+  .description("OMO: Cancel active Ralph loop")
+  .action(runCancelRalphCommand);
 
 program
   .command("resume")

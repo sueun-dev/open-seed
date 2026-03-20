@@ -18,10 +18,11 @@ const ALL_ROLE_IDS = [
 ];
 
 describe("role registry", () => {
-  it("contains 40 roles with 5 active by default", () => {
+  it("contains 40 roles with all 40 active by default (OMO style)", () => {
     const registry = getRoleRegistry(createDefaultConfig());
     expect(registry).toHaveLength(40);
-    expect(registry.filter((role) => role.active)).toHaveLength(5);
+    // OMO: all roles active by default — users disable what they don't need
+    expect(registry.filter((role) => role.active)).toHaveLength(40);
   });
 
   it("maps inactive roles to active fallbacks by category", () => {
@@ -31,10 +32,10 @@ describe("role registry", () => {
     expect(resolved.category).toBe("frontend");
   });
 
-  it("listActiveRoles returns only active roles", () => {
+  it("listActiveRoles returns all 40 active roles (OMO style)", () => {
     const registry = getRoleRegistry(createDefaultConfig());
     const active = listActiveRoles(registry);
-    expect(active).toHaveLength(5);
+    expect(active).toHaveLength(40);
     expect(active.every((r) => r.active)).toBe(true);
   });
 

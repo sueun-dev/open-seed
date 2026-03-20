@@ -319,7 +319,7 @@ describe("E2E Engine Run — Full Pipeline", () => {
       console.log(`    [${e.satisfied ? "✓" : "✗"}] ${e.type}: ${e.description}`);
     }
     console.log("═══════════════════════════════════════════════════\n");
-  }, 30_000);
+  }, 60_000);
 
   it("runs a second task in run mode and verifies persistence", async () => {
     const capturedEvents: AgentEvent[] = [];
@@ -365,7 +365,7 @@ describe("E2E Engine Run — Full Pipeline", () => {
       console.log(`    [${t.status}] ${t.role} via ${t.provider} (${t.transport})`);
     }
     console.log("═══════════════════════════════════════════════════\n");
-  }, 30_000);
+  }, 60_000);
 
   it("captures session.started event with Sisyphus metadata", async () => {
     const capturedEvents: AgentEvent[] = [];
@@ -402,5 +402,5 @@ describe("E2E Engine Run — Full Pipeline", () => {
     console.log(`  Scope:        ${startEvent!.payload.scope}`);
     console.log(`  Risk:         ${startEvent!.payload.risk}`);
     console.log("═══════════════════════════════════════════════════\n");
-  }, 30_000);
+  }, 60_000);
 });

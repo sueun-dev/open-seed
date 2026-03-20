@@ -49,7 +49,26 @@ const server = http.createServer(async (req, res) => {
   // ── SSE Streaming Run ──
   if (url.pathname === "/api/run/stream" && req.method === "POST") {
     const body = await readBody(req);
-    const { task, mode } = safeJsonParse(body) || {};
+    const { task, mode, projectDir } = safeJsonParse(body) || {};
+
+    // If projectDir is specified, use workspace/{projectDir} as CWD
+    // This isolates generated apps from the agent's own code
+    let childCwd = CWD;
+    if (projectDir) {
+      const workspaceRoot = path.join(CWD, "workspace");
+      childCwd = path.join(workspaceRoot, projectDir);
+      if (!fs.existsSync(childCwd)) {
+        fs.mkdirSync(childCwd, { recursive: true });
+      }
+      // Copy agent config to workspace so engine has provider settings
+      const srcConfig = path.join(CWD, ".agent", "config.json");
+      const dstConfigDir = path.join(childCwd, ".agent");
+      const dstConfig = path.join(dstConfigDir, "config.json");
+      if (fs.existsSync(srcConfig) && !fs.existsSync(dstConfig)) {
+        if (!fs.existsSync(dstConfigDir)) fs.mkdirSync(dstConfigDir, { recursive: true });
+        fs.copyFileSync(srcConfig, dstConfig);
+      }
+    }
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -59,7 +78,7 @@ const server = http.createServer(async (req, res) => {
 
     const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
     const child = spawn("node", [agentCli, mode || "run", task], {
-      cwd: CWD,
+      cwd: childCwd,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -449,6 +468,289 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── OAuth Login API — opens system terminal + polls for credentials ──
+  if (url.pathname === "/api/auth/login" && req.method === "POST") {
+    const body = await readBody(req);
+    const { provider } = safeJsonParse(body) || {};
+    if (!provider) { res.writeHead(400); res.end("Missing provider"); return; }
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive"
+    });
+
+    const send = (data) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+    const homedir = require("os").homedir();
+    const { execSync: execSyncAuth, spawnSync: spawnSyncAuth } = require("node:child_process");
+
+    // ── Resolve CLI paths (don't assume it's in PATH) ──
+    function findCli(name) {
+      const candidates = [
+        name, // PATH
+        path.join(homedir, ".local", "bin", name),
+        path.join(homedir, ".npm", "bin", name),
+        `/usr/local/bin/${name}`,
+        `/opt/homebrew/bin/${name}`,
+      ];
+      // For claude: also check the bundled install
+      if (name === "claude") {
+        candidates.push(path.join(homedir, ".claude", "local", "node_modules", ".bin", "claude"));
+        candidates.push(path.join(homedir, ".claude", "local", "claude"));
+      }
+      if (name === "codex") {
+        candidates.push(path.join(homedir, ".codex", "node_modules", ".bin", "codex"));
+      }
+      for (const c of candidates) {
+        try {
+          const resolved = execSyncAuth(`which ${c} 2>/dev/null || echo ""`, { encoding: "utf-8" }).trim();
+          if (resolved) return resolved;
+        } catch {}
+        // Direct check
+        try { if (fs.existsSync(c) && fs.statSync(c).mode & 0o111) return c; } catch {}
+      }
+      return null;
+    }
+
+    // ── Provider-specific setup ──
+    let credFiles = [];  // Check multiple credential locations
+    let shellCmd, installHint, cliPath;
+
+    if (provider === "openai") {
+      cliPath = findCli("codex");
+      credFiles = [
+        path.join(homedir, ".codex", "auth.json"),
+      ];
+      shellCmd = cliPath ? `${cliPath} auth login` : "npx -y @openai/codex auth login";
+      installHint = "npm install -g @openai/codex";
+      send({ status: "starting", message: "OpenAI OAuth 로그인을 시작합니다..." });
+    } else if (provider === "anthropic") {
+      cliPath = findCli("claude");
+      credFiles = [
+        path.join(homedir, ".claude", ".credentials.json"),  // plaintext
+        path.join(homedir, ".claude", "credentials.json"),    // alt location
+      ];
+      shellCmd = cliPath ? `${cliPath} auth login` : "npx -y @anthropic-ai/claude-code auth login";
+      installHint = "npm install -g @anthropic-ai/claude-code";
+      send({ status: "starting", message: "Anthropic OAuth 로그인을 시작합니다..." });
+    } else if (provider === "gemini") {
+      cliPath = findCli("gcloud");
+      credFiles = [
+        path.join(homedir, ".config", "gcloud", "application_default_credentials.json"),
+      ];
+      shellCmd = cliPath ? `${cliPath} auth application-default login` : "gcloud auth application-default login";
+      installHint = "brew install google-cloud-sdk";
+      send({ status: "starting", message: "Google OAuth 로그인을 시작합니다..." });
+    } else {
+      send({ status: "error", message: `Unknown provider: ${provider}` });
+      res.end();
+      return;
+    }
+
+    // ── Record credential state BEFORE login ──
+    const credStatesBefore = {};
+    for (const cf of credFiles) {
+      try { credStatesBefore[cf] = { mtime: fs.statSync(cf).mtimeMs, size: fs.statSync(cf).size }; }
+      catch { credStatesBefore[cf] = null; }
+    }
+
+    // For Anthropic on macOS: also check keychain state before
+    let keychainBefore = null;
+    if (provider === "anthropic" && process.platform === "darwin") {
+      try {
+        const user = process.env.USER || require("os").userInfo().username;
+        const result = spawnSyncAuth("security", ["find-generic-password", "-a", user, "-s", "Claude Code-credentials", "-w"], { encoding: "utf-8" });
+        if (result.status === 0 && result.stdout.trim()) {
+          keychainBefore = result.stdout.trim().slice(0, 20); // first 20 chars as fingerprint
+        }
+      } catch {}
+    }
+
+    // ── Launch auth command in visible terminal ──
+    let launched = false;
+    send({ status: "progress", message: `CLI: ${shellCmd}` });
+
+    try {
+      if (process.platform === "darwin") {
+        // macOS: open Terminal.app with the command
+        const escaped = shellCmd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        spawn("osascript", [
+          "-e", `tell application "Terminal"`,
+          "-e", `  activate`,
+          "-e", `  do script "${escaped}"`,
+          "-e", `end tell`
+        ], { detached: true, stdio: "ignore" }).unref();
+        launched = true;
+        send({ status: "progress", message: "✓ Terminal.app이 열렸습니다. 브라우저에서 로그인하세요." });
+      } else if (process.platform === "linux") {
+        for (const [cmd, args] of [
+          ["gnome-terminal", ["--", "bash", "-c", shellCmd + "; echo 'Done. Press Enter.'; read"]],
+          ["xterm", ["-e", shellCmd]],
+          ["konsole", ["-e", "bash", "-c", shellCmd]],
+        ]) {
+          try {
+            spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+            launched = true;
+            send({ status: "progress", message: `✓ ${cmd}이 열렸습니다. 브라우저에서 로그인하세요.` });
+            break;
+          } catch { continue; }
+        }
+      }
+
+      if (!launched) {
+        // Fallback: try direct spawn with shell
+        spawn("bash", ["-c", shellCmd], { shell: true, detached: true, stdio: "ignore", env: { ...process.env, BROWSER: "open" } }).unref();
+        launched = true;
+        send({ status: "progress", message: "프로세스가 시작되었습니다." });
+      }
+    } catch (err) {
+      send({ status: "progress", message: `터미널 실행 실패: ${err.message}` });
+    }
+
+    if (!launched) {
+      send({ status: "progress", message: "터미널을 직접 열고 아래 명령어를 실행하세요:" });
+      send({ status: "progress", message: `$ ${shellCmd}` });
+      send({ status: "progress", message: `(설치: ${installHint})` });
+    }
+
+    send({ status: "progress", message: "로그인 완료 대기 중..." });
+
+    // ── Poll for credential changes (file + keychain) ──
+    let attempts = 0;
+    const maxAttempts = 90; // 3 min
+    const pollInterval = setInterval(async () => {
+      attempts++;
+
+      // Check credential files
+      for (const cf of credFiles) {
+        try {
+          const stat = fs.statSync(cf);
+          const before = credStatesBefore[cf];
+          const changed = !before
+            ? true  // newly created
+            : (stat.mtimeMs > before.mtime || stat.size !== before.size);
+          if (changed) {
+            clearInterval(pollInterval);
+            send({ status: "success", message: `✓ ${provider} OAuth 연결 완료! (${path.basename(cf)})` });
+            res.end();
+            return;
+          }
+        } catch { /* file not yet created */ }
+      }
+
+      // For Anthropic: also check macOS keychain
+      if (provider === "anthropic" && process.platform === "darwin") {
+        try {
+          const user = process.env.USER || require("os").userInfo().username;
+          const result = spawnSyncAuth("security", ["find-generic-password", "-a", user, "-s", "Claude Code-credentials", "-w"], { encoding: "utf-8", timeout: 3000 });
+          if (result.status === 0 && result.stdout.trim()) {
+            const keychainNow = result.stdout.trim().slice(0, 20);
+            if (keychainNow !== keychainBefore) {
+              clearInterval(pollInterval);
+              send({ status: "success", message: `✓ Anthropic OAuth 연결 완료! (macOS Keychain)` });
+              res.end();
+              return;
+            }
+          }
+        } catch {}
+      }
+
+      if (attempts >= maxAttempts) {
+        clearInterval(pollInterval);
+        send({ status: "error", message: "시간 초과 (3분). 로그인 후 'Check All' 버튼을 눌러주세요." });
+        res.end();
+      }
+
+      if (attempts % 10 === 0) {
+        send({ status: "progress", message: `대기 중... (${attempts * 2}초)` });
+      }
+    }, 2000);
+
+    req.on("close", () => { clearInterval(pollInterval); });
+    return;
+  }
+
+  // ── API Key Save API — saves API key to .env ──
+  if (url.pathname === "/api/auth/apikey" && req.method === "POST") {
+    const body = await readBody(req);
+    const { provider, apiKey } = safeJsonParse(body) || {};
+    if (!provider || !apiKey) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "Missing provider or apiKey" })); return; }
+
+    const envMap = {
+      openai: "OPENAI_API_KEY",
+      anthropic: "ANTHROPIC_API_KEY",
+      gemini: "GEMINI_API_KEY"
+    };
+    const envVar = envMap[provider];
+    if (!envVar) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "Unknown provider" })); return; }
+
+    try {
+      // Write to .agent/.env for project-local key storage
+      const envDir = path.join(CWD, ".agent");
+      if (!fs.existsSync(envDir)) fs.mkdirSync(envDir, { recursive: true });
+
+      const envPath = path.join(envDir, ".env");
+      let content = "";
+      try { content = fs.readFileSync(envPath, "utf8"); } catch {}
+
+      // Replace existing or append
+      const regex = new RegExp(`^${envVar}=.*$`, "m");
+      if (regex.test(content)) {
+        content = content.replace(regex, `${envVar}=${apiKey}`);
+      } else {
+        content = content.trimEnd() + (content ? "\n" : "") + `${envVar}=${apiKey}\n`;
+      }
+
+      fs.writeFileSync(envPath, content, "utf8");
+
+      // Also set in current process env for immediate use
+      process.env[envVar] = apiKey;
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, envVar, stored: envPath }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // ── Auth Disconnect API — removes saved credentials ──
+  if (url.pathname === "/api/auth/disconnect" && req.method === "POST") {
+    const body = await readBody(req);
+    const { provider } = safeJsonParse(body) || {};
+    if (!provider) { res.writeHead(400); res.end("Missing provider"); return; }
+
+    const envMap = { openai: "OPENAI_API_KEY", anthropic: "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY" };
+    const envVar = envMap[provider];
+
+    try {
+      // Remove from .agent/.env
+      const envPath = path.join(CWD, ".agent", ".env");
+      if (fs.existsSync(envPath)) {
+        let content = fs.readFileSync(envPath, "utf8");
+        content = content.replace(new RegExp(`^${envVar}=.*\\n?`, "m"), "");
+        fs.writeFileSync(envPath, content, "utf8");
+      }
+
+      // Remove from process env
+      delete process.env[envVar];
+
+      // For OAuth: try to remove auth files
+      if (provider === "openai") {
+        const codexAuth = path.join(require("os").homedir(), ".codex", "auth.json");
+        if (fs.existsSync(codexAuth)) fs.unlinkSync(codexAuth);
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, message: `${provider} 연결이 해제되었습니다.` }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   // ── Terminal API (persistent shell session) ──
   if (url.pathname === "/api/terminal" && req.method === "POST") {
     const body = await readBody(req);
@@ -524,7 +826,7 @@ const server = http.createServer(async (req, res) => {
     });
 
     req.on("close", () => { closed = true; try { child.kill("SIGTERM"); } catch {} });
-    setTimeout(() => { if (!closed) { try { child.kill("SIGTERM"); } catch {} } }, 300000);
+    // No timeout — long-running sessions are expected
     return;
   }
 
@@ -644,6 +946,11 @@ function parseEventLine(line) {
 
   return result;
 }
+
+// Disable default timeouts — AGI pipeline steps can run 30+ minutes
+server.requestTimeout = 0;
+server.headersTimeout = 0;
+server.keepAliveTimeout = 0;
 
 server.listen(PORT, () => {
   console.log(`\n  ╔══════════════════════════════════╗`);

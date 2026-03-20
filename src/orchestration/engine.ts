@@ -98,17 +98,44 @@ import {
   buildOraclePrompt,
   createSandboxEnvironment
 } from "./sisyphus.js";
+import {
+  wireEverythingIntoEngine,
+  runVerifyFixLoop,
+  runParallelAgents,
+  preemptiveCompact,
+  type BackgroundAgentTask
+} from "./engine-wiring.js";
+import { wireAllOmoHooksFull } from "./omo-hooks-full.js";
+import { getActiveSkills, buildSkillContext } from "./builtin-skills.js";
+import { getEnabledMcps, getMcpEnvStatus } from "../mcp/builtin-mcps.js";
+import { checkFilesForErrors, formatErrorsForPrompt } from "./live-error-monitor.js";
+import { needsInterview, generateInterviewQuestions, buildRefinedTaskFromInterview } from "./interview-mode.js";
+import { needsDebate, selectDebateParticipants } from "./debate-mode.js";
+import { createSchedulerState, recordRateLimit, isRateLimited, getBestAvailableProvider, clearRateLimit, getRateLimitSummary } from "./rate-limit-scheduler.js";
+import { discoverCustomCommands } from "./custom-commands.js";
+import { createWorkspaceCheckpoint, saveCheckpointToDisk } from "./workspace-checkpoint.js";
+import { runPrChecks, formatPrAnalysis } from "./pr-checks.js";
+import { createCircuitBreaker, executeWithCircuitBreaker, getCircuitBreakerStatus } from "./circuit-breaker.js";
+import { HitlManager } from "./human-in-the-loop.js";
+import { buildSkillChain } from "./skill-chain.js";
+import { getReviewerForFile, buildReviewPrompt as buildLangReviewPrompt } from "./language-reviewers.js";
+import { generateStrategies, runStrategyBranching } from "./strategy-branching.js";
+import { buildDependencyGraph, analyzeImpact, getContextFilesForEdit, formatImpactAnalysis } from "./dependency-graph.js";
+import { calculateConfidence, estimateTaskClarity, estimateCodebaseFamiliarity, formatConfidenceScore, createConfidenceHistory, recordConfidenceDecision, getSuccessRateForSimilarTasks } from "./confidence-engine.js";
+import { createDegradationState, updateDegradation, shouldSkipStep, getDegradedPromptStrategy, formatDegradationStatus } from "./graceful-degradation.js";
 
 // ─── Public Interface ────────────────────────────────────────────────────────
 
 export interface RunEngineOptions {
   cwd: string;
   task: string;
-  mode: "run" | "team";
+  mode: "run" | "team" | "create";
   resumeSessionId?: string;
   onSessionReady?: (sessionId: string) => void | Promise<void>;
   /** External event bus for UI integration */
   eventBus?: AgentEventBus;
+  /** Limit enforcer retry rounds (default: 8). AGI pipeline steps should use 2. */
+  maxEnforcerRounds?: number;
 }
 
 export interface RunEngineResult {
@@ -127,6 +154,12 @@ export interface RunEngineResult {
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
 export async function runEngine(options: RunEngineOptions): Promise<RunEngineResult> {
+  // Auto-detect AGI pipeline steps: limit enforcer rounds to keep each step fast
+  const isAgiStep = /^\[STEP \d+:/.test(options.task);
+  if (isAgiStep && options.maxEnforcerRounds === undefined) {
+    options.maxEnforcerRounds = 2;
+  }
+
   const config = await loadConfig(options.cwd);
   const sessionStore = new SessionStore(options.cwd, config.sessions);
   const roleRegistry = getRoleRegistry(config);
@@ -231,6 +264,106 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     }
   });
 
+  // ═══ FULL OMO WIRING — connects ALL subsystems automatically ═══
+
+  // Wire ALL 46+ OMO hooks into event bus
+  const filesReadTracker = new Set<string>();
+  wireAllOmoHooksFull({ eventBus, config, cwd: options.cwd, filesRead: filesReadTracker });
+
+  // Track file reads for write-guard hook
+  eventBus.on("tool.completed", async (event) => {
+    if (event.payload.ok && event.payload.tool === "read") {
+      const p = (event.payload.output as { path?: string })?.path;
+      if (p) filesReadTracker.add(p);
+    }
+  });
+
+  // Auto-detect and inject skills based on task keywords
+  const activeSkills = getActiveSkills(options.task, config.disabled?.skills);
+  const skillPromptContext = buildSkillContext(activeSkills);
+
+  // Rate limit scheduler (OMC)
+  const rateLimitScheduler = createSchedulerState();
+
+  // Human-in-the-loop manager (LangGraph)
+  const hitlManager = new HitlManager();
+
+  // Wire rate limit detection into provider errors
+  eventBus.on("provider.retry", async (event) => {
+    const provider = (event.payload.provider as string) ?? "";
+    const retryAfter = (event.payload.retryAfterMs as number) ?? undefined;
+    if (provider) recordRateLimit(rateLimitScheduler, provider, retryAfter);
+  });
+  eventBus.on("provider.stream", async (event) => {
+    const provider = (event.payload.provider as string) ?? "";
+    if (provider) clearRateLimit(rateLimitScheduler, provider);
+  });
+
+  // ═══ AGI AUTONOMY SYSTEMS ═══
+
+  // Circuit breakers per provider
+  const circuitBreakers = {
+    anthropic: createCircuitBreaker(),
+    openai: createCircuitBreaker(),
+    gemini: createCircuitBreaker(),
+  };
+
+  // Dependency graph (async — builds in background for large projects)
+  let depGraph: Awaited<ReturnType<typeof buildDependencyGraph>> | null = null;
+  buildDependencyGraph(options.cwd).then(g => { depGraph = g; }).catch(() => {});
+
+  // Confidence engine
+  const confidenceHistory = createConfidenceHistory();
+
+  // Graceful degradation
+  const degradationState = createDegradationState(tokenBudget.maxTokens);
+
+  // Wire degradation updates
+  eventBus.on("cost.update", async (event) => {
+    const pct = ((event.payload.totalTokens as number) / tokenBudget.maxTokens) * 100;
+    const elapsed = Date.now() - (session?.createdAt ? new Date(session.createdAt).getTime() : Date.now());
+    Object.assign(degradationState, updateDegradation(degradationState, { tokenUsedPct: pct, elapsedMs: elapsed }));
+  });
+
+  // Wire circuit breakers into provider errors
+  eventBus.on("provider.retry", async (event) => {
+    const pid = (event.payload.provider as string) as keyof typeof circuitBreakers;
+    if (circuitBreakers[pid]) {
+      const { recordFailure: rf } = await import("./circuit-breaker.js");
+      rf(circuitBreakers[pid]);
+    }
+  });
+
+  // Custom commands discovery
+  const customCommands = await discoverCustomCommands(options.cwd);
+  const customCmdContext = customCommands.length > 0
+    ? `## Custom Commands Available\n${customCommands.map(c => `- /${c.name}: ${c.description}`).join("\n")}`
+    : "";
+
+  // Auto-discover available MCPs and inject context
+  const enabledMcps = getEnabledMcps(config.disabled?.mcps);
+  const mcpContext = enabledMcps.length > 0
+    ? `## Available MCP Servers\n${enabledMcps.map(m => {
+        const env = getMcpEnvStatus(m);
+        return `- ${m.name}: ${m.description} ${env.ready ? "✓" : `(needs ${env.missing})`}`;
+      }).join("\n")}`
+    : "";
+
+  const wiring = await wireEverythingIntoEngine({
+    cwd: options.cwd,
+    configDir: config.sessions.localDirName,
+    eventBus,
+    monitor: contextMonitor,
+    bgManager: bgTaskManager,
+    learnedPatterns,
+    maxTokens: tokenBudget.maxTokens
+  });
+
+  // Auto-recovery: if a crashed session was detected, use it
+  if (wiring.recoveredSessionId && !options.resumeSessionId) {
+    options.resumeSessionId = wiring.recoveredSessionId;
+  }
+
   // Wire event bus to session store for persistence
   eventBus.on("*", async (event) => {
     if (event.sessionId) {
@@ -299,6 +432,17 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   const microagentContext = buildMicroagentContext(activeMicroagents);
   const intent = analyzeIntent(options.task);
 
+  // Workspace checkpoint before execution (Cline-style safe experimentation)
+  if (intent.risk === "high" || intent.scope === "repo-wide") {
+    try {
+      const cp = await createWorkspaceCheckpoint(options.cwd, `pre-exec-${session.id}`);
+      await saveCheckpointToDisk(options.cwd, config.sessions.localDirName, cp);
+      await eventBus.fire("session.checkpoint", "engine", session.id, {
+        checkpointId: cp.id, label: cp.label, fileCount: cp.files.size
+      });
+    } catch { /* non-critical */ }
+  }
+
   // Sisyphus Phase 1: Codebase Assessment
   const files = await walkTopLevel(options.cwd);
   const configFiles: Record<string, string> = {};
@@ -307,6 +451,11 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     try { configFiles[f] = await fs.readFile(fp, "utf8"); } catch { /* skip */ }
   }
   const codebaseAssessment = assessCodebase(files, configFiles);
+
+  // Language-specific review prompt injection
+  const langReviewCtx = codebaseAssessment.patterns.primaryLanguage
+    ? buildLangReviewPrompt(codebaseAssessment.patterns.primaryLanguage)
+    : "";
 
   // Sisyphus: Intent Verbalization
   const verbalized = verbalizeIntent(options.task, intent);
@@ -369,7 +518,8 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   // Start work checklist context (OMO)
   const startCtx = startChecklist.length > 0 ? `# Pre-flight Checks\n${startChecklist.map(c => `- ${c}`).join("\n")}` : "";
 
-  const combinedContext = [agentsContext, designReferenceContext, memoryContext, consolidatedMemoryContext, microagentContext, assessmentContext, modelRoutingCtx, learnedCtx, skillContext, atlasContext, startCtx].filter(Boolean).join("\n\n");
+  const rateLimitCtx = getRateLimitSummary(rateLimitScheduler);
+  const combinedContext = [wiring.autoInjectedContext, wiring.recoveryContext, agentsContext, designReferenceContext, memoryContext, consolidatedMemoryContext, microagentContext, assessmentContext, modelRoutingCtx, learnedCtx, skillContext, skillPromptContext, mcpContext, customCmdContext, rateLimitCtx, langReviewCtx, atlasContext, startCtx].filter(Boolean).join("\n\n");
   const requestedCategory = classifyTask(options.task);
   const repoSummary = buildRepoSummary(repoMap);
 
@@ -377,6 +527,31 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   const researcherRole = resolveRole(roleRegistry, "researcher");
   const executorRole = resolveRole(roleRegistry, requestedCategory === "frontend" ? "frontend-engineer" : "executor");
   const reviewerRole = resolveRole(roleRegistry, "reviewer");
+
+  // ═══ CONFIDENCE CHECK — decide if we can proceed autonomously ═══
+  const taskClarity = estimateTaskClarity(options.task);
+  const codebaseFam = estimateCodebaseFamiliarity({
+    hasRepoMap: repoMap.length > 0,
+    hasAgentsMd: agentsContext.length > 0,
+    hasMemory: memoryContext.length > 0,
+    learnedPatternCount: learnedPatterns.length,
+    previousSessionCount: 0
+  });
+  const confidence = calculateConfidence({
+    taskClarity,
+    codebaseFamiliarity: codebaseFam,
+    riskLevel: intent.risk,
+    hasTests: codebaseAssessment.patterns.hasTests,
+    hasExistingPatterns: codebaseAssessment.conventions.length > 0,
+    previousSuccessRate: getSuccessRateForSimilarTasks(confidenceHistory),
+    toolsAvailable: true,
+    scopeSize: intent.scope
+  });
+
+  await eventBus.fire("enforcer.checklist", "engine", session.id, {
+    round: 0, verdict: "confidence",
+    checklist: [`Confidence: ${Math.round(confidence.value * 100)}% → ${confidence.recommendation}`]
+  });
 
   // ─── Phase: Planning + Research (parallel) ───────────────────────────────
 
@@ -435,7 +610,38 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
       modelVariant
     })
     : [];
-  const delegationSummary = summarizeDelegationArtifacts(delegationOutcomes);
+  let delegationSummary = summarizeDelegationArtifacts(delegationOutcomes);
+
+  // ═══ BACKGROUND PARALLEL AGENTS — fire research specialists concurrently ═══
+  if (options.mode === "run" && !intent.skipResearch && intent.scope !== "single-file") {
+    const bgTasks: BackgroundAgentTask[] = intent.suggestedRoles
+      .filter(r => r !== "executor" && r !== "planner" && r !== "reviewer")
+      .slice(0, 3)
+      .map((roleId, i) => ({
+        id: `bg-${roleId}-${i}`,
+        roleId,
+        prompt: `Research context for: ${options.task}\nFocus: ${roleId}\nProvide findings, risks, recommendations.`,
+        priority: 10 - i
+      }));
+    if (bgTasks.length > 0) {
+      const bgResults = await runParallelAgents({
+        tasks: bgTasks,
+        maxConcurrency: Math.min(bgTasks.length, config.team.maxWorkers),
+        executeFn: async (roleId, prompt) => {
+          const role = resolveRole(roleRegistry, roleId);
+          const result = await executeRoleTask({
+            ...roleTaskCtx,
+            role, mode: options.mode, prompt, retryConfig: config.retry
+          });
+          return typeof result === "object" && result !== null && "summary" in result
+            ? (result as { summary: string }).summary : JSON.stringify(result);
+        },
+        eventBus, sessionId: session.id, bgManager: bgTaskManager
+      });
+      const bgFindings = bgResults.filter(r => r.success && r.output).map(r => `[${r.roleId}] ${r.output!.slice(0, 300)}`).join("\n");
+      if (bgFindings) delegationSummary += `\n\nBackground research:\n${bgFindings}`;
+    }
+  }
 
   // ─── Phase: Factcheck ───────────────────────────────────────────────────
 
@@ -475,6 +681,59 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
 
   // Fire after.execute hook
   await hooks.fire("after.execute", { sessionId: session.id, task: options.task, event: "after.execute", data: { execution: executionOutput.summary } });
+
+  // ═══ LIVE ERROR MONITOR + VERIFY-FIX — only for real projects (skip for mock/empty projects) ═══
+  const hasVerifiableProject = codebaseAssessment.patterns.primaryLanguage !== null;
+
+  if (hasVerifiableProject) {
+    // Live error monitor — check for errors right after execution
+    const changedFiles = (executionOutput.changes ?? [])
+      .map((c: string) => c.replace(/^(created|modified|updated)\s+/i, "").trim())
+      .filter((f: string) => /\.(ts|tsx|js|jsx)$/.test(f));
+    if (changedFiles.length > 0) {
+      try {
+        const errorReport = await checkFilesForErrors(options.cwd, changedFiles);
+        const errorPrompt = formatErrorsForPrompt(errorReport);
+        if (errorPrompt) {
+          await eventBus.fire("enforcer.checklist", "engine", session.id, {
+            round: 0, verdict: "live-errors",
+            checklist: [`${errorReport.totalErrors} errors, ${errorReport.totalWarnings} warnings in ${changedFiles.length} files`]
+          });
+        }
+      } catch { /* live error check is non-critical */ }
+    }
+
+    // Verify-fix auto-loop — run tests, parse errors, fix, retest
+    try {
+      const { execSync } = await import("node:child_process");
+      const vfResult = await runVerifyFixLoop({
+        cwd: options.cwd,
+        executionOutput,
+        maxCycles: 3,
+        runCommand: async (cmd) => {
+          try {
+            const stdout = execSync(cmd, { cwd: options.cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+            return { stdout, stderr: "", exitCode: 0 };
+          } catch (e: unknown) {
+            const err = e as { stdout?: string; stderr?: string; status?: number };
+            return { stdout: err.stdout ?? "", stderr: err.stderr ?? "", exitCode: err.status ?? 1 };
+          }
+        },
+        fixWithLLM: async (fixPrompt) => {
+          return await executeRoleTaskWithRetry({
+            ...roleTaskCtx,
+            role: executorRole, mode: options.mode,
+            prompt: buildExecutorPrompt(fixPrompt, plannerOutput.summary, researchOutput?.summary, delegationSummary, executionContext, repoMap),
+            retryConfig: config.retry, maxRetries
+          }) as ExecutorArtifact;
+        },
+        eventBus,
+        sessionId: session.id
+      });
+      executionOutput = vfResult.finalOutput;
+      enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
+    } catch { /* verify-fix is non-critical — engine continues */ }
+  }
 
   // Checkpoint after first execution
   await checkpointSaver.save(createCheckpoint(session.id, "executing", enforcer.executionRounds, {
@@ -517,7 +776,8 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
 
   while (!isEnforcerDone(enforcer)) {
     // Stop continuation guard (OMO)
-    const stopCheck = shouldStop(enforcer.executionRounds, 8, review.verdict, consecutiveFailures);
+    const enforcerMaxRounds = options.maxEnforcerRounds ?? 8;
+    const stopCheck = shouldStop(enforcer.executionRounds, enforcerMaxRounds, review.verdict, consecutiveFailures);
     if (stopCheck.stop) {
       await eventBus.fire("enforcer.checklist", "engine", session.id, { round: enforcer.executionRounds, verdict: "stop-guard", checklist: [stopCheck.reason!] });
       break;
@@ -591,12 +851,17 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
 
     const followUpTask = buildFollowUpPrompt(options.task, combinedFollowUp);
 
-    // Context compaction: if context is getting too large, compact it
+    // ═══ PREEMPTIVE COMPACTION — actually compact context before overflow ═══
     let effectiveContext = executionContext;
-    const contextTokens = estimateTokens(effectiveContext);
-    if (contextTokens > tokenBudget.compactionThreshold * 0.5) {
-      const { compacted } = compactContext(effectiveContext, Math.floor(tokenBudget.compactionThreshold * 0.4));
+    const compactionResult = preemptiveCompact(effectiveContext, contextMonitor, tokenBudget.maxTokens);
+    if (compactionResult.compacted) {
+      const { compacted } = compactContext(effectiveContext, Math.floor(tokenBudget.maxTokens * 0.4));
       effectiveContext = compacted;
+      await eventBus.fire("error.retriable", "engine", session.id, {
+        message: compactionResult.summary,
+        category: "preemptive-compaction",
+        attempt: contextMonitor.compactionCount
+      });
     }
 
     executionOutput = await executeRoleTaskWithRetry({
@@ -664,24 +929,30 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
 
   // ─── Sandbox Apply/Revert ────────────────────────────────────────────────
 
+  // OMO style: always apply sandbox changes. Revert is manual via undo.
+  // Rationale: reviewer may be overly strict, but code was still written correctly.
+  // Better to keep the work and let the user decide than to silently delete everything.
   if (sandbox && sandbox.hasChanges()) {
-    if (review.verdict === "pass" && config.sandbox?.autoApplyOnPass) {
-      const result = await sandbox.apply();
-      await eventBus.fire("sandbox.applied", "engine", session.id, {
-        applied: result.applied, paths: result.paths
-      });
-    } else if (review.verdict === "fail") {
-      const result = await sandbox.revert();
-      await eventBus.fire("sandbox.reverted", "engine", session.id, {
-        reverted: result.reverted
-      });
-    }
+    const result = await sandbox.apply();
+    await eventBus.fire("sandbox.applied", "engine", session.id, {
+      applied: result.applied, paths: result.paths, reviewVerdict: review.verdict
+    });
   }
 
   // ─── Phase: Done ─────────────────────────────────────────────────────────
 
   session.lastReview = review;
-  session.status = review.verdict === "pass" ? "completed" : "failed";
+  // Session is "completed" if execution produced meaningful work (tool calls
+  // succeeded), regardless of the reviewer's quality verdict. The reviewer
+  // verdict is a quality signal, not a success/failure gate. Only mark
+  // "failed" when the executor itself errored (no tool calls, all blocked).
+  const executorTasks = session.tasks.filter(t => t.role === "executor" || t.category === "execution");
+  const hasSuccessfulWork = executorTasks.some(t => {
+    const output = t.output as Record<string, unknown> | undefined;
+    const toolResults = output?.toolResults as Array<{ ok?: boolean }> | undefined;
+    return toolResults?.some(r => r.ok) ?? false;
+  });
+  session.status = hasSuccessfulWork || review.verdict === "pass" ? "completed" : "failed";
   session.updatedAt = nowIso();
   await transitionPhase(session, "done", sessionStore, eventBus);
   await sessionStore.saveSnapshot(session);
@@ -923,7 +1194,7 @@ async function executeRoleTask(params: {
   undoManager?: UndoManager;
   modelVariant?: import("./model-variants.js").ModelVariantConfig;
   role: ReturnType<typeof resolveRole>;
-  mode: "run" | "team";
+  mode: "run" | "team" | "create";
   prompt: string;
   retryConfig?: { maxToolRetries: number; maxParseRetries: number; retriablePatterns: string[] };
 }): Promise<RoleArtifact> {

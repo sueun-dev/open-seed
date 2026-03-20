@@ -20,7 +20,7 @@ import { RulesEngine } from "../safety/rules-engine.js";
 import { SessionStore } from "../sessions/store.js";
 import type { DiffSandbox } from "../tools/diff-sandbox.js";
 import { ToolRuntime } from "../tools/runtime.js";
-import { isToolBearingArtifact, normalizeSpecialistArtifact } from "./contracts.js";
+import { isToolBearingArtifact, normalizeSpecialistArtifact, getSpecialistContractKind } from "./contracts.js";
 import { CostTracker } from "./cost-tracker.js";
 import { ProjectMemoryStore } from "../memory/project-memory.js";
 import { HookRegistry } from "./hooks.js";
@@ -118,9 +118,9 @@ export async function runWorkerInline(params: {
       maxTurns: 10
     });
 
-    // Convert to executor artifact format
-    const artifact = {
-      kind: "execution" as const,
+    // Convert to specialist artifact format — normalize through the contract
+    // system so delegation can identify the artifact type and access its fields.
+    const rawArtifact = {
       summary: `${agenticResult.summary} Executed ${agenticResult.totalToolCalls} tool calls across ${agenticResult.totalTurns} turns.`,
       changes: agenticResult.toolResults.filter(r => r.ok && (r.name === "write" || r.name === "apply_patch")).map(r => {
         const out = r.output as { path?: string } | undefined;
@@ -128,6 +128,10 @@ export async function runWorkerInline(params: {
       }),
       suggestedCommands: [],
       toolCalls: [],
+      toolResults: agenticResult.toolResults
+    };
+    const artifact = {
+      ...normalizeSpecialistArtifact(role, rawArtifact),
       toolResults: agenticResult.toolResults
     };
 
