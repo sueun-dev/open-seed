@@ -94,6 +94,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 /* Drag */
 .fi.drag-over{border-top:2px solid var(--accent);margin-top:-2px}
 .fi.dragging{opacity:.4}
+.drop-highlight{outline:2px dashed var(--accent)!important;outline-offset:-2px;background:rgba(88,166,255,0.05)!important}
 /* Inline rename */
 .fi .rename-input{background:var(--bg);border:1px solid var(--accent);color:var(--fg);font-family:var(--font);font-size:13px;padding:0 4px;outline:none;border-radius:3px;width:100%;margin:-1px 0}
 /* Multi select */
@@ -713,12 +714,21 @@ function stab(n){document.querySelectorAll('[data-st]').forEach(b=>b.classList.t
 /* ═══ FILES ═══ */
 const _collapsedDirs=new Set();
 let _fileTree=null;
+let _lastFileHash='';
 async function loadFiles(){
   const b=document.getElementById('sbBody');
   const scrollTop=b.scrollTop;
-  b.innerHTML='';
   try{
     const f=await(await fetch('/api/files')).json();
+
+    // Skip re-render if file list hasn't changed
+    const hash=f.map(x=>x.path).join('|');
+    if(hash===_lastFileHash&&b.children.length>0){
+      b.scrollTop=scrollTop;
+      return;
+    }
+    _lastFileHash=hash;
+
     const tree={children:{},files:[]};
     for(const x of f){
       const parts=x.path.split('/');
@@ -739,9 +749,10 @@ async function loadFiles(){
       }
     }
     _fileTree=tree;
+    b.innerHTML='';
     renderTree(b,tree,0);
     b.scrollTop=scrollTop;
-  }catch(e){b.textContent='Error: '+e.message}
+  }catch(e){if(!b.children.length)b.textContent='Error: '+e.message}
 }
 const _fileIcons={ts:'TS',tsx:'TX',js:'JS',jsx:'JX',json:'{}',md:'MD',py:'PY',html:'<>',css:'#',toml:'TM',yml:'YM',yaml:'YM',sh:'$',txt:'TX',svg:'SV',png:'IM',jpg:'IM',gif:'IM',lock:'LK',gitignore:'GI',env:'EN',sql:'DB',rs:'RS',go:'GO',java:'JA',rb:'RB',php:'PH',vue:'VU',svelte:'SV'};
 const _fileColors={ts:'#3b82f6',tsx:'#3b82f6',js:'#eab308',jsx:'#eab308',json:'#22c55e',md:'#a855f7',py:'#22c55e',html:'#ef4444',css:'#a855f7',toml:'#eab308',yml:'#ef4444',yaml:'#ef4444',sh:'#22c55e',txt:'#6b7280',svg:'#f97316',lock:'#6b7280',gitignore:'#6b7280',env:'#eab308'};
@@ -1106,28 +1117,43 @@ function revealFileInExplorer(filePath){
 
 // ── Git Status ──
 let _gitStatus={};
+let _lastGitHash='';
 async function loadGitStatus(){
   try{
     const r=await fetch('/api/git/status');
-    _gitStatus=await r.json();
+    const newStatus=await r.json();
+    // Skip if unchanged
+    const hash=JSON.stringify(newStatus);
+    if(hash===_lastGitHash)return;
+    _lastGitHash=hash;
+    _gitStatus=newStatus;
     applyGitStatus();
   }catch{_gitStatus={}}
 }
 function applyGitStatus(){
-  document.querySelectorAll('.fi').forEach(el=>{
-    el.classList.remove('git-modified','git-added','git-untracked','git-deleted');
-    const badge=el.querySelector('.git-badge');
-    if(badge)badge.remove();
-  });
+  // Only update files that need changes (incremental, not full wipe)
   document.querySelectorAll('.fi[data-filepath]').forEach(el=>{
     const fp=el.dataset.filepath;
     const s=_gitStatus[fp];
-    if(!s)return;
-    el.classList.add('git-'+s);
-    const b=document.createElement('span');
-    b.className='git-badge '+s;
-    b.textContent={modified:'M',added:'A',deleted:'D',untracked:'U',renamed:'R'}[s]||'?';
-    el.appendChild(b);
+    const currentClass=['git-modified','git-added','git-untracked','git-deleted'].find(c=>el.classList.contains(c));
+    const targetClass=s?'git-'+s:null;
+
+    // Skip if already correct
+    if(currentClass===targetClass)return;
+
+    // Remove old
+    if(currentClass)el.classList.remove(currentClass);
+    const oldBadge=el.querySelector('.git-badge');
+    if(oldBadge)oldBadge.remove();
+
+    // Add new
+    if(s){
+      el.classList.add('git-'+s);
+      const b=document.createElement('span');
+      b.className='git-badge '+s;
+      b.textContent={modified:'M',added:'A',deleted:'D',untracked:'U',renamed:'R'}[s]||'?';
+      el.appendChild(b);
+    }
   });
 }
 
@@ -1235,13 +1261,29 @@ function setupDrop(el,dirPath){
 /** Handle files dragged from OS (Finder/Desktop/other apps) into the explorer */
 async function handleExternalFileDrop(files,targetDir){
   let uploaded=0,failed=0;
+  const MAX_FILE_SIZE=5*1024*1024; // 5MB limit
+
   for(const file of files){
     try{
-      // Read file content
+      // Skip directories (they come as 0-byte entries)
+      if(file.size===0&&!file.type)continue;
+      // Skip too-large files
+      if(file.size>MAX_FILE_SIZE){
+        failed++;
+        console.warn('File too large (>5MB):',file.name);
+        continue;
+      }
+      // Skip binary files
+      const binaryExts=['png','jpg','jpeg','gif','ico','woff','woff2','ttf','eot','pdf','zip','tar','gz','mp3','mp4','mov','avi'];
+      const ext=file.name.split('.').pop().toLowerCase();
+      if(binaryExts.includes(ext)){
+        failed++;
+        console.warn('Binary file skipped:',file.name);
+        continue;
+      }
+
       const content=await readFileAsText(file);
       const targetPath=targetDir?targetDir+'/'+file.name:file.name;
-
-      // Upload via PUT API
       const r=await fetch('/api/file',{
         method:'PUT',
         headers:{'Content-Type':'application/json'},
@@ -1254,9 +1296,8 @@ async function handleExternalFileDrop(files,targetDir){
       console.error('Drop upload failed:',file.name,err);
     }
   }
-  // Refresh explorer
-  loadFiles();
-  // Show notification
+  // Single debounced refresh after all files
+  debouncedLoadFiles(300);
   const msg=failed>0
     ?`Uploaded ${uploaded} file(s), ${failed} failed`
     :`Uploaded ${uploaded} file(s)`;
@@ -1268,6 +1309,9 @@ function readFileAsText(file){
     const reader=new FileReader();
     reader.onload=()=>resolve(reader.result);
     reader.onerror=()=>reject(reader.error);
+    // Timeout: don't hang forever on problematic files
+    const timeout=setTimeout(()=>reject(new Error('Read timeout')),10000);
+    reader.onloadend=()=>clearTimeout(timeout);
     reader.readAsText(file);
   });
 }
@@ -1341,36 +1385,51 @@ function updateBreadcrumb(filePath){
   }).join('<span style="color:var(--fg3);margin:0 4px">›</span>');
 }
 
-// ── Auto-refresh (poll every 5s) ──
-setInterval(()=>{loadGitStatus();},5000);
-// Initial load + refresh files every 10s
-setInterval(()=>{loadFiles();},10000);
+// ── Debounced auto-refresh ──
+let _loadFilesTimer=null;
+let _loadFilesRunning=false;
+let _gitStatusTimer=null;
 
-// ── Override loadFiles to add features ──
+function debouncedLoadFiles(delayMs){
+  if(_loadFilesTimer)clearTimeout(_loadFilesTimer);
+  _loadFilesTimer=setTimeout(()=>{_loadFilesTimer=null;loadFiles();},delayMs||200);
+}
+
+// Poll: git status every 15s, files every 30s (much less aggressive)
+setInterval(()=>{if(!_loadFilesRunning)loadGitStatus();},15000);
+setInterval(()=>{if(!_loadFilesRunning)loadFiles();},30000);
+
+// ── Override loadFiles with debounce guard + feature wiring ──
 const _origLoadFiles=loadFiles;
 loadFiles=async function(){
-  await _origLoadFiles();
-  await loadGitStatus();
-  renderOpenEditors();
-  // Add drag/drop + inline rename + multi-select to all file entries
-  document.querySelectorAll('.fi:not(.dir)').forEach(el=>{
-    const fp=el.dataset?.filepath;
-    if(!fp)return;
-    setupDrag(el,fp);
-    el.ondblclick=()=>startRename(el,fp,false);
-    const origClick=el.onclick;
-    el.onclick=e=>{handleFileClick(e,el,fp);};
-  });
-  document.querySelectorAll('.fi.dir').forEach(el=>{
-    const dp=el.dataset?.dirpath;
-    if(!dp)return;
-    setupDrop(el,dp);
-    el.ondblclick=e=>{e.stopPropagation();startRename(el,dp,true);};
-  });
-  // Setup global drop zone on the sidebar body (drop files into project root)
-  setupExternalDropZone(document.getElementById('sbBody'),'');
-  // Setup drop zone on editor area too
-  setupExternalDropZone(document.getElementById('edZone'),'');
+  if(_loadFilesRunning)return; // prevent concurrent runs
+  _loadFilesRunning=true;
+  try{
+    await _origLoadFiles();
+    await loadGitStatus();
+    renderOpenEditors();
+    // Wire drag/drop + rename + multi-select
+    document.querySelectorAll('.fi:not(.dir)').forEach(el=>{
+      if(el._wired)return; el._wired=true;
+      const fp=el.dataset?.filepath;
+      if(!fp)return;
+      setupDrag(el,fp);
+      el.ondblclick=()=>startRename(el,fp,false);
+      el.onclick=e=>{handleFileClick(e,el,fp);};
+    });
+    document.querySelectorAll('.fi.dir').forEach(el=>{
+      if(el._wired)return; el._wired=true;
+      const dp=el.dataset?.dirpath;
+      if(!dp)return;
+      setupDrop(el,dp);
+      el.ondblclick=e=>{e.stopPropagation();startRename(el,dp,true);};
+    });
+    // Global drop zones (only once)
+    setupExternalDropZone(document.getElementById('sbBody'),'');
+    setupExternalDropZone(document.getElementById('edZone'),'');
+  }finally{
+    _loadFilesRunning=false;
+  }
 };
 
 /** Setup an element as an external file drop zone (files from OS) */
@@ -1392,9 +1451,7 @@ function setupExternalDropZone(el,targetDir){
     if(!e.dataTransfer.types.includes('Files'))return;
     dragDepth++;
     if(dragDepth===1){
-      el.style.outline='2px dashed var(--accent)';
-      el.style.outlineOffset='-2px';
-      el.style.background='rgba(88,166,255,0.05)';
+      el.classList.add('drop-highlight');
     }
   });
 
@@ -1403,18 +1460,14 @@ function setupExternalDropZone(el,targetDir){
     dragDepth--;
     if(dragDepth<=0){
       dragDepth=0;
-      el.style.outline='';
-      el.style.outlineOffset='';
-      el.style.background='';
+      el.classList.remove('drop-highlight');
     }
   });
 
   el.addEventListener('drop',async e=>{
     if(_dragPath)return;
     dragDepth=0;
-    el.style.outline='';
-    el.style.outlineOffset='';
-    el.style.background='';
+    el.classList.remove('drop-highlight');
     if(!e.dataTransfer.files||e.dataTransfer.files.length===0)return;
     e.preventDefault();
     e.stopPropagation();
