@@ -41,27 +41,28 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 
 /* ═══ Layout ═══ */
 .app{display:grid;grid-template-columns:48px 1fr;grid-template-rows:1fr 24px;height:100vh}
+*{box-sizing:border-box}
 
 /* ═══ Activity Bar ═══ */
 .act-bar{grid-row:1/3;background:var(--bg2);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:2px;border-right:1px solid var(--border)}
-.act-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--r);cursor:pointer;color:var(--fg3);transition:all .12s;position:relative}
-.act-btn:hover{color:var(--fg2);background:rgba(255,255,255,.04)}
+.act-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--r);cursor:pointer;color:var(--fg3);transition:color .15s,background .15s;position:relative}
+.act-btn:hover{color:var(--fg2);background:rgba(255,255,255,.05)}
 .act-btn.on{color:var(--fg);border-left:2px solid var(--accent);border-radius:0;background:rgba(255,255,255,.03)}
 .act-btn svg{width:22px;height:22px;fill:currentColor}
 .act-btn .dot{position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .act-sep{flex:1}
 
 /* ═══ Main ═══ */
-.main-area{display:flex;overflow:hidden;position:relative}
+.main-area{display:flex;overflow:hidden;position:relative;height:100%}
 
 /* ═══ Sidebar ═══ */
-.sidebar{width:260px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;transition:width .2s ease,border-color .2s}
+.sidebar{width:260px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;transition:width .2s cubic-bezier(.4,0,.2,1),border-color .2s}
 .sidebar.hide{width:0;overflow:hidden;border-color:transparent}
-.sb-title{padding:12px 16px 8px;font-family:var(--font);font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--fg3);display:flex;justify-content:space-between;align-items:center;user-select:none}
-.sb-title .btns{display:flex;gap:2px}
-.sb-title .btns button{background:none;border:none;color:var(--fg3);cursor:pointer;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:var(--r);font-size:14px;transition:all .1s}
-.sb-title .btns button:hover{background:rgba(255,255,255,.06);color:var(--fg2)}
-.sb-body{flex:1;overflow-y:auto;padding:0 4px 12px}
+.sb-title{padding:10px 12px 6px;font-family:var(--font);font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--fg3);display:flex;justify-content:space-between;align-items:center;user-select:none;height:34px}
+.sb-title .btns{display:flex;gap:1px}
+.sb-title .btns button{background:none;border:none;color:var(--fg3);cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:var(--r);font-size:13px;transition:color .1s,background .1s}
+.sb-title .btns button:hover{background:rgba(255,255,255,.08);color:var(--fg2)}
+.sb-body{flex:1;overflow-y:auto;padding:0 0 8px}
 
 /* File tree — VSCode style */
 .fi{display:flex;align-items:center;gap:4px;padding:2px 8px;cursor:pointer;font-family:var(--font);font-size:13px;color:var(--fg2);margin:0;transition:background .06s;user-select:none;line-height:22px;min-height:22px}
@@ -102,14 +103,14 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .content-area{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 
 /* Tab bar */
-.tab-strip{display:flex;background:var(--bg2);min-height:35px;border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0}
+.tab-strip{display:flex;background:var(--bg2);height:35px;min-height:35px;border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0;align-items:stretch}
 .tab-strip::-webkit-scrollbar{height:0}
-.tab{display:flex;align-items:center;gap:6px;padding:0 16px;height:35px;font-family:var(--font);font-size:12px;color:var(--fg3);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:color .15s,background .15s,border-color .15s;min-width:0}
-.tab:hover{color:var(--fg2);background:rgba(255,255,255,.02)}
+.tab{display:flex;align-items:center;gap:6px;padding:0 14px;height:35px;font-family:var(--font);font-size:12px;color:var(--fg3);cursor:pointer;border-bottom:2px solid transparent;border-right:1px solid var(--border);white-space:nowrap;transition:color .12s,background .12s,border-color .12s;min-width:0;flex-shrink:0}
+.tab:hover{color:var(--fg2);background:rgba(255,255,255,.03)}
 .tab.on{color:var(--fg);background:var(--bg);border-bottom-color:var(--accent)}
 .tab.dirty::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--yellow);flex-shrink:0}
-.tab .x{opacity:0;font-size:14px;line-height:1;cursor:pointer;margin-left:4px;padding:2px;border-radius:3px}
-.tab:hover .x{opacity:.5}
+.tab .x{opacity:0;font-size:13px;line-height:1;cursor:pointer;margin-left:6px;padding:2px 3px;border-radius:3px;transition:opacity .1s}
+.tab:hover .x{opacity:.4}
 .tab .x:hover{opacity:1;background:rgba(255,255,255,.1)}
 
 /* Editor */
@@ -129,7 +130,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .code-edit .highlight-layer code{background:none!important;padding:0!important;font-size:inherit!important}
 
 /* ═══ Terminal ═══ */
-.term-panel{border-top:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg);flex-shrink:0;transition:height .2s ease,border-color .2s}
+.term-panel{border-top:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg);flex-shrink:0;transition:height .2s cubic-bezier(.4,0,.2,1),border-color .15s}
 .term-panel.shut{height:0!important;border-color:transparent;overflow:hidden}
 .term-head{display:flex;align-items:center;height:30px;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 12px;font-family:var(--font);font-size:10px;color:var(--fg3);gap:8px;text-transform:uppercase;letter-spacing:1px;flex-shrink:0}
 .term-head button{background:none;border:none;color:var(--fg3);cursor:pointer;font-size:12px;font-family:var(--font);padding:2px 6px;border-radius:3px}
@@ -140,7 +141,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .term-in input{flex:1;background:none;border:none;outline:none;color:var(--fg);font-family:var(--font);font-size:12px}
 
 /* ═══ Chat ═══ */
-.chat-panel{position:absolute;top:0;right:0;bottom:0;width:440px;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;z-index:50;box-shadow:-4px 0 24px rgba(0,0,0,.3);transform:translateX(100%);opacity:0;pointer-events:none;transition:transform .2s ease,opacity .2s ease}
+.chat-panel{position:absolute;top:0;right:0;bottom:0;width:440px;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;z-index:50;box-shadow:-4px 0 24px rgba(0,0,0,.3);transform:translateX(100%);opacity:0;pointer-events:none;transition:transform .25s cubic-bezier(.4,0,.2,1),opacity .2s ease}
 .chat-panel.show{transform:translateX(0);opacity:1;pointer-events:auto}
 .ch-head{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
 .ch-head h3{font-family:var(--font);font-size:12px;font-weight:600;color:var(--accent);letter-spacing:.5px;text-transform:uppercase}
@@ -193,7 +194,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .go-btn:disabled{opacity:.25;cursor:not-allowed;transform:none}
 
 /* ═══ Fullscreen Panels ═══ */
-.full-panel{overflow-y:auto;padding:24px 48px;position:absolute;inset:0;z-index:10;background:var(--bg);opacity:0;pointer-events:none;transition:opacity .15s ease}
+.full-panel{overflow-y:auto;padding:24px 48px;position:absolute;inset:0;z-index:10;background:var(--bg);opacity:0;pointer-events:none;transition:opacity .2s cubic-bezier(.4,0,.2,1)}
 .full-panel.show{opacity:1;pointer-events:auto}
 .full-panel .inner{max-width:800px;margin:0 auto}
 .full-panel h2{font-family:var(--font);font-size:13px;color:var(--fg);margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
@@ -634,7 +635,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
       <div class="editor-zone" id="edZone">
         <div class="welcome-screen" id="welc">
           <h1>Open <b>Seed</b></h1>
-          <p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Sisyphus Protocol<br><br>
+          <p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Prometheus Engine<br><br>
           <kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer &nbsp; <kbd>⌘J</kbd> Terminal<br><br>
           <b style="color:var(--accent)">🧠 AGI Mode</b> — 프롬프트 하나로 완전한 앱 생성<br>
           <b style="color:var(--green)">🔨 Build</b> — 코드 작성, 수정, 테스트<br>
@@ -1022,7 +1023,7 @@ function closeTab(p){const i=T.findIndex(t=>t.p===p);if(i<0)return;if(T[i].d&&!c
 function renderEd(){if(!AT){showWelcome();return}const z=document.getElementById('edZone');z.querySelector('.welcome-screen')?.remove();let w=z.querySelector('.code-wrap');if(!w){w=document.createElement('div');w.className='code-wrap';w.innerHTML='<div class="line-gutter" id="lg"></div><div class="code-edit"><textarea id="ce" spellcheck="false"></textarea></div>';z.appendChild(w);const ce=document.getElementById('ce');ce.oninput=()=>{AT.c=ce.value;AT.d=ce.value!==AT.o;renderTabs();updateGutter()};ce.onscroll=()=>{document.getElementById('lg').scrollTop=ce.scrollTop};ce.onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();const s=ce.selectionStart;ce.value=ce.value.substring(0,s)+'  '+ce.value.substring(ce.selectionEnd);ce.selectionStart=ce.selectionEnd=s+2;ce.oninput()}}}document.getElementById('ce').value=AT.c;updateGutter()}
 function updateHighlight(){const hl=document.getElementById('hl');if(!hl||!AT)return;const ext=AT.p.split('.').pop();const lang={ts:'typescript',tsx:'typescript',js:'javascript',json:'json',css:'css',html:'xml',md:'markdown',py:'python',sh:'bash'}[ext]||'';let html;if(lang&&hljs.getLanguage(lang)){html=hljs.highlight(AT.c,{language:lang}).value}else{html=esc(AT.c)}hl.innerHTML='<code>'+html+'</code>'}
 function updateGutter(){const g=document.getElementById('lg'),ce=document.getElementById('ce');if(!g||!ce)return;const n=ce.value.split('\n').length;g.innerHTML=Array.from({length:n},(_,i)=>'<div>'+(i+1)+'</div>').join('')}
-function showWelcome(){const z=document.getElementById('edZone');z.querySelector('.code-wrap')?.remove();if(!z.querySelector('.welcome-screen'))z.innerHTML='<div class="welcome-screen" id="welc"><h1>Open <b>Seed</b></h1><p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Sisyphus Protocol<br><br><kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer<br><kbd>⌘S</kbd> Save &nbsp; <kbd>⌘\`</kbd> Terminal</p></div>'}
+function showWelcome(){const z=document.getElementById('edZone');z.querySelector('.code-wrap')?.remove();if(!z.querySelector('.welcome-screen'))z.innerHTML='<div class="welcome-screen" id="welc"><h1>Open <b>Seed</b></h1><p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Prometheus Engine<br><br><kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer<br><kbd>⌘S</kbd> Save &nbsp; <kbd>⌘\`</kbd> Terminal</p></div>'}
 
 /* ═══ SAVE ═══ */
 async function saveActive(){if(!AT||!AT.d)return;const r=await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:AT.p,content:AT.c})});if((await r.json()).ok){AT.o=AT.c;AT.d=false;renderTabs();setSB('Saved '+AT.p)}}
