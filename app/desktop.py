@@ -1,7 +1,6 @@
 """
 Open Seed | Desktop App
-Native macOS window using system WebKit.
-No Electron, no Chrome, no signing required.
+Click to launch. Server starts automatically. No terminal needed.
 """
 import subprocess
 import sys
@@ -15,39 +14,39 @@ ICON_PATH = os.path.join(APP_DIR, "icon.png")
 
 
 def set_dock_icon():
-    """Set the Dock icon and app name on macOS using pyobjc."""
+    """Set Dock icon + app name on macOS."""
     try:
-        import ctypes
-        import ctypes.util
-        # Change the process name at the OS level
-        libc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("c"))
-        # Set argv[0] so Activity Monitor / Dock shows "Open Seed"
-        name = b"Open Seed"
-        try:
-            libc.setprogname(name)
-        except Exception:
-            pass
-
-        from AppKit import NSApplication, NSImage, NSRunningApplication, NSProcessInfo
+        from AppKit import NSApplication, NSImage, NSProcessInfo
         from Foundation import NSBundle
-
         app = NSApplication.sharedApplication()
-
-        # Set icon
         icon = NSImage.alloc().initWithContentsOfFile_(ICON_PATH)
         if icon:
             app.setApplicationIconImage_(icon)
-
-        # Set process name
         NSProcessInfo.processInfo().setValue_forKey_("Open Seed", "processName")
-
-        # Set bundle info
         bundle = NSBundle.mainBundle()
         info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
         if info:
             info["CFBundleName"] = "Open Seed"
             info["CFBundleDisplayName"] = "Open Seed"
-            info["CFBundleExecutable"] = "Open Seed"
+    except Exception:
+        pass
+
+
+def kill_existing_server():
+    """Kill any existing server on our port."""
+    try:
+        import signal
+        result = subprocess.run(
+            ["lsof", "-ti", f":{PORT}"],
+            capture_output=True, text=True, timeout=3
+        )
+        for pid in result.stdout.strip().split("\n"):
+            if pid.strip():
+                try:
+                    os.kill(int(pid.strip()), signal.SIGTERM)
+                except (ProcessLookupError, ValueError):
+                    pass
+        time.sleep(0.5)
     except Exception:
         pass
 
@@ -57,14 +56,14 @@ def start_server():
     server_js = os.path.join(APP_DIR, "server.js")
     return subprocess.Popen(
         ["node", server_js, "--port", str(PORT), "--cwd", PROJECT_DIR],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         env=os.environ.copy()
     )
 
 
 def wait_for_server(timeout=15):
-    """Wait until server is ready."""
+    """Wait until server responds."""
     import urllib.request
     for _ in range(timeout * 4):
         try:
@@ -78,11 +77,15 @@ def wait_for_server(timeout=15):
 def main():
     import webview
 
-    # Set custom Dock icon before creating window
     set_dock_icon()
+    kill_existing_server()
 
-    # Start server in background
     server = start_server()
+
+    if not wait_for_server():
+        print("Server failed to start")
+        server.terminate()
+        sys.exit(1)
 
     def on_closing():
         server.terminate()
@@ -91,13 +94,6 @@ def main():
         except Exception:
             server.kill()
 
-    # Wait for server
-    if not wait_for_server():
-        print("Server failed to start")
-        server.terminate()
-        sys.exit(1)
-
-    # Create native window
     window = webview.create_window(
         title="Open Seed",
         url=f"http://localhost:{PORT}",
@@ -108,11 +104,7 @@ def main():
         text_select=True,
     )
     window.events.closing += on_closing
-
-    # Start the GUI (blocks until window is closed)
     webview.start(debug=False)
-
-    # Cleanup
     server.terminate()
 
 
