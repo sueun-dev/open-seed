@@ -1,11 +1,19 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("agent40", {
-  run: (params) => ipcRenderer.invoke("agent:run", params),
-  doctor: () => ipcRenderer.invoke("agent:doctor"),
-  checkComments: () => ipcRenderer.invoke("agent:check-comments"),
-  getTheme: () => ipcRenderer.invoke("theme:get"),
-  onStream: (callback) => {
-    ipcRenderer.on("agent:stream", (event, data) => callback(data));
-  }
+contextBridge.exposeInMainWorld("openseed", {
+  // Platform info
+  platform: process.platform,
+  isElectron: true,
+
+  // Window controls
+  minimize: () => ipcRenderer.send("window:minimize"),
+  maximize: () => ipcRenderer.send("window:maximize"),
+  close: () => ipcRenderer.send("window:close"),
+
+  // Dialog
+  openFolder: () => ipcRenderer.invoke("dialog:openFolder"),
+
+  // App info
+  version: "0.1.0",
+  name: "Open Seed"
 });

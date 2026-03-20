@@ -1,15 +1,78 @@
 {
   "name": "open-seed",
   "version": "0.1.0",
-  "description": "Open Seed — Autonomous AGI Coding Engine Desktop App",
+  "description": "Open Seed | Autonomous AGI Coding Engine",
+  "author": "sueun-dev",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "web": "node server.js",
     "dev": "node server.js",
-    "electron": "electron ."
+    "electron": "electron .",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "build": "electron-builder"
+  },
+  "build": {
+    "appId": "com.openseed.app",
+    "productName": "Open Seed",
+    "directories": {
+      "output": "../release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "server.js",
+      "index.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "engine",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../src",
+        "to": "src",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "darkModeSupport": true
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    },
+    "dmg": {
+      "title": "Open Seed",
+      "backgroundColor": "#0d1117"
+    }
   },
   "dependencies": {
     "electron": "^32.2.7"
+  },
+  "devDependencies": {
+    "electron-builder": "^25.1.8"
   }
 }
