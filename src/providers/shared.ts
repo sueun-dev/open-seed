@@ -18,6 +18,13 @@ export interface ProviderInvocationMetadata {
   streamed?: boolean;
 }
 
+/** Build an optional abort timeout. Returns null if timeoutMs is 0 or unset (no limit). */
+function createAbortTimeout(controller: AbortController, timeoutMs: number | undefined): ReturnType<typeof setTimeout> | null {
+  const ms = timeoutMs ?? 0;
+  if (ms <= 0) return null;
+  return setTimeout(() => controller.abort(), ms);
+}
+
 export async function requestJsonWithRetry<T>(params: {
   config: ProviderConfig;
   url: string;
@@ -30,16 +37,16 @@ export async function requestJsonWithRetry<T>(params: {
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), params.config.timeoutMs ?? 15_000);
+    const timeout = createAbortTimeout(controller, params.config.timeoutMs);
 
     try {
       const response = await fetchImpl(params.url, {
         method: "POST",
         headers: params.headers,
         body: JSON.stringify(params.body),
-        signal: controller.signal
+        ...(timeout ? { signal: controller.signal } : {})
       });
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
 
       if (!response.ok) {
         const body = await response.text();
@@ -55,7 +62,7 @@ export async function requestJsonWithRetry<T>(params: {
         metadata: { attempts: attempt }
       };
     } catch (error) {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       if (attempt >= attempts || !isRetryableError(error)) {
         throw error;
       }
@@ -99,16 +106,16 @@ export async function requestSseWithRetry<T = unknown>(params: {
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), params.config.timeoutMs ?? 15_000);
+    const timeout = createAbortTimeout(controller, params.config.timeoutMs);
 
     try {
       const response = await fetchImpl(params.url, {
         method: "POST",
         headers: params.headers,
         body: JSON.stringify(params.body),
-        signal: controller.signal
+        ...(timeout ? { signal: controller.signal } : {})
       });
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
 
       if (!response.ok) {
         const body = await response.text();
@@ -128,7 +135,7 @@ export async function requestSseWithRetry<T = unknown>(params: {
         metadata: { attempts: attempt, streamed: true }
       };
     } catch (error) {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       if (attempt >= attempts || !isRetryableError(error)) {
         throw error;
       }

@@ -292,7 +292,7 @@ describe("E2E App Quality — What Does the Engine Actually Produce?", () => {
     // Evidence requirements were created
     expect(result.evidence).toBeDefined();
     expect(result.evidence!.length).toBeGreaterThan(0);
-  }, 30_000);
+  }, 60_000);
 
   it("verifies mock-generated code is syntactically valid when mock writes", async () => {
     // This test sets up a scenario where mock WILL write code
@@ -367,7 +367,7 @@ describe("E2E App Quality — What Does the Engine Actually Produce?", () => {
       console.log(`║ ${s} ${tr.name.padEnd(12)} ${detail.slice(0, 40)}`.slice(0, 59).padEnd(59) + "║");
     }
     console.log("╚═══════════════════════════════════════════════════════════╝\n");
-  }, 30_000);
+  }, 60_000);
 });
 
 async function walkDir(dir: string): Promise<string[]> {

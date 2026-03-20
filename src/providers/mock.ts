@@ -24,8 +24,19 @@ function makePlannerArtifact(request: ProviderRequest): PlannerArtifact {
 }
 
 function makeExecutorArtifact(request: ProviderRequest): ExecutorArtifact {
+  // If prompt contains tool results from a previous turn, the task is done —
+  // return empty toolCalls so the agentic loop can terminate.
+  if (/Tool results:/i.test(request.prompt) || /\[assistant\]:/i.test(request.prompt)) {
+    return createMockSpecialistArtifact({
+      roleId: "executor",
+      category: "execution",
+      prompt: request.prompt,
+      toolCalls: []
+    }) as ExecutorArtifact;
+  }
+
   const calls = buildToolCalls(request);
-  // Ensure at least one tool call so the executor validation passes
+  // First turn: ensure at least one tool call so the executor validation passes
   if (calls.length === 0) {
     calls.push({ name: "repo_map", reason: "Inspect repository structure", input: {} });
   }

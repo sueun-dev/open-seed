@@ -13,7 +13,7 @@
  * No more "empty toolCalls" problem. No more JSON parsing failures.
  */
 
-import type { AgentConfig, NativeToolDef, ProviderResponse, RoleDefinition, ToolCall, ToolResult } from "../core/types.js";
+import type { AgentConfig, NativeToolCall, NativeToolDef, ProviderResponse, RoleDefinition, ToolCall, ToolName, ToolResult } from "../core/types.js";
 import { ToolRuntime, listToolDefinitions } from "../tools/runtime.js";
 import { ApprovalEngine } from "../safety/approval.js";
 import { SessionStore } from "../sessions/store.js";
@@ -65,14 +65,70 @@ export function buildNativeTools(role: RoleDefinition): NativeToolDef[] {
 }
 
 /**
+ * Extract tool calls from a provider response.
+ *
+ * Priority:
+ * 1. Native tool_calls from the provider (OpenAI function calling / Anthropic tool_use)
+ * 2. JSON-embedded toolCalls in the response text (legacy fallback)
+ */
+function extractToolCalls(response: ProviderResponse): { toolCalls: ToolCall[]; finalText: string; isDone: boolean } {
+  // Priority 1: Native tool calls from provider
+  if (response.toolCalls && response.toolCalls.length > 0) {
+    const toolCalls: ToolCall[] = response.toolCalls.map(tc => ({
+      name: tc.name as ToolName,
+      reason: `native tool call ${tc.id}`,
+      input: tc.arguments
+    }));
+    return { toolCalls, finalText: response.text, isDone: false };
+  }
+
+  // Priority 2: Parse JSON text for embedded toolCalls (legacy fallback)
+  const text = response.text.trim();
+  if (!text) {
+    return { toolCalls: [], finalText: "", isDone: true };
+  }
+
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Try to extract JSON from markdown fences
+    const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (fenceMatch) { try { parsed = JSON.parse(fenceMatch[1]); } catch {} }
+  }
+
+  if (parsed) {
+    // Extract toolCalls from any of: toolCalls, tool_calls, actions
+    const rawCalls = parsed.toolCalls || parsed.tool_calls || parsed.actions || [];
+    if (Array.isArray(rawCalls) && rawCalls.length > 0) {
+      const toolCalls: ToolCall[] = rawCalls.map((tc: any) => ({
+        name: (tc.name || tc.tool || "") as ToolName,
+        reason: tc.reason || tc.description || "",
+        input: tc.input || tc.arguments || tc.params || {}
+      })).filter((tc: ToolCall) => tc.name);
+      if (toolCalls.length > 0) {
+        return { toolCalls, finalText: parsed.summary || parsed.kind || text, isDone: false };
+      }
+    }
+    // Model returned a final artifact with no tool calls — done
+    if (parsed.kind === "execution" || parsed.summary) {
+      return { toolCalls: [], finalText: text, isDone: true };
+    }
+  }
+
+  // Plain text with no tool calls — done
+  return { toolCalls: [], finalText: text, isDone: true };
+}
+
+/**
  * Run the agentic loop — model calls tools, we execute, send results back.
  *
  * Flow:
  * 1. Send system prompt + user prompt + tool definitions to LLM
- * 2. LLM responds with text (done) or tool_calls
+ * 2. LLM responds with text (done) or tool_calls (native or JSON)
  * 3. If tool_calls: execute each one, collect results
  * 4. Send tool results back to LLM as new turn
- * 5. Repeat from step 2 until LLM responds with text only
+ * 5. Repeat from step 2 until LLM responds with text only (no tool calls)
  */
 export async function runAgenticLoop(params: AgenticRunParams): Promise<AgenticResult> {
   const maxTurns = params.maxTurns ?? 15;
@@ -105,7 +161,8 @@ export async function runAgenticLoop(params: AgenticRunParams): Promise<AgenticR
   for (let turn = 0; turn < maxTurns; turn++) {
     totalTurns++;
 
-    // Call LLM with tools
+    // Call LLM with tools — use "text" format instead of "json" so the
+    // provider can freely return native tool_calls without json_object constraint
     const response = await params.providerRegistry.invokeWithFailover(
       params.config,
       params.providerId as any,
@@ -133,32 +190,11 @@ export async function runAgenticLoop(params: AgenticRunParams): Promise<AgenticR
       });
     }
 
-    const text = response.text.trim();
+    // Extract tool calls — native first, then JSON fallback
+    const { toolCalls, finalText: responseText, isDone } = extractToolCalls(response);
 
-    // Try to parse as JSON with toolCalls
-    let toolCalls: ToolCall[] = [];
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed.toolCalls && Array.isArray(parsed.toolCalls) && parsed.toolCalls.length > 0) {
-        toolCalls = parsed.toolCalls.map((tc: any) => ({
-          name: tc.name,
-          reason: tc.reason || "",
-          input: tc.input || tc.arguments || {}
-        }));
-        finalText = parsed.summary || parsed.kind || "";
-      } else {
-        // No tool calls — model is done
-        finalText = text;
-        break;
-      }
-    } catch {
-      // Not JSON — model is done, returned plain text
-      finalText = text;
-      break;
-    }
-
-    if (toolCalls.length === 0) {
-      finalText = text;
+    if (isDone || toolCalls.length === 0) {
+      finalText = responseText || response.text;
       break;
     }
 
@@ -177,7 +213,7 @@ export async function runAgenticLoop(params: AgenticRunParams): Promise<AgenticR
     // Add to conversation
     messages.push({
       role: "assistant",
-      content: text
+      content: response.text || JSON.stringify({ toolCalls: toolCalls.map(tc => ({ name: tc.name, input: tc.input })) })
     });
     messages.push({
       role: "user",
@@ -195,13 +231,26 @@ export async function runAgenticLoop(params: AgenticRunParams): Promise<AgenticR
     }
   }
 
-  // Parse final text as artifact
+  // Parse final text as artifact — include tool execution evidence
   let summary = finalText;
   try {
     const parsed = JSON.parse(finalText);
     summary = parsed.summary || parsed.kind || finalText;
   } catch {
     // plain text summary is fine
+  }
+
+  // Enrich summary with tool execution evidence so reviewer can see what happened
+  if (allToolResults.length > 0) {
+    const successTools = allToolResults.filter(r => r.ok);
+    const failedTools = allToolResults.filter(r => !r.ok);
+    const toolEvidence = [
+      `\n\n--- Tool Execution Evidence ---`,
+      `Tools executed: ${allToolResults.length} (${successTools.length} ok, ${failedTools.length} failed)`,
+      ...successTools.slice(0, 10).map(r => `✓ ${r.name}: ${typeof r.output === "string" ? r.output.slice(0, 100) : JSON.stringify(r.output).slice(0, 100)}`),
+      ...failedTools.slice(0, 5).map(r => `✗ ${r.name}: ${r.error?.slice(0, 100)}`),
+    ].join("\n");
+    summary += toolEvidence;
   }
 
   return {

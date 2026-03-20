@@ -83,17 +83,28 @@ describe("runSoakHarness", () => {
   it("skips providers that are not ready", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "agent40-soak-skip-"));
     const config = createDefaultConfig();
-    config.providers.openai.defaultModel = "gpt-test";
+    // Use a provider that definitely has no credentials — gemini with no env var
+    config.providers.gemini.defaultModel = "gemini-test";
+
+    // Create a registry where gemini is explicitly NOT configured
+    const stubNotConfigured: ProviderAdapter = {
+      id: "gemini",
+      isConfigured() { return false; },
+      invoke() { throw new Error("not configured"); }
+    };
+
+    const registry = new ProviderRegistry({ gemini: stubNotConfigured });
 
     const report = await runSoakHarness({
       cwd,
       config,
+      registry,
       rounds: 1,
-      providers: ["openai"]
+      providers: ["gemini"]
     });
 
     expect(report.providers[0]).toMatchObject({
-      providerId: "openai",
+      providerId: "gemini",
       status: "skipped"
     });
   });

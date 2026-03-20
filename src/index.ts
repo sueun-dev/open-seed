@@ -56,6 +56,39 @@ export * from "./orchestration/microagents.js";
 export * from "./orchestration/model-variants.js";
 export * from "./orchestration/sisyphus.js";
 
+export * from "./orchestration/engine-wiring.js";
+export * from "./orchestration/omo-hooks-full.js";
+export * from "./orchestration/builtin-skills.js";
+export * from "./tools/omo-tools.js";
+export * from "./mcp/builtin-mcps.js";
+
+// AGI Autonomy Systems
+export * from "./orchestration/circuit-breaker.js";
+export * from "./orchestration/strategy-branching.js";
+export * from "./orchestration/dependency-graph.js";
+export * from "./orchestration/confidence-engine.js";
+export * from "./orchestration/graceful-degradation.js";
+
+// Final research gaps filled
+export * from "./orchestration/language-reviewers.js";
+export * from "./orchestration/human-in-the-loop.js";
+export * from "./orchestration/skill-chain.js";
+
+// Research-derived features
+export * from "./orchestration/workspace-checkpoint.js";
+export * from "./orchestration/live-error-monitor.js";
+export * from "./orchestration/interview-mode.js";
+export * from "./orchestration/debate-mode.js";
+export * from "./orchestration/pr-checks.js";
+export * from "./orchestration/custom-commands.js";
+export * from "./orchestration/rate-limit-scheduler.js";
+
+// One-Prompt-to-App
+export * from "./orchestration/prompt-discovery.js";
+export * from "./orchestration/blueprint.js";
+export * from "./orchestration/full-stack-orchestrator.js";
+export * from "./orchestration/quality-gate.js";
+
 // Memory
 export * from "./memory/project-memory.js";
 export * from "./memory/memory-pipeline.js";

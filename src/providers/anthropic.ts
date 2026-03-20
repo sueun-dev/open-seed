@@ -1,7 +1,7 @@
 import childProcess from "node:child_process";
 import process from "node:process";
 
-import type { ProviderAdapter, ProviderConfig, ProviderInvokeOptions, ProviderRequest, ProviderResponse } from "../core/types.js";
+import type { ProviderAdapter, ProviderConfig, ProviderInvokeOptions, ProviderRequest, ProviderResponse, NativeToolCall } from "../core/types.js";
 import { getProviderAuthStatus, resolveProviderAuth } from "./auth.js";
 import { normalizeProviderText, requestJsonWithRetry, requestSseWithRetry } from "./shared.js";
 
@@ -18,7 +18,30 @@ export type ClaudeCliRunner = (params: ClaudeCliRunParams) => Promise<{
   usage?: ProviderResponse["usage"];
 }>;
 
-const CLAUDE_CLI_MIN_TIMEOUT_MS = 120_000;
+// No timeout limit — AGI pipeline can run for hours
+const CLAUDE_CLI_MIN_TIMEOUT_MS = 0;
+
+/** Convert our NativeToolDef[] to Anthropic's tools format */
+function buildAnthropicTools(request: ProviderRequest): Array<Record<string, unknown>> | undefined {
+  if (!request.tools || request.tools.length === 0) return undefined;
+  return request.tools.map(t => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.parameters
+  }));
+}
+
+/** Parse Anthropic tool_use content blocks into NativeToolCall[] */
+function parseAnthropicToolUse(content: Array<{ type?: string; id?: string; name?: string; input?: Record<string, unknown> }> | undefined): NativeToolCall[] {
+  if (!content) return [];
+  return content
+    .filter(block => block.type === "tool_use" && block.name)
+    .map(block => ({
+      id: block.id ?? `toolu_${Math.random().toString(36).slice(2, 10)}`,
+      name: block.name!,
+      arguments: block.input ?? {}
+    }));
+}
 
 export class AnthropicProviderAdapter implements ProviderAdapter {
   readonly id = "anthropic";
@@ -43,9 +66,16 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
     const url = auth.authMode === "oauth"
       ? normalizeAnthropicOauthUrl(config.baseUrl)
       : (config.baseUrl ?? "https://api.anthropic.com/v1/messages");
+
+    const tools = buildAnthropicTools(request);
+    const hasTools = tools !== undefined;
+
     if (options?.onTextDelta) {
       let text = "";
       let usage: ProviderResponse["usage"] | undefined;
+      const collectedToolUse: Map<string, { id: string; name: string; jsonStr: string }> = new Map();
+      let currentToolUseId = "";
+
       const { metadata } = await requestSseWithRetry({
         config,
         url,
@@ -64,7 +94,8 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
               role: "user",
               content: request.prompt
             }
-          ]
+          ],
+          ...(hasTools ? { tools } : {})
         },
         fetchImpl: this.fetchImpl,
         async onMessage(message) {
@@ -72,12 +103,32 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
             return;
           }
           const json = JSON.parse(message.data) as {
-            delta?: { type?: string; text?: string };
+            type?: string;
+            index?: number;
+            content_block?: { type?: string; id?: string; name?: string; text?: string };
+            delta?: { type?: string; text?: string; partial_json?: string };
             usage?: { input_tokens?: number; output_tokens?: number };
           };
+          // Text content
           if (message.event === "content_block_delta" && json.delta?.type === "text_delta" && json.delta.text) {
             text += json.delta.text;
             await options.onTextDelta?.(json.delta.text, "anthropic");
+          }
+          // Tool use content block start
+          if (message.event === "content_block_start" && json.content_block?.type === "tool_use") {
+            currentToolUseId = json.content_block.id ?? `toolu_${Math.random().toString(36).slice(2, 10)}`;
+            collectedToolUse.set(currentToolUseId, {
+              id: currentToolUseId,
+              name: json.content_block.name ?? "",
+              jsonStr: ""
+            });
+          }
+          // Tool use input JSON delta
+          if (message.event === "content_block_delta" && json.delta?.type === "input_json_delta" && json.delta.partial_json) {
+            const existing = collectedToolUse.get(currentToolUseId);
+            if (existing) {
+              existing.jsonStr += json.delta.partial_json;
+            }
           }
           if (json.usage) {
             usage = {
@@ -87,10 +138,21 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
           }
         }
       });
+
+      // Parse accumulated tool calls
+      const nativeToolCalls: NativeToolCall[] = [];
+      for (const [, tc] of collectedToolUse) {
+        if (!tc.name) continue;
+        let args: Record<string, unknown> = {};
+        try { args = JSON.parse(tc.jsonStr || "{}"); } catch { /* malformed */ }
+        nativeToolCalls.push({ id: tc.id, name: tc.name, arguments: args });
+      }
+
       return {
         provider: "anthropic",
         model: request.model ?? config.defaultModel,
         text: normalizeProviderText(text, request),
+        toolCalls: nativeToolCalls.length > 0 ? nativeToolCalls : undefined,
         usage,
         metadata: {
           ...metadata,
@@ -99,8 +161,10 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
         }
       };
     }
+
+    // Non-streaming path
     const { json, metadata } = await requestJsonWithRetry<{
-      content?: Array<{ type?: string; text?: string }>;
+      content?: Array<{ type?: string; id?: string; name?: string; text?: string; input?: Record<string, unknown> }>;
       usage?: { input_tokens?: number; output_tokens?: number };
     }>({
       config,
@@ -118,15 +182,20 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
             role: "user",
             content: request.prompt
           }
-        ]
+        ],
+        ...(hasTools ? { tools } : {})
       },
       fetchImpl: this.fetchImpl
     });
-    const text = normalizeProviderText(json.content?.find((part) => part.type === "text")?.text ?? "", request);
+    const textParts = json.content?.filter(part => part.type === "text").map(part => part.text ?? "") ?? [];
+    const text = normalizeProviderText(textParts.join(""), request);
+    const nativeToolCalls = parseAnthropicToolUse(json.content);
+
     return {
       provider: "anthropic",
       model: request.model ?? config.defaultModel,
       text,
+      toolCalls: nativeToolCalls.length > 0 ? nativeToolCalls : undefined,
       usage: {
         inputTokens: json.usage?.input_tokens,
         outputTokens: json.usage?.output_tokens
@@ -218,12 +287,8 @@ async function runClaudeCli(params: ClaudeCliRunParams): Promise<{
     "--",
     params.request.prompt
   ];
-  // Note: --json-schema causes Claude to output a schema definition instead of actual JSON.
-  // The system prompt already instructs the model to return JSON, so no schema flag needed.
 
   return await new Promise((resolve, reject) => {
-    // Remove CLAUDECODE to prevent nested session detection when agent40
-    // spawns claude CLI from inside a Claude Code session.
     const childEnv: Record<string, string | undefined> = { ...process.env, CLAUDE_CODE_ENTRYPOINT: process.env.CLAUDE_CODE_ENTRYPOINT ?? "agent40" };
     delete childEnv.CLAUDECODE;
 
@@ -236,9 +301,10 @@ async function runClaudeCli(params: ClaudeCliRunParams): Promise<{
     let stdout = "";
     let stderr = "";
     let streamed = false;
-    const timeout = setTimeout(() => {
-      child.kill("SIGTERM");
-    }, Math.max(params.config.timeoutMs ?? 15_000, CLAUDE_CLI_MIN_TIMEOUT_MS));
+    const cliTimeoutMs = params.config.timeoutMs || 0;
+    const timeout = cliTimeoutMs > 0
+      ? setTimeout(() => { child.kill("SIGTERM"); }, cliTimeoutMs)
+      : null;
 
     child.stdout.on("data", (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
@@ -249,11 +315,11 @@ async function runClaudeCli(params: ClaudeCliRunParams): Promise<{
       stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
     });
     child.on("error", (error) => {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       reject(error);
     });
     child.on("close", (code) => {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       if (code !== 0) {
         reject(new Error(stderr.trim() || stdout.trim() || `Claude CLI exited with code ${code ?? "unknown"}`));
         return;

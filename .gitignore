@@ -4,6 +4,7 @@ dist/
 .research/
 .pytest_cache/
 coverage/
+workspace/
 *.tmp
 *.log
 .DS_Store

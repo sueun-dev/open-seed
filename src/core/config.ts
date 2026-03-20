@@ -5,6 +5,21 @@ import type { AgentConfig } from "./types.js";
 import { getConfigPath } from "./paths.js";
 import { ensureDir, fileExists } from "./utils.js";
 
+/**
+ * OMO-aligned defaults — batteries included, zero config.
+ *
+ * Philosophy: EVERYTHING is ON by default. Users disable what they don't need.
+ * Matches oh-my-openagent's "install and forget" approach.
+ *
+ * - All 3 providers enabled (auto-detect credentials)
+ * - All 40 roles active
+ * - All tools enabled (browser, LSP, hashEdit, repoMap, AST grep, web search)
+ * - Safety in auto mode (OMO auto-approves everything except git push)
+ * - Sandbox enabled (Plandex-style safe writes)
+ * - Self-healing, oracle escalation, verify-fix all active
+ * - Session recovery, context monitoring, think mode all automatic
+ * - Background agents with concurrency control
+ */
 export function createDefaultConfig(): AgentConfig {
   return {
     providers: {
@@ -13,27 +28,27 @@ export function createDefaultConfig(): AgentConfig {
         apiKeyEnv: "ANTHROPIC_API_KEY",
         authMode: "oauth",
         oauthTokenEnv: "ANTHROPIC_OAUTH_TOKEN",
-        defaultModel: "set-me",
-        timeoutMs: 15000,
-        maxRetries: 2
+        defaultModel: "claude-opus-4-6",
+        timeoutMs: 0,
+        maxRetries: 3
       },
       openai: {
         enabled: true,
         apiKeyEnv: "OPENAI_API_KEY",
-        authMode: "api_key",
+        authMode: "oauth",
         oauthTokenEnv: "OPENAI_OAUTH_TOKEN",
-        defaultModel: "set-me",
-        timeoutMs: 15000,
-        maxRetries: 2
+        defaultModel: "gpt-5.4",
+        timeoutMs: 0,
+        maxRetries: 3
       },
       gemini: {
         enabled: true,
         apiKeyEnv: "GEMINI_API_KEY",
         authMode: "api_key",
         oauthTokenEnv: "GEMINI_OAUTH_TOKEN",
-        defaultModel: "set-me",
-        timeoutMs: 15000,
-        maxRetries: 2
+        defaultModel: "gemini-2.5-pro",
+        timeoutMs: 0,
+        maxRetries: 3
       }
     },
     routing: {
@@ -41,24 +56,48 @@ export function createDefaultConfig(): AgentConfig {
         planning: "anthropic",
         research: "anthropic",
         execution: "openai",
-        frontend: "gemini",
+        frontend: "anthropic",
         review: "openai"
       }
     },
     safety: {
-      defaultMode: "ask",
-      autoApprove: ["read", "search", "lsp_diagnostics", "test_dry_run"],
-      requireApproval: ["write", "edit", "bash_side_effect", "browser_submit", "git_push"]
+      // OMO style: auto-approve everything except dangerous actions
+      defaultMode: "auto",
+      autoApprove: [
+        "read",
+        "search",
+        "lsp_diagnostics",
+        "test_dry_run",
+        "write",
+        "edit",
+        "bash_side_effect",
+        "browser_submit"
+      ],
+      requireApproval: ["git_push"]
     },
     roles: {
-      active: ["orchestrator", "planner", "executor", "reviewer", "researcher"]
+      // ALL 40 roles active by default — OMO enables all agents
+      active: [
+        "orchestrator", "planner", "executor", "reviewer", "researcher",
+        "repo-mapper", "search-specialist", "dependency-analyst",
+        "security-auditor", "risk-analyst", "benchmark-analyst", "issue-triage-agent",
+        "api-designer", "docs-writer", "prompt-engineer", "release-manager",
+        "cost-optimizer", "model-router", "git-strategist", "pr-author",
+        "lsp-analyst", "ast-rewriter", "build-doctor", "test-engineer",
+        "debugger", "backend-engineer", "db-engineer", "performance-engineer",
+        "devops-engineer", "cicd-engineer", "observability-engineer",
+        "refactor-specialist", "code-simplifier", "migration-engineer", "toolsmith",
+        "frontend-engineer", "ux-designer", "accessibility-auditor",
+        "browser-operator", "compliance-reviewer"
+      ]
     },
     tools: {
+      // All tools ON — OMO registers all 26 tools by default
       browser: true,
       lsp: true,
       hashEdit: true,
       repoMap: true,
-      parallelReadMax: 4
+      parallelReadMax: 8
     },
     team: {
       maxWorkers: 5,
@@ -71,30 +110,83 @@ export function createDefaultConfig(): AgentConfig {
     browser: {
       enabled: true,
       headless: true,
-      doctorSmokeTest: false
+      doctorSmokeTest: true
     },
     lsp: {
       enabled: true
     },
     retry: {
-      maxToolRetries: 3,
-      maxParseRetries: 2,
+      maxToolRetries: 5,
+      maxParseRetries: 3,
       retriablePatterns: [
         "SyntaxError",
         "ENOENT",
         "ETIMEDOUT",
         "ECONNRESET",
         "rate_limit",
+        "overloaded",
         "503",
-        "429"
+        "429",
+        "502",
+        "500"
       ]
     },
     sandbox: {
-      enabled: false,
+      // OMO-style: sandbox ON for safe writes, auto-apply on pass
+      enabled: true,
       autoApplyOnPass: true
     },
+    tmux: {
+      enabled: true,
+      layout: "main-vertical",
+      mainPaneSize: 60
+    },
+    disabled: {
+      // OMO style: everything ON, disable explicitly
+      hooks: [],
+      agents: [],
+      tools: [],
+      skills: [],
+      mcps: [],
+      commands: []
+    },
+    experimental: {
+      taskSystem: true,
+      preemptiveCompaction: true,
+      safeHookCreation: false,
+      dynamicContextPruning: false
+    },
+    notification: {
+      enabled: true,
+      minDurationMs: 30000
+    },
+    websearchProvider: "exa",
+    backgroundConcurrency: 5,
     prompts: {},
-    rules: []
+    rules: [
+      // Built-in safety rules — OMO's tool guards
+      {
+        id: "block-env-writes",
+        description: "Block writes to .env, .credentials, secrets files",
+        filePatterns: [".env", ".env.*", "**/.env", "**/.env.*", "**/.credentials*", "**/secrets.*"],
+        approvalOverride: "block",
+        enabled: true
+      },
+      {
+        id: "block-destructive-commands",
+        description: "Block rm -rf, DROP TABLE, and other destructive commands",
+        commandPatterns: ["rm -rf", "rm -fr", "DROP TABLE", "DROP DATABASE", "truncate table"],
+        approvalOverride: "block",
+        enabled: true
+      },
+      {
+        id: "block-force-push",
+        description: "Block git force push",
+        commandPatterns: ["push --force", "push -f", "reset --hard origin"],
+        approvalOverride: "block",
+        enabled: true
+      }
+    ]
   };
 }
 

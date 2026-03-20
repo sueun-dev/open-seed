@@ -30,6 +30,10 @@ describe("ToolRuntime", () => {
   it("blocks write calls when approval is required", async () => {
     const cwd = await makeProject();
     const config = createDefaultConfig();
+    // Override safety to "ask" mode for this test — default is "auto" (OMO style)
+    config.safety.defaultMode = "ask";
+    config.safety.autoApprove = ["read", "search", "lsp_diagnostics", "test_dry_run"];
+    config.safety.requireApproval = ["write", "edit", "bash_side_effect", "browser_submit", "git_push"];
     const store = new SessionStore(cwd, config.sessions);
     const session = await store.createSession("test write approval");
     const role = resolveRole(getRoleRegistry(config), "executor");

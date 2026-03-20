@@ -39,12 +39,8 @@ export class ProviderRegistry {
       }
     }
 
-    // Only use mock if explicitly configured as the preferred provider
-    if (providerId === "mock") {
-      return { providerId: "mock", adapter: this.get("mock"), usedMockFallback: true };
-    }
-
-    throw new Error(`No configured provider available for role ${role.id}. Preferred: ${providerId}. Configure at least one provider with valid credentials.`);
+    // Never fall back to mock in production. Require real provider credentials.
+    throw new Error(`No configured provider available for role ${role.id}. Preferred: ${providerId}. Configure at least one provider with valid credentials (OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY).`);
   }
 
   async invokeWithFailover(
@@ -77,19 +73,19 @@ export class ProviderRegistry {
   }
 
   private getInvocationOrder(config: AgentConfig, preferredProviderId: ProviderId): ProviderId[] {
-    if (preferredProviderId === "mock") {
+    const configuredProviders = (["anthropic", "openai", "gemini"] as const)
+      .filter((providerId) => this.get(providerId).isConfigured(config.providers[providerId]));
+
+    // If no real providers configured and tests explicitly passed mock, allow it
+    if (configuredProviders.length === 0 && preferredProviderId === "mock") {
       return ["mock"];
     }
 
-    const configuredProviders = (["anthropic", "openai", "gemini"] as const)
-      .filter((providerId) => this.get(providerId).isConfigured(config.providers[providerId]));
     const ordered: ProviderId[] = [
       preferredProviderId,
       ...configuredProviders.filter((providerId) => providerId !== preferredProviderId)
-    ];
+    ].filter(id => id !== "mock" || configuredProviders.length === 0);
 
-    // NEVER fall back to mock in production. If all real providers fail, throw.
-    // Mock is only used when explicitly set as the preferred provider.
     return Array.from(new Set(ordered));
   }
 }
