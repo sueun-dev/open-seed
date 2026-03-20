@@ -61,12 +61,22 @@ const server = http.createServer(async (req, res) => {
         fs.mkdirSync(childCwd, { recursive: true });
       }
       // Copy agent config to workspace so engine has provider settings
+      // Always overwrite to ensure timeouts are 0 (unlimited)
       const srcConfig = path.join(CWD, ".agent", "config.json");
       const dstConfigDir = path.join(childCwd, ".agent");
       const dstConfig = path.join(dstConfigDir, "config.json");
-      if (fs.existsSync(srcConfig) && !fs.existsSync(dstConfig)) {
+      if (fs.existsSync(srcConfig)) {
         if (!fs.existsSync(dstConfigDir)) fs.mkdirSync(dstConfigDir, { recursive: true });
-        fs.copyFileSync(srcConfig, dstConfig);
+        try {
+          const cfg = JSON.parse(fs.readFileSync(srcConfig, "utf8"));
+          // Force all provider timeouts to 0 (unlimited)
+          for (const p of ["openai", "anthropic", "gemini"]) {
+            if (cfg.providers?.[p]) cfg.providers[p].timeoutMs = 0;
+          }
+          fs.writeFileSync(dstConfig, JSON.stringify(cfg, null, 2), "utf8");
+        } catch {
+          fs.copyFileSync(srcConfig, dstConfig);
+        }
       }
     }
 
