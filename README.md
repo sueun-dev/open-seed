@@ -20,27 +20,27 @@
 
 ## What is Open Seed?
 
-Open Seed is an **autonomous AI agent** that builds complete software from a single prompt. It does not autocomplete. It does not suggest. It **plans, writes, tests, debugs, and ships** — fully autonomously.
+Open Seed is an **autonomous AI agent** that builds complete software from a single prompt. It does not autocomplete. It does not suggest. It **plans, writes, tests, debugs, and ships** |fully autonomously.
 
 ```
-$ openseed run "todo 앱 만들어줘"
+$ openseed run "Build a full-stack todo app"
 
-→ Phase 1: ANALYZE — intent classification, codebase assessment
-→ Phase 2: DESIGN — architecture, file structure, task breakdown
-→ Phase 3: BUILD — 40 specialist roles write complete code
-→ Phase 4: VERIFY — type-check, tests, build validation
-→ Phase 5: IMPROVE — security audit, performance, test coverage
-→ Phase 6: REVIEW — final quality gate
+→ Phase 1: ANALYZE    intent classification, codebase assessment
+→ Phase 2: DESIGN     architecture, file structure, task breakdown
+→ Phase 3: BUILD      40 specialist roles write complete code
+→ Phase 4: VERIFY     type-check, tests, build validation
+→ Phase 5: IMPROVE    security audit, performance, test coverage
+→ Phase 6: REVIEW     final quality gate
 
 ✓ 6/6 phases passed
-📁 workspace/todo-app/ — complete runnable project
+📁 workspace/todo-app/    complete runnable project
 ```
 
 Powered by **GPT-5.4 + Claude Opus 4.6** via OAuth. **$0 cost** with subscription.
 
 ---
 
-## AGI Pipeline — The Prometheus Engine
+## AGI Pipeline |The Prometheus Engine
 
 Every request flows through a 6-phase autonomous pipeline:
 
@@ -133,7 +133,7 @@ npm run build
 node app/server.js --port 4040
 ```
 
-Open **http://localhost:4040** — full IDE with AGI mode, explorer, editor, terminal, AI chat.
+Open **http://localhost:4040** |full IDE with AGI mode, explorer, editor, terminal, AI chat.
 
 ### CLI
 
@@ -173,7 +173,7 @@ workspace/todo-app/
 
 ---
 
-## Provider Setup — $0 with Subscriptions
+## Provider Setup |$0 with Subscriptions
 
 ### OpenAI (GPT-5.4 via Codex OAuth)
 ```bash
@@ -246,13 +246,13 @@ No API keys needed. OAuth tokens are detected automatically. Or set API keys in 
 
 Full IDE experience in the browser:
 
-- **AGI Mode** — 6-phase autonomous pipeline with real-time progress dashboard
-- **File Explorer** — collapsible folder tree, create/rename/delete, right-click context menu
-- **Code Editor** — syntax highlighting, line numbers, tab indent, Cmd+S save
-- **Terminal** — real shell with `cd`, command history, streaming output
-- **AI Chat** — Build / Ask / AGI modes with thinking animation + event cards
-- **Settings** — Providers, Safety, Engine, Tools, Expert configuration tabs
-- **OAuth Manager** — one-click provider authentication
+- **AGI Mode** |6-phase autonomous pipeline with real-time progress dashboard
+- **File Explorer** |collapsible folder tree, create/rename/delete, right-click context menu
+- **Code Editor** |syntax highlighting, line numbers, tab indent, Cmd+S save
+- **Terminal** |real shell with `cd`, command history, streaming output
+- **AI Chat** |Build / Ask / AGI modes with thinking animation + event cards
+- **Settings** |Providers, Safety, Engine, Tools, Expert configuration tabs
+- **OAuth Manager** |one-click provider authentication
 
 | Shortcut | Action |
 |---|---|
@@ -282,7 +282,7 @@ Full IDE experience in the browser:
 
 ```
 E2E AGI Pipeline Test:
-  Prompt: "todo 앱 만들어줘"
+  Prompt: "Build a full-stack todo app"
   Steps: 6/6 passed (ANALYZE → DESIGN → BUILD → VERIFY → IMPROVE → REVIEW)
   Files: Complete project with package.json, src/, tests/, dist/
   Build: npm install + vite build auto-executed
