@@ -273,6 +273,32 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── Git Status API ──
+  if (url.pathname === "/api/git/status" && req.method === "GET") {
+    try {
+      const { execSync } = require("node:child_process");
+      const raw = execSync("git status --porcelain -u", { cwd: CWD, encoding: "utf-8", timeout: 5000 });
+      const status = {};
+      for (const line of raw.split("\n").filter(Boolean)) {
+        const code = line.slice(0, 2);
+        const file = line.slice(3);
+        let s = "untracked";
+        if (code.includes("M")) s = "modified";
+        else if (code.includes("A")) s = "added";
+        else if (code.includes("D")) s = "deleted";
+        else if (code.includes("R")) s = "renamed";
+        else if (code.includes("?")) s = "untracked";
+        status[file] = s;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(status));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("{}");
+    }
+    return;
+  }
+
   // ── File viewer ──
   if (url.pathname === "/api/files" && req.method === "GET") {
     const files = [];
