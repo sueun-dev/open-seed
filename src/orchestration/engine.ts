@@ -584,7 +584,14 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     }) as Promise<ResearchArtifact>
     : Promise.resolve(undefined);
 
-  const [plannerOutput, researchOutput] = await Promise.all([plannerPromise, researchPromise]);
+  const [rawPlannerOutput, researchOutput] = await Promise.all([plannerPromise, researchPromise]);
+
+  // Defensive: ensure plannerOutput always has safe defaults
+  const plannerOutput = {
+    ...rawPlannerOutput,
+    summary: rawPlannerOutput?.summary || "",
+    tasks: Array.isArray(rawPlannerOutput?.tasks) ? rawPlannerOutput.tasks : [],
+  } as PlannerArtifact;
 
   // Fire after.plan hook
   await hooks.fire("after.plan", { sessionId: session.id, task: options.task, event: "after.plan", data: { plan: plannerOutput.summary, research: researchOutput?.summary } });
@@ -652,7 +659,7 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   // ─── Phase: Factcheck ───────────────────────────────────────────────────
 
   // Verify assumptions in the planner's output before execution
-  const planClaims = extractClaims(plannerOutput.summary + " " + plannerOutput.tasks.map(t => t.title).join(" "));
+  const planClaims = extractClaims((plannerOutput.summary || "") + " " + (plannerOutput.tasks ?? []).map(t => t.title).join(" "));
   const factcheckResult = await verifyClaims(options.cwd, planClaims);
   const factcheckCtx = buildFactcheckContext(factcheckResult);
   if (factcheckCtx) {
@@ -683,6 +690,10 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     ),
     retryConfig: config.retry, maxRetries
   }) as ExecutorArtifact;
+  // Defensive: ensure executionOutput always has safe defaults
+  if (!executionOutput || typeof executionOutput !== "object") executionOutput = {} as ExecutorArtifact;
+  if (!executionOutput.summary) executionOutput.summary = "";
+  if (!Array.isArray(executionOutput.changes)) executionOutput.changes = [];
   enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
 
   // Fire after.execute hook
@@ -736,7 +747,11 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
         eventBus,
         sessionId: session.id
       });
-      executionOutput = vfResult.finalOutput;
+      if (vfResult?.finalOutput) {
+        executionOutput = vfResult.finalOutput;
+        if (!executionOutput.summary) executionOutput.summary = "";
+        if (!Array.isArray(executionOutput.changes)) executionOutput.changes = [];
+      }
       enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
     } catch { /* verify-fix is non-critical — engine continues */ }
   }
@@ -757,6 +772,11 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     prompt: buildReviewerPrompt(options.task, executionOutput, delegationSummary, combinedContext),
     retryConfig: config.retry, maxRetries
   }) as ReviewResult;
+  // Defensive: ensure review always has safe defaults
+  if (!review || typeof review !== "object") review = {} as ReviewResult;
+  if (!review.verdict) review.verdict = "fail";
+  if (!review.summary) review.summary = "";
+  if (!Array.isArray(review.followUp)) review.followUp = [];
   enforcer = updateEnforcerAfterReview(enforcer, review);
 
   // Fire after.review hook
@@ -809,7 +829,7 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     // Oracle escalation — consult strategic advisor after repeated failures
     if (review.verdict === "fail") {
       consecutiveFailures++;
-      failureHistory.push(`Round ${enforcer.executionRounds}: ${executionOutput.summary.slice(0, 200)}`);
+      failureHistory.push(`Round ${enforcer.executionRounds}: ${(executionOutput.summary || "").slice(0, 200)}`);
 
       const oracle = checkOracleEscalation(consecutiveFailures);
       if (oracle.shouldEscalate) {
@@ -851,7 +871,7 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     await hooks.fire("before.execute", { sessionId: session.id, task: options.task, event: "before.execute", data: { round: enforcer.executionRounds } });
 
     const enforcerFollowUp = getEnforcerFollowUp(enforcer);
-    const reviewFollowUp = review.verdict === "fail" ? review.followUp : [];
+    const reviewFollowUp = review.verdict === "fail" ? (review.followUp ?? []) : [];
     const combinedFollowUp = [...reviewFollowUp, ...enforcerFollowUp];
     if (selfHealContext) combinedFollowUp.push(selfHealContext);
 
@@ -879,6 +899,10 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
       ),
       retryConfig: config.retry, maxRetries
     }) as ExecutorArtifact;
+    // Defensive: ensure executionOutput always has safe defaults
+    if (!executionOutput || typeof executionOutput !== "object") executionOutput = {} as ExecutorArtifact;
+    if (!executionOutput.summary) executionOutput.summary = "";
+    if (!Array.isArray(executionOutput.changes)) executionOutput.changes = [];
     enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
 
     // Update evidence from execution
@@ -913,6 +937,11 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
       prompt: buildReviewerPrompt(options.task, executionOutput, delegationSummary, executionContext),
       retryConfig: config.retry, maxRetries
     }) as ReviewResult;
+    // Defensive: ensure review always has safe defaults
+    if (!review || typeof review !== "object") review = {} as ReviewResult;
+    if (!review.verdict) review.verdict = "fail";
+    if (!review.summary) review.summary = "";
+    if (!Array.isArray(review.followUp)) review.followUp = [];
     enforcer = updateEnforcerAfterReview(enforcer, review);
 
     // Update evidence from review

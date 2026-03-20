@@ -18,11 +18,147 @@ const { EventEmitter } = require("node:events");
 
 const args = process.argv.slice(2);
 const PORT = parseInt(args.find((a, i) => args[i - 1] === "--port") || process.env.PORT || "4040", 10);
-const CWD = args.find((a, i) => args[i - 1] === "--cwd") || process.cwd();
 const APP_DIR = __dirname;
 const PROJECT_DIR = path.join(APP_DIR, "..");
 
+// Resolve the absolute path to the node binary so spawn() works in .app bundles
+// (macOS .app sandboxed environment doesn't inherit PATH from login shell)
+const NODE_BIN = process.execPath;
+
+// Fix PATH for .app bundles — inherit login shell's PATH so child processes
+// can find node, npm, claude, python3, git, etc.
+try {
+  const { execSync } = require("node:child_process");
+  const shellPath = execSync("/bin/zsh -lc 'echo $PATH' 2>/dev/null", { encoding: "utf8" }).trim();
+  if (shellPath) {
+    process.env.PATH = shellPath;
+  }
+  // Also resolve claude CLI path explicitly
+  const claudePath = execSync("/bin/zsh -lc 'which claude' 2>/dev/null", { encoding: "utf8" }).trim();
+  if (claudePath && require("node:fs").existsSync(claudePath)) {
+    process.env.CLAUDE_BIN = claudePath;
+  }
+} catch {}
+
+// ═══ Workspace Management ═══
+// Global settings dir (not per-workspace)
+const GLOBAL_SETTINGS_DIR = path.join(require("os").homedir(), ".openseed");
+const WORKSPACE_HISTORY_PATH = path.join(GLOBAL_SETTINGS_DIR, "workspaces.json");
+if (!fs.existsSync(GLOBAL_SETTINGS_DIR)) fs.mkdirSync(GLOBAL_SETTINGS_DIR, { recursive: true });
+
+// CWD is mutable — changes when user opens a folder
+let CWD = args.find((a, i) => args[i - 1] === "--cwd") || null;
+
+// Try to restore last workspace from saved history
+if (!CWD || CWD === require("os").homedir()) {
+  try {
+    const hist = JSON.parse(fs.readFileSync(WORKSPACE_HISTORY_PATH, "utf8"));
+    if (hist.lastOpened && fs.existsSync(hist.lastOpened)) {
+      CWD = hist.lastOpened;
+    }
+  } catch {}
+}
+
+// If still nothing, start with no workspace (null = welcome screen)
+if (!CWD || !fs.existsSync(CWD)) CWD = null;
+
+function saveWorkspaceHistory(dir) {
+  try {
+    let hist = {};
+    try { hist = JSON.parse(fs.readFileSync(WORKSPACE_HISTORY_PATH, "utf8")); } catch {}
+    hist.lastOpened = dir;
+    const recent = hist.recent || [];
+    const idx = recent.indexOf(dir);
+    if (idx !== -1) recent.splice(idx, 1);
+    recent.unshift(dir);
+    hist.recent = recent.slice(0, 20);
+    fs.writeFileSync(WORKSPACE_HISTORY_PATH, JSON.stringify(hist, null, 2), "utf8");
+  } catch {}
+}
+
+// ═══ User Profile & Autonomous AGI State ═══
+// These are per-workspace, so use functions to resolve paths
+function getUserProfilePath() { return CWD ? path.join(CWD, ".agent", "user-profile.json") : path.join(GLOBAL_SETTINGS_DIR, "user-profile.json"); }
+function getAutoAgiStatePath() { return CWD ? path.join(CWD, ".agent", "auto-agi-state.json") : null; }
+function getTaskQueuePath() { return CWD ? path.join(CWD, ".agent", "task-queue.json") : null; }
+
+function loadJson(p, fallback = {}) {
+  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; }
+}
+function saveJson(p, data) {
+  const dir = path.dirname(p);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(data, null, 2), "utf8");
+}
+
+// User profile: learns from interactions
+function getUserProfile() {
+  return loadJson(getUserProfilePath(), {
+    preferences: {},
+    patterns: [],
+    recentTasks: [],
+    codebaseKnowledge: {},
+    techStack: [],
+    workingHours: [],
+    totalSessions: 0,
+    lastActive: null,
+  });
+}
+function updateUserProfile(update) {
+  const profile = getUserProfile();
+  Object.assign(profile, update);
+  profile.lastActive = new Date().toISOString();
+  saveJson(getUserProfilePath(), profile);
+  return profile;
+}
+
+// Codebase mapping (Aider-style) — build repo understanding
+function buildRepoMap(dir) {
+  const map = { files: [], dirs: [], languages: {}, entryPoints: [], configs: [], totalFiles: 0, totalLines: 0 };
+  const ignore = new Set([".git", "node_modules", "dist", ".agent", "coverage", ".next", "__pycache__", ".research", "release"]);
+  const langMap = { ".ts": "TypeScript", ".tsx": "TypeScript/React", ".js": "JavaScript", ".jsx": "JavaScript/React", ".py": "Python", ".rs": "Rust", ".go": "Go", ".swift": "Swift", ".html": "HTML", ".css": "CSS", ".json": "JSON", ".md": "Markdown" };
+  const configFiles = ["package.json", "tsconfig.json", "Cargo.toml", "go.mod", "pyproject.toml", ".env", "Dockerfile", "docker-compose.yml"];
+
+  function walk(d, depth = 0) {
+    if (depth > 4) return;
+    try {
+      const entries = fs.readdirSync(d, { withFileTypes: true });
+      for (const e of entries) {
+        if (ignore.has(e.name) || e.name.startsWith(".")) continue;
+        const full = path.join(d, e.name);
+        const rel = path.relative(dir, full);
+        if (e.isDirectory()) {
+          map.dirs.push(rel);
+          walk(full, depth + 1);
+        } else {
+          map.files.push(rel);
+          map.totalFiles++;
+          const ext = path.extname(e.name).toLowerCase();
+          const lang = langMap[ext];
+          if (lang) map.languages[lang] = (map.languages[lang] || 0) + 1;
+          if (configFiles.includes(e.name)) map.configs.push(rel);
+          if (e.name === "index.ts" || e.name === "main.ts" || e.name === "app.ts" || e.name === "index.js" || e.name === "main.js") {
+            map.entryPoints.push(rel);
+          }
+          try { map.totalLines += fs.readFileSync(full, "utf8").split("\n").length; } catch {}
+        }
+      }
+    } catch {}
+  }
+  walk(dir);
+  return map;
+}
+
+// Autonomous AGI: persistent task queue
+function getTaskQueue() { const p = getTaskQueuePath(); return p ? loadJson(p, { tasks: [], completed: [], active: null }) : { tasks: [], completed: [], active: null }; }
+function saveTaskQueue(q) { const p = getTaskQueuePath(); if (p) saveJson(p, q); }
+
+// Auto AGI state
+let autoAgiRunning = false;
+let autoAgiAbort = false;
+
 function safePath(userPath) {
+  if (!CWD) return null;
   const abs = require("node:path").resolve(CWD, userPath);
   if (abs !== CWD && !abs.startsWith(CWD + require("node:path").sep)) return null;
   return abs;
@@ -87,7 +223,7 @@ const server = http.createServer(async (req, res) => {
     });
 
     const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
-    const child = spawn("node", [agentCli, mode || "run", task], {
+    const child = spawn(NODE_BIN, [agentCli, mode || "run", task], {
       cwd: childCwd,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"]
@@ -229,7 +365,7 @@ const server = http.createServer(async (req, res) => {
     const fullPrompt = `${systemPrompt}\n\nFile contents:\n${fileContents.join("\n\n")}\n\nUser question: ${question}`;
 
     // Use node to call the provider
-    const child = spawn("node", ["-e", `
+    const child = spawn(NODE_BIN, ["-e", `
       const { ProviderRegistry } = require("${PROJECT_DIR}/dist/providers/registry.js");
       const { loadConfig } = require("${PROJECT_DIR}/dist/core/config.js");
       (async () => {
@@ -276,14 +412,18 @@ const server = http.createServer(async (req, res) => {
   // ── AGI Pipeline (server-orchestrated) ──
   if (url.pathname === "/api/agi/run" && req.method === "POST") {
     const body = await readBody(req);
-    const { task, projectDir } = safeJsonParse(body) || {};
+    const { task, targetDir } = safeJsonParse(body) || {};
     if (!task) { res.writeHead(400); res.end("Missing task"); return; }
 
-    // Workspace setup
-    const projName = projectDir || "agi-" + Date.now().toString(36);
-    const workspaceRoot = path.join(CWD, "workspace");
-    const childCwd = path.join(workspaceRoot, projName);
-    if (!fs.existsSync(childCwd)) fs.mkdirSync(childCwd, { recursive: true });
+    // Workspace setup — targetDir can be absolute path or relative to CWD
+    let childCwd = CWD;
+    let projName = path.basename(CWD);
+    if (targetDir) {
+      // If absolute path, use directly; otherwise join with CWD
+      childCwd = path.isAbsolute(targetDir) ? targetDir : path.join(CWD, targetDir);
+      projName = path.basename(childCwd);
+      if (!fs.existsSync(childCwd)) fs.mkdirSync(childCwd, { recursive: true });
+    }
 
     // Copy config with unlimited timeouts
     const srcConfig = path.join(CWD, ".agent", "config.json");
@@ -359,6 +499,14 @@ const server = http.createServer(async (req, res) => {
 
     sendAgi("agi.pipeline.start", { plan: { steps }, complexity, projectDir: projName, totalSteps: steps.length });
 
+    // Build codebase map for context (Aider-style)
+    const repoMap = buildRepoMap(childCwd);
+    const userProfile = getUserProfile();
+
+    // Track task in user profile
+    userProfile.recentTasks = [...(userProfile.recentTasks || []).slice(-20), task];
+    updateUserProfile(userProfile);
+
     // Shared context — passed between steps
     const ctx = {
       task,
@@ -368,6 +516,8 @@ const server = http.createServer(async (req, res) => {
       errorLog: [],
       decisions: [],
       totalTokens: 0,
+      repoMap,
+      userProfile,
     };
 
     // Build step prompt with full inter-step memory
@@ -397,9 +547,23 @@ const server = http.createServer(async (req, res) => {
       sections.push(`## Your Task: ${step.title}`);
       sections.push(getStepInstructions(step.type));
 
-      // Scaffold for new projects
-      if (ctx.allFiles.length === 0 && (step.type === "build" || step.type === "design")) {
-        sections.push(`\nCRITICAL PROJECT STRUCTURE RULES:\n- STANDALONE project in workspace/${projName}/\n- MUST create: package.json (with "start" script), src/, tests/\n- Write EVERY file with COMPLETE content. No placeholders.\n- Runnable with: npm install && npm start`);
+      // Codebase context (Aider-style repo understanding)
+      if (ctx.repoMap && ctx.repoMap.totalFiles > 0) {
+        sections.push(`## Codebase Map\n- ${ctx.repoMap.totalFiles} files, ${ctx.repoMap.totalLines} lines\n- Languages: ${Object.entries(ctx.repoMap.languages).map(([l,c]) => `${l}(${c})`).join(", ")}\n- Entry points: ${ctx.repoMap.entryPoints.slice(0, 5).join(", ")}`);
+      }
+
+      // User context for personalization
+      if (ctx.userProfile && ctx.userProfile.techStack && ctx.userProfile.techStack.length > 0) {
+        sections.push(`## User Preferences\nPreferred tech: ${ctx.userProfile.techStack.join(", ")}`);
+      }
+
+      // Scaffold instructions
+      if (step.type === "build" || step.type === "design") {
+        if (ctx.allFiles.length === 0) {
+          sections.push(`\nCRITICAL PROJECT STRUCTURE RULES:\n- Write files DIRECTLY in the current working directory.\n- MUST create: package.json (with "start" script), src/, tests/\n- Write EVERY file with COMPLETE content. No placeholders.\n- Runnable with: npm install && npm start`);
+        } else {
+          sections.push(`\nIMPORTANT:\n- You are working in the user's EXISTING workspace.\n- Create/modify files relative to the current directory.\n- If the user mentions a specific folder (e.g. "Test 폴더에"), create files inside that folder.\n- Do NOT create unnecessary wrapper directories.`);
+        }
       }
 
       return sections.join("\n\n");
@@ -424,7 +588,7 @@ const server = http.createServer(async (req, res) => {
       return new Promise((resolve, reject) => {
         if (aborted) { reject(new Error("Aborted")); return; }
         const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
-        const child = spawn("node", [agentCli, mode || "run", prompt], {
+        const child = spawn(NODE_BIN, [agentCli, mode || "run", prompt], {
           cwd: childCwd,
           env: { ...process.env },
           stdio: ["ignore", "pipe", "pipe"]
@@ -687,6 +851,36 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end("{}");
     }
+    return;
+  }
+
+  // ── Browse: list folders anywhere on disk ──
+  if (url.pathname === "/api/browse" && req.method === "GET") {
+    const dir = url.searchParams.get("path") || os.homedir();
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const dirs = [];
+      for (const e of entries) {
+        if (e.name.startsWith(".")) continue;
+        if (e.isDirectory()) {
+          dirs.push({ name: e.name, path: path.join(dir, e.name) });
+        }
+      }
+      dirs.sort((a, b) => a.name.localeCompare(b.name));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ current: dir, parent: path.dirname(dir), dirs }));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ current: dir, parent: path.dirname(dir), dirs: [], error: e.message }));
+    }
+    return;
+  }
+
+  // ── Guard: file/git/run APIs require a workspace ──
+  const _fileApis = ["/api/files", "/api/file", "/api/file/raw", "/api/file/rename", "/api/mkdir", "/api/git/status", "/api/run", "/api/run/stream", "/api/agi/run", "/api/config", "/api/settings", "/api/sessions", "/api/terminal", "/api/status", "/api/auto-agi/run"];
+  if (!CWD && _fileApis.some(p => url.pathname === p || url.pathname.startsWith(p + "/"))) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "no_workspace", message: "No workspace open. Open a folder first." }));
     return;
   }
 
@@ -1016,7 +1210,7 @@ const server = http.createServer(async (req, res) => {
     if (!provider) { res.writeHead(400); res.end("Missing provider"); return; }
 
     const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
-    const child = spawn("node", [agentCli, "soak", "--providers", provider, "--rounds", "1"], {
+    const child = spawn(NODE_BIN, [agentCli, "soak", "--providers", provider, "--rounds", "1"], {
       cwd: CWD,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -1444,6 +1638,367 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── Workspace API ──
+  if (url.pathname === "/api/workspace" && req.method === "GET") {
+    let hist = {};
+    try { hist = JSON.parse(fs.readFileSync(WORKSPACE_HISTORY_PATH, "utf8")); } catch {}
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      current: CWD,
+      name: CWD ? path.basename(CWD) : null,
+      recent: (hist.recent || []).filter(d => fs.existsSync(d)).slice(0, 10),
+    }));
+    return;
+  }
+
+  // Open folder — via native dialog (macOS osascript)
+  if (url.pathname === "/api/workspace/open" && req.method === "POST") {
+    const body = await readBody(req);
+    const { dir } = safeJsonParse(body) || {};
+
+    if (dir) {
+      // Direct open — user provided a path
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Directory not found: " + dir }));
+        return;
+      }
+      CWD = dir;
+      saveWorkspaceHistory(dir);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, dir: CWD, name: path.basename(CWD) }));
+      return;
+    }
+
+    // No dir provided — show native folder picker
+    try {
+      const { execSync } = require("node:child_process");
+      const script = `osascript -e 'POSIX path of (choose folder with prompt "Open Seed — 프로젝트 폴더 선택")'`;
+      const chosen = execSync(script, { encoding: "utf-8", timeout: 60000 }).trim();
+      // osascript returns path with trailing /
+      const cleanPath = chosen.endsWith("/") ? chosen.slice(0, -1) : chosen;
+
+      if (cleanPath && fs.existsSync(cleanPath)) {
+        CWD = cleanPath;
+        saveWorkspaceHistory(cleanPath);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, dir: CWD, name: path.basename(CWD) }));
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, cancelled: true }));
+      }
+    } catch (e) {
+      // User cancelled or error
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, cancelled: true, error: e.message }));
+    }
+    return;
+  }
+
+  // List directories for folder browsing
+  if (url.pathname === "/api/workspace/browse" && req.method === "GET") {
+    const dir = url.searchParams.get("dir") || require("os").homedir();
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true })
+        .filter(e => e.isDirectory() && !e.name.startsWith("."))
+        .map(e => ({ name: e.name, path: path.join(dir, e.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ dir, entries, parent: path.dirname(dir) }));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ dir, entries: [], error: e.message }));
+    }
+    return;
+  }
+
+  // ── Codebase Map API ──
+  if (url.pathname === "/api/repomap" && req.method === "GET") {
+    const targetDir = url.searchParams.get("dir") || CWD;
+    const abs = path.resolve(CWD, targetDir);
+    try {
+      const map = buildRepoMap(abs);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(map));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // ── User Profile API ──
+  if (url.pathname === "/api/profile" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(getUserProfile()));
+    return;
+  }
+  if (url.pathname === "/api/profile" && req.method === "PUT") {
+    const body = await readBody(req);
+    const update = safeJsonParse(body) || {};
+    const profile = updateUserProfile(update);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(profile));
+    return;
+  }
+
+  // ── Autonomous AGI Task Queue API ──
+  if (url.pathname === "/api/auto-agi/queue" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(getTaskQueue()));
+    return;
+  }
+  if (url.pathname === "/api/auto-agi/queue" && req.method === "POST") {
+    const body = await readBody(req);
+    const { task, priority, category } = safeJsonParse(body) || {};
+    if (!task) { res.writeHead(400); res.end("Missing task"); return; }
+    const q = getTaskQueue();
+    const newTask = {
+      id: "task-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      task,
+      priority: priority || "normal",
+      category: category || "general",
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      result: null,
+    };
+    q.tasks.push(newTask);
+    // Sort by priority
+    const pOrder = { critical: 0, high: 1, normal: 2, low: 3 };
+    q.tasks.sort((a, b) => (pOrder[a.priority] || 2) - (pOrder[b.priority] || 2));
+    saveTaskQueue(q);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(newTask));
+    return;
+  }
+  if (url.pathname === "/api/auto-agi/queue" && req.method === "DELETE") {
+    const body = await readBody(req);
+    const { taskId } = safeJsonParse(body) || {};
+    const q = getTaskQueue();
+    q.tasks = q.tasks.filter(t => t.id !== taskId);
+    saveTaskQueue(q);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // ── Autonomous AGI Run (processes queue autonomously via SSE) ──
+  if (url.pathname === "/api/auto-agi/run" && req.method === "POST") {
+    const body = await readBody(req);
+    const { mode } = safeJsonParse(body) || {}; // mode: "queue" | "observe" | "proactive"
+
+    if (autoAgiRunning) {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Autonomous AGI already running" }));
+      return;
+    }
+
+    autoAgiRunning = true;
+    autoAgiAbort = false;
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive"
+    });
+
+    const sendAuto = (type, data) => {
+      try { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); } catch {}
+    };
+
+    req.on("close", () => { autoAgiAbort = true; });
+
+    // Load user profile for context
+    const profile = getUserProfile();
+    profile.totalSessions = (profile.totalSessions || 0) + 1;
+    updateUserProfile(profile);
+
+    // Build codebase understanding
+    sendAuto("auto.status", { message: "Building codebase map...", phase: "init" });
+    const repoMap = buildRepoMap(CWD);
+    sendAuto("auto.repomap", { files: repoMap.totalFiles, languages: repoMap.languages, entryPoints: repoMap.entryPoints });
+
+    if (mode === "proactive") {
+      // Proactive mode: analyze codebase and generate tasks automatically
+      sendAuto("auto.status", { message: "Analyzing codebase for improvements...", phase: "analyze" });
+
+      const analysisPrompt = `You are an autonomous AGI analyzing a codebase. Generate a prioritized list of tasks.
+
+CODEBASE:
+- Files: ${repoMap.totalFiles} total, ${repoMap.totalLines} lines
+- Languages: ${Object.entries(repoMap.languages).map(([l,c]) => `${l}: ${c}`).join(", ")}
+- Entry points: ${repoMap.entryPoints.join(", ")}
+- Configs: ${repoMap.configs.join(", ")}
+
+USER PROFILE:
+- Sessions: ${profile.totalSessions}
+- Recent tasks: ${(profile.recentTasks || []).slice(-5).join("; ")}
+- Tech preferences: ${JSON.stringify(profile.preferences || {})}
+
+Analyze and output a JSON array of tasks. Each task: {"task": "description", "priority": "critical|high|normal|low", "category": "bug|feature|refactor|test|docs|security|performance"}
+Focus on: bugs, missing tests, security issues, performance improvements, code quality.
+Output ONLY the JSON array, nothing else.`;
+
+      try {
+        const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
+        const analysisResult = await new Promise((resolve, reject) => {
+          const child = spawn(NODE_BIN, [agentCli, "run", analysisPrompt], {
+            cwd: CWD, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"]
+          });
+          let out = "";
+          child.stdout.on("data", c => { out += c.toString(); });
+          child.on("close", () => resolve(out));
+          child.on("error", reject);
+          setTimeout(() => { try { child.kill(); } catch {} }, 120000);
+        });
+
+        // Try to extract JSON array from output
+        const jsonMatch = analysisResult.match(/\[[\s\S]*?\]/);
+        if (jsonMatch) {
+          const tasks = JSON.parse(jsonMatch[0]);
+          const q = getTaskQueue();
+          for (const t of tasks) {
+            q.tasks.push({
+              id: "auto-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+              task: t.task,
+              priority: t.priority || "normal",
+              category: t.category || "general",
+              status: "queued",
+              createdAt: new Date().toISOString(),
+              source: "proactive",
+              result: null,
+            });
+          }
+          saveTaskQueue(q);
+          sendAuto("auto.tasks-generated", { count: tasks.length, tasks: tasks.slice(0, 10) });
+        }
+      } catch (e) {
+        sendAuto("auto.error", { message: "Analysis failed: " + e.message });
+      }
+    }
+
+    // Process task queue
+    const q = getTaskQueue();
+    const pendingTasks = q.tasks.filter(t => t.status === "queued");
+
+    if (pendingTasks.length === 0) {
+      sendAuto("auto.status", { message: "No tasks in queue", phase: "idle" });
+      sendAuto("auto.complete", { processed: 0 });
+      res.write("data: [DONE]\n\n");
+      res.end();
+      autoAgiRunning = false;
+      return;
+    }
+
+    sendAuto("auto.status", { message: `Processing ${pendingTasks.length} tasks...`, phase: "execute" });
+    let processed = 0;
+    let succeeded = 0;
+
+    for (const task of pendingTasks) {
+      if (autoAgiAbort) break;
+
+      task.status = "running";
+      task.startedAt = new Date().toISOString();
+      q.active = task.id;
+      saveTaskQueue(q);
+
+      sendAuto("auto.task-start", { taskId: task.id, task: task.task, priority: task.priority, category: task.category, index: processed, total: pendingTasks.length });
+
+      // Build context-aware prompt with user profile + codebase knowledge
+      const taskPrompt = buildAutoAgiPrompt(task, profile, repoMap);
+
+      try {
+        const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
+        const taskMode = task.category === "refactor" || task.category === "feature" ? "team" : "run";
+
+        const result = await new Promise((resolve, reject) => {
+          if (autoAgiAbort) { reject(new Error("Aborted")); return; }
+          const child = spawn(NODE_BIN, [agentCli, taskMode, taskPrompt], {
+            cwd: CWD, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"]
+          });
+          let stdout = "", stderr = "";
+          child.stdout.on("data", c => {
+            const text = c.toString();
+            stdout += text;
+            // Forward events to client
+            for (const line of text.split("\n")) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              const parsed = parseEventLine(trimmed);
+              if (parsed) {
+                if (parsed.eventType === "tool.completed") {
+                  sendAuto("auto.event", { taskId: task.id, ...parsed });
+                } else if (parsed.eventType === "provider.stream") {
+                  const chunk = parsed.payload?.chunk || parsed.payload?.delta || "";
+                  if (chunk) sendAuto("auto.llm", { taskId: task.id, text: typeof chunk === "string" ? chunk : "" });
+                }
+              }
+            }
+          });
+          child.stderr.on("data", c => { stderr += c.toString(); });
+          child.on("close", code => resolve({ stdout, stderr, code }));
+          child.on("error", reject);
+
+          // Abort check
+          const iv = setInterval(() => { if (autoAgiAbort) { child.kill("SIGTERM"); clearInterval(iv); } }, 2000);
+          child.on("close", () => clearInterval(iv));
+        });
+
+        task.status = result.code === 0 ? "completed" : "failed";
+        task.completedAt = new Date().toISOString();
+        task.result = { exitCode: result.code, summary: result.stdout.slice(-2000) };
+        if (task.status === "completed") succeeded++;
+
+        sendAuto("auto.task-complete", { taskId: task.id, status: task.status, index: processed, total: pendingTasks.length });
+
+        // Learn from this task
+        profile.recentTasks = [...(profile.recentTasks || []).slice(-20), task.task];
+        updateUserProfile(profile);
+
+      } catch (e) {
+        task.status = "failed";
+        task.completedAt = new Date().toISOString();
+        task.result = { error: e.message };
+        sendAuto("auto.task-error", { taskId: task.id, error: e.message });
+      }
+
+      // Move to completed
+      q.tasks = q.tasks.filter(t => t.id !== task.id);
+      q.completed.push(task);
+      q.active = null;
+      saveTaskQueue(q);
+      processed++;
+    }
+
+    sendAuto("auto.complete", { processed, succeeded, failed: processed - succeeded });
+    res.write("data: [DONE]\n\n");
+    res.end();
+    autoAgiRunning = false;
+    return;
+  }
+
+  // ── Autonomous AGI Stop ──
+  if (url.pathname === "/api/auto-agi/stop" && req.method === "POST") {
+    autoAgiAbort = true;
+    autoAgiRunning = false;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, stopped: true }));
+    return;
+  }
+
+  // ── Autonomous AGI Status ──
+  if (url.pathname === "/api/auto-agi/status" && req.method === "GET") {
+    const q = getTaskQueue();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      running: autoAgiRunning,
+      queueLength: q.tasks.length,
+      completedCount: q.completed.length,
+      activeTask: q.active,
+    }));
+    return;
+  }
+
   // ── Static files ──
   const staticPath = path.resolve(APP_DIR, url.pathname === "/" ? "index.html" : url.pathname.slice(1));
   if (!staticPath.startsWith(APP_DIR) || !fs.existsSync(staticPath)) {
@@ -1480,7 +2035,7 @@ const server = http.createServer(async (req, res) => {
 function runAgent(...args) {
   return new Promise((resolve) => {
     const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
-    const child = spawn("node", [agentCli, ...args], {
+    const child = spawn(NODE_BIN, [agentCli, ...args], {
       cwd: CWD,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"]
@@ -1492,6 +2047,39 @@ function runAgent(...args) {
     child.on("close", (code) => resolve({ exitCode: code, stdout, stderr }));
     child.on("error", (err) => resolve({ exitCode: -1, stdout: "", stderr: err.message }));
   });
+}
+
+function buildAutoAgiPrompt(task, profile, repoMap) {
+  const sections = [];
+  sections.push(`# Autonomous AGI Task`);
+  sections.push(`## Task\n${task.task}`);
+  sections.push(`## Priority: ${task.priority} | Category: ${task.category}`);
+
+  // Codebase context
+  sections.push(`## Codebase Context`);
+  sections.push(`- ${repoMap.totalFiles} files, ${repoMap.totalLines} lines`);
+  sections.push(`- Languages: ${Object.entries(repoMap.languages).map(([l,c]) => `${l}(${c})`).join(", ")}`);
+  sections.push(`- Entry points: ${repoMap.entryPoints.slice(0, 10).join(", ")}`);
+  sections.push(`- Config files: ${repoMap.configs.slice(0, 10).join(", ")}`);
+
+  // User context
+  if (profile.preferences && Object.keys(profile.preferences).length > 0) {
+    sections.push(`## User Preferences\n${JSON.stringify(profile.preferences)}`);
+  }
+  if (profile.techStack && profile.techStack.length > 0) {
+    sections.push(`## Preferred Tech: ${profile.techStack.join(", ")}`);
+  }
+
+  // Instructions
+  sections.push(`## Instructions`);
+  sections.push(`- Work autonomously. Complete the task fully.`);
+  sections.push(`- Write ALL code with COMPLETE content. No placeholders.`);
+  sections.push(`- Run tests/verification after changes.`);
+  sections.push(`- Follow existing code patterns and conventions.`);
+  sections.push(`- If this is a bug fix, identify root cause first.`);
+  sections.push(`- If this is a feature, design before implementing.`);
+
+  return sections.join("\n\n");
 }
 
 function readBody(req) {
@@ -1531,7 +2119,7 @@ server.listen(PORT, () => {
   console.log(`\n  ╔══════════════════════════════════╗`);
   console.log(`  ║  agent40 app                     ║`);
   console.log(`  ║  http://localhost:${PORT}            ║`);
-  console.log(`  ║  cwd: ${CWD.slice(-28).padEnd(28)}║`);
+  console.log(`  ║  cwd: ${(CWD || "(no workspace)").slice(-28).padEnd(28)}║`);
   console.log(`  ╚══════════════════════════════════╝\n`);
 
   // Only auto-open browser if NOT launched from desktop app

@@ -160,7 +160,7 @@ export function buildPRDFromInterview(
   sections.push(`\n## Scope\n- Action: ${intent.action}\n- Scope: ${intent.scope}\n- Risk: ${intent.risk}`);
   sections.push(`\n## Constraints\n${Array.from(answers.entries()).filter(([k]) => k.includes("constraint")).map(([_, v]) => `- ${v}`).join("\n") || "- None specified"}`);
   sections.push(`\n## Success Criteria\n- [ ] All planned changes implemented\n- [ ] Tests pass\n- [ ] No regressions\n- [ ] Build succeeds`);
-  sections.push(`\n## Roles Required\n${intent.suggestedRoles.map(r => `- ${r}`).join("\n")}`);
+  sections.push(`\n## Roles Required\n${(intent.suggestedRoles ?? []).map(r => `- ${r}`).join("\n") || "- auto"}`);
 
   return sections.join("\n");
 }
