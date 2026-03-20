@@ -7,22 +7,35 @@ import subprocess
 import sys
 import os
 import time
-import threading
 
 PORT = 4040
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(APP_DIR)
+ICON_PATH = os.path.join(APP_DIR, "icon.png")
+
+
+def set_dock_icon():
+    """Set the Dock icon on macOS using pyobjc."""
+    try:
+        from AppKit import NSApplication, NSImage
+        app = NSApplication.sharedApplication()
+        icon = NSImage.alloc().initWithContentsOfFile_(ICON_PATH)
+        if icon:
+            app.setApplicationIconImage_(icon)
+    except Exception:
+        pass  # Non-critical
+
 
 def start_server():
     """Start the Node.js web server."""
     server_js = os.path.join(APP_DIR, "server.js")
-    env = os.environ.copy()
     return subprocess.Popen(
         ["node", server_js, "--port", str(PORT), "--cwd", PROJECT_DIR],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=env
+        env=os.environ.copy()
     )
+
 
 def wait_for_server(timeout=15):
     """Wait until server is ready."""
@@ -31,12 +44,16 @@ def wait_for_server(timeout=15):
         try:
             urllib.request.urlopen(f"http://localhost:{PORT}", timeout=1)
             return True
-        except:
+        except Exception:
             time.sleep(0.25)
     return False
 
+
 def main():
     import webview
+
+    # Set custom Dock icon before creating window
+    set_dock_icon()
 
     # Start server in background
     server = start_server()
@@ -45,7 +62,7 @@ def main():
         server.terminate()
         try:
             server.wait(timeout=3)
-        except:
+        except Exception:
             server.kill()
 
     # Wait for server
@@ -71,6 +88,7 @@ def main():
 
     # Cleanup
     server.terminate()
+
 
 if __name__ == "__main__":
     main()
