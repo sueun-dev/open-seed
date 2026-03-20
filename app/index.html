@@ -63,19 +63,22 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .sb-title .btns button:hover{background:rgba(255,255,255,.06);color:var(--fg2)}
 .sb-body{flex:1;overflow-y:auto;padding:0 4px 12px}
 
-/* File tree */
-.fi{display:flex;align-items:center;gap:5px;padding:3px 8px;border-radius:var(--r);cursor:pointer;font-family:var(--font);font-size:12.5px;color:var(--fg2);margin:0 4px 1px;transition:background .12s,color .12s,opacity .12s;user-select:none}
-.fi:hover{background:rgba(255,255,255,.04)}
-.fi.on{background:var(--accent-dim);color:var(--accent)}
-.fi .ic{width:18px;text-align:center;font-size:10px;font-weight:700;flex-shrink:0;opacity:.7;transition:transform .15s ease}
-.fi.dir{color:var(--fg3)}
-.fi.dir .ic{opacity:.5}
-.fi.dir.open .ic{transform:rotate(90deg)}
+/* File tree — VSCode style */
+.fi{display:flex;align-items:center;gap:4px;padding:2px 8px;cursor:pointer;font-family:var(--font);font-size:13px;color:var(--fg2);margin:0;transition:background .06s;user-select:none;line-height:22px;min-height:22px}
+.fi:hover{background:rgba(255,255,255,.06)}
+.fi.on{background:rgba(88,166,255,.12);color:var(--fg)}
+.fi.on:hover{background:rgba(88,166,255,.18)}
+.fi .ic{width:16px;text-align:center;font-size:10px;font-weight:600;flex-shrink:0;opacity:.8;transition:transform .1s ease}
+.fi .arrow{width:16px;text-align:center;font-size:8px;flex-shrink:0;color:var(--fg3);transition:transform .1s ease}
+.fi.dir{color:var(--fg2)}
+.fi.dir:hover{color:var(--fg)}
+.fi.dir .arrow{opacity:.6}
+.fi.dir.open .arrow{transform:rotate(90deg)}
 .dir-children{overflow:hidden}
-.dir-children.collapsing{animation:collapseOut .15s ease forwards}
-.dir-children.expanding{animation:expandIn .15s ease forwards}
-@keyframes expandIn{from{opacity:0;max-height:0}to{opacity:1;max-height:2000px}}
-@keyframes collapseOut{from{opacity:1;max-height:2000px}to{opacity:0;max-height:0}}
+.dir-children.collapsing{animation:collapseOut .12s ease forwards}
+.dir-children.expanding{animation:expandIn .12s ease forwards}
+@keyframes expandIn{from{opacity:0;max-height:0}to{opacity:1;max-height:5000px}}
+@keyframes collapseOut{from{opacity:1;max-height:5000px}to{opacity:0;max-height:0}}
 
 /* ═══ Content ═══ */
 .content-area{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
@@ -713,6 +716,8 @@ async function loadFiles(){
     b.scrollTop=scrollTop;
   }catch(e){b.textContent='Error: '+e.message}
 }
+const _fileIcons={ts:'TS',tsx:'TX',js:'JS',jsx:'JX',json:'{}',md:'MD',py:'PY',html:'<>',css:'#',toml:'TM',yml:'YM',yaml:'YM',sh:'$',txt:'TX',svg:'SV',png:'IM',jpg:'IM',gif:'IM',lock:'LK',gitignore:'GI',env:'EN',sql:'DB',rs:'RS',go:'GO',java:'JA',rb:'RB',php:'PH',vue:'VU',svelte:'SV'};
+const _fileColors={ts:'#3b82f6',tsx:'#3b82f6',js:'#eab308',jsx:'#eab308',json:'#22c55e',md:'#a855f7',py:'#22c55e',html:'#ef4444',css:'#a855f7',toml:'#eab308',yml:'#ef4444',yaml:'#ef4444',sh:'#22c55e',txt:'#6b7280',svg:'#f97316',lock:'#6b7280',gitignore:'#6b7280',env:'#eab308'};
 function renderTree(container,node,depth){
   const dirNames=Object.keys(node.children).sort();
   const files=(node.files||[]).sort((a,b)=>a.name.localeCompare(b.name));
@@ -720,36 +725,28 @@ function renderTree(container,node,depth){
     const child=node.children[dn];
     const dirPath=child.path||dn;
     const collapsed=_collapsedDirs.has(dirPath);
-    // Dir row
     const d=document.createElement('div');
     d.className='fi dir'+(collapsed?'':' open');
-    d.style.paddingLeft=(8+depth*14)+'px';
+    d.style.paddingLeft=(4+depth*16)+'px';
     d.dataset.dirpath=dirPath;
-    d.innerHTML='<span class="ic">▸</span>'+esc(dn)+'/';
-    d.onclick=(e)=>{
-      e.stopPropagation();
-      toggleDir(d,dirPath,child,depth);
-    };
+    d.innerHTML='<span class="arrow">▶</span><span class="ic" style="color:#e2b55a">📁</span><span>'+esc(dn)+'</span>';
+    d.onclick=(e)=>{e.stopPropagation();toggleDir(d,dirPath,child,depth)};
     d.oncontextmenu=e=>{e.preventDefault();ctxMenu(e,dirPath,'dir')};
     container.appendChild(d);
-    // Children container
-    const childContainer=document.createElement('div');
-    childContainer.className='dir-children';
-    childContainer.dataset.dirpath=dirPath;
-    if(!collapsed){
-      renderTree(childContainer,child,depth+1);
-    }else{
-      childContainer.style.display='none';
-    }
-    container.appendChild(childContainer);
+    const cc=document.createElement('div');
+    cc.className='dir-children';
+    cc.dataset.dirpath=dirPath;
+    if(!collapsed){renderTree(cc,child,depth+1)}else{cc.style.display='none'}
+    container.appendChild(cc);
   }
   for(const file of files){
     const d=document.createElement('div');
     d.className='fi'+(AT?.p===file.path?' on':'');
-    d.style.paddingLeft=(8+depth*14)+'px';
-    const ext=file.name.split('.').pop();
-    const c={ts:'var(--accent)',tsx:'var(--accent)',js:'var(--yellow)',json:'var(--green)',md:'var(--purple)',py:'var(--green)',html:'var(--red)',css:'var(--purple)',toml:'var(--yellow)',yml:'var(--yellow)',yaml:'var(--yellow)',sh:'var(--green)',txt:'var(--fg3)'}[ext]||'var(--fg3)';
-    d.innerHTML='<span class="ic" style="color:'+c+'">'+(ext||'').slice(0,2).toUpperCase()+'</span>'+esc(file.name);
+    d.style.paddingLeft=(4+depth*16+16)+'px';
+    const ext=file.name.split('.').pop().toLowerCase();
+    const ic=_fileIcons[ext]||ext.slice(0,2).toUpperCase();
+    const cl=_fileColors[ext]||'#6b7280';
+    d.innerHTML='<span class="ic" style="color:'+cl+';font-size:9px">'+ic+'</span><span>'+esc(file.name)+'</span>';
     d.onclick=()=>{document.querySelectorAll('.fi').forEach(x=>x.classList.remove('on'));d.classList.add('on');openTab(file.path)};
     d.oncontextmenu=e=>{e.preventDefault();ctxMenu(e,file.path,'file')};
     container.appendChild(d);
