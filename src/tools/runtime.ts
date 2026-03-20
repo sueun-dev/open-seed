@@ -1779,8 +1779,8 @@ function summarizeToolOutput(tool: string, output: unknown): Record<string, unkn
     case "read": s.path = o.path; s.lines = typeof o.content === "string" ? o.content.split("\n").length : 0; break;
     case "write": s.path = o.path; s.bytes = o.bytes; s.staged = o.staged; break;
     case "apply_patch": s.path = o.path; s.editsApplied = o.editsApplied; break;
-    case "bash": s.exitCode = o.exitCode; s.stdout = typeof o.stdout === "string" ? o.stdout.slice(-300) : ""; s.stderr = typeof o.stderr === "string" ? o.stderr.slice(-200) : ""; break;
-    case "git": s.exitCode = o.exitCode; s.stdout = typeof o.stdout === "string" ? o.stdout.slice(-200) : ""; break;
+    case "bash": s.exitCode = o.exitCode; s.stdout = typeof o.stdout === "string" ? o.stdout : ""; s.stderr = typeof o.stderr === "string" ? o.stderr : ""; break;
+    case "git": s.exitCode = o.exitCode; s.stdout = typeof o.stdout === "string" ? o.stdout : ""; break;
     case "grep": s.matchCount = Array.isArray(o.matches) ? o.matches.length : o.matchCount; break;
     case "glob": s.count = Array.isArray(o.files) ? o.files.length : o.count; break;
     case "ls": s.totalEntries = o.totalEntries; break;
@@ -1794,11 +1794,10 @@ function summarizeToolOutput(tool: string, output: unknown): Record<string, unkn
     case "process_list": s.count = o.count; break;
     case "session_list": s.count = o.count; break;
     default: {
-      // Generic: include first 3 keys
-      const keys = Object.keys(o).slice(0, 3);
+      // Generic: include all keys — no truncation
+      const keys = Object.keys(o);
       for (const k of keys) {
-        const v = o[k];
-        s[k] = typeof v === "string" ? v.slice(0, 150) : v;
+        s[k] = o[k];
       }
     }
   }
