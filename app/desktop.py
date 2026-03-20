@@ -54,11 +54,13 @@ def kill_existing_server():
 def start_server():
     """Start the Node.js web server."""
     server_js = os.path.join(APP_DIR, "server.js")
+    env = os.environ.copy()
+    env["OPENSEED_DESKTOP"] = "1"  # Prevent server from opening browser
     return subprocess.Popen(
         ["node", server_js, "--port", str(PORT), "--cwd", PROJECT_DIR],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        env=os.environ.copy()
+        env=env
     )
 
 

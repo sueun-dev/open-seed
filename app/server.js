@@ -969,8 +969,10 @@ server.listen(PORT, () => {
   console.log(`  ║  cwd: ${CWD.slice(-28).padEnd(28)}║`);
   console.log(`  ╚══════════════════════════════════╝\n`);
 
-  // Auto-open in browser
-  const openCmd = process.platform === "darwin" ? "open"
-    : process.platform === "win32" ? "start" : "xdg-open";
-  spawn(openCmd, [`http://localhost:${PORT}`], { stdio: "ignore", detached: true }).unref();
+  // Only auto-open browser if NOT launched from desktop app
+  if (!process.env.OPENSEED_DESKTOP) {
+    const openCmd = process.platform === "darwin" ? "open"
+      : process.platform === "win32" ? "start" : "xdg-open";
+    spawn(openCmd, [`http://localhost:${PORT}`], { stdio: "ignore", detached: true }).unref();
+  }
 });
