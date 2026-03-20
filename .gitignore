@@ -10,3 +10,5 @@ workspace/
 .DS_Store
 app/node_modules/
 release/
+__pycache__/
+*.pyc

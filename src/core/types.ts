@@ -193,7 +193,23 @@ export type ToolName =
   | "task_create"
   | "task_get"
   | "task_list"
-  | "task_update";
+  | "task_update"
+  // OpenCode + OpenClaw tools
+  | "ls"
+  | "fetch"
+  | "multi_patch"
+  | "process_list"
+  | "process_start"
+  | "process_stop"
+  | "diagnostics"
+  | "memory_search"
+  | "memory_save"
+  | "session_list"
+  | "session_send"
+  | "cron_create"
+  | "cron_list"
+  | "cron_delete"
+  | "doctor";
 
 /**
  * Goose-inspired tool definition with full JSON schema.
@@ -207,7 +223,7 @@ export interface ToolDefinition {
   /** JSON Schema for input validation */
   inputSchema?: Record<string, unknown>;
   /** Tool category for registry grouping */
-  toolCategory?: "file" | "search" | "shell" | "browser" | "analysis" | "network";
+  toolCategory?: "file" | "search" | "shell" | "browser" | "analysis" | "network" | "automation";
 }
 
 export interface ToolCall {

@@ -36,6 +36,22 @@ program
   .argument("<task>", "Task to execute")
   .action(runRunCommand);
 
+// Non-interactive mode (OpenCode -p flag)
+program
+  .command("prompt")
+  .description("Run a single prompt non-interactively and exit (like OpenCode -p)")
+  .argument("<task>", "Task to execute")
+  .option("-f, --format <format>", "Output format: text or json", "text")
+  .option("-q, --quiet", "Suppress progress output")
+  .action(async (task: string, options: { format: string; quiet: boolean }) => {
+    const { runRunCommand } = await import("./commands/run.js");
+    // Set non-interactive env
+    process.env.OPENSEED_NON_INTERACTIVE = "1";
+    if (options.quiet) process.env.OPENSEED_QUIET = "1";
+    if (options.format === "json") process.env.OPENSEED_OUTPUT_JSON = "1";
+    await runRunCommand(task);
+  });
+
 program
   .command("team")
   .description("Run a task through the team worker runtime")
@@ -88,6 +104,29 @@ program
   .action(runStatusCommand);
 
 program.command("doctor").description("Run local environment checks").action(runDoctorCommand);
+
+// OpenCode-style ask command (provider advisor)
+program
+  .command("ask")
+  .description("Ask a specific provider for advice (non-interactive)")
+  .argument("<provider>", "Provider: openai, anthropic, gemini")
+  .argument("<question>", "Question to ask")
+  .action(async (provider: string, question: string) => {
+    const { loadConfig } = await import("./core/config.js");
+    const { ProviderRegistry } = await import("./providers/registry.js");
+    const config = await loadConfig(process.cwd());
+    const registry = new ProviderRegistry();
+    try {
+      const resp = await registry.invokeWithFailover(config, provider as any, {
+        role: "researcher", category: "research", systemPrompt: "You are a helpful coding assistant. Answer concisely.",
+        prompt: question, responseFormat: "text"
+      });
+      process.stdout.write(resp.text + "\n");
+    } catch (e) {
+      process.stderr.write(`Error: ${e instanceof Error ? e.message : String(e)}\n`);
+      process.exit(1);
+    }
+  });
 
 program
   .command("check-comments")

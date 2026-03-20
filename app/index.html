@@ -345,35 +345,25 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             <div style="font-size:28px">🧠</div>
             <div>
               <h2 style="margin:0;border:0;padding:0;font-size:18px">AGI Autonomous Mode</h2>
-              <div style="font-size:11px;color:var(--fg3)">프롬프트 하나로 완전한 앱을 만들거나, 자율적으로 코드를 개선합니다</div>
+              <div style="font-size:11px;color:var(--fg3)">One prompt to build a complete app. Full autonomous execution with live activity log.</div>
             </div>
           </div>
 
           <!-- AGI Input -->
           <div style="margin-bottom:20px">
             <div style="display:flex;gap:8px;margin-bottom:10px">
-              <input class="si" id="agiPrompt" type="text" placeholder="원하는 것을 자유롭게 입력하세요 (예: Todo 앱 만들어줘, 이 프로젝트 개선해줘...)" style="flex:1;font-size:13px;padding:12px 16px;border-radius:8px">
-              <button class="save-btn" id="agiStartBtn" onclick="startAgiFull()" style="font-size:13px;padding:12px 24px;margin:0;border-radius:8px;font-weight:700">🧠 AGI Start</button>
-              <button class="save-btn" id="agiStopBtn" onclick="stopAgi()" style="font-size:11px;padding:12px 16px;margin:0;border-radius:8px;background:var(--red);display:none">■ Stop</button>
+              <input class="si" id="agiPrompt" type="text" placeholder="Describe what you want to build (e.g., Create a todo app, Improve this project...)" style="flex:1;font-size:13px;padding:12px 16px;border-radius:8px">
+              <button class="save-btn" id="agiStartBtn" onclick="startAgiV2()" style="font-size:13px;padding:12px 24px;margin:0;border-radius:8px;font-weight:700">AGI Start</button>
+              <button class="save-btn" id="agiStopBtn" onclick="stopAgi()" style="font-size:11px;padding:12px 16px;margin:0;border-radius:8px;background:var(--red);display:none">Stop</button>
             </div>
             <div style="font-size:10px;color:var(--fg3)">
-              자동 실행 파이프라인: <b>분석</b> → <b>설계</b> → <b>빌드</b> → <b>테스트+수정 반복</b> → <b>보안/성능 개선</b> → <b>최종 검증</b>
+              Dynamic pipeline: steps are generated based on task complexity. Includes auto-replan on failure.
             </div>
           </div>
 
-          <!-- Pipeline Steps Visualization -->
-          <div style="display:flex;gap:4px;margin-bottom:20px;font-size:10px" id="agiPipeline">
-            <div class="agi-step" id="agi-s-analyze" style="flex:1;text-align:center;padding:6px 4px;border-radius:6px;background:var(--bg3);color:var(--fg3)">1. 분석</div>
-            <div style="color:var(--fg3);display:flex;align-items:center">→</div>
-            <div class="agi-step" id="agi-s-design" style="flex:1;text-align:center;padding:6px 4px;border-radius:6px;background:var(--bg3);color:var(--fg3)">2. 설계</div>
-            <div style="color:var(--fg3);display:flex;align-items:center">→</div>
-            <div class="agi-step" id="agi-s-build" style="flex:1;text-align:center;padding:6px 4px;border-radius:6px;background:var(--bg3);color:var(--fg3)">3. 빌드</div>
-            <div style="color:var(--fg3);display:flex;align-items:center">→</div>
-            <div class="agi-step" id="agi-s-verify" style="flex:1;text-align:center;padding:6px 4px;border-radius:6px;background:var(--bg3);color:var(--fg3)">4. 검증+수정</div>
-            <div style="color:var(--fg3);display:flex;align-items:center">→</div>
-            <div class="agi-step" id="agi-s-improve" style="flex:1;text-align:center;padding:6px 4px;border-radius:6px;background:var(--bg3);color:var(--fg3)">5. 개선</div>
-            <div style="color:var(--fg3);display:flex;align-items:center">→</div>
-            <div class="agi-step" id="agi-s-review" style="flex:1;text-align:center;padding:6px 4px;border-radius:6px;background:var(--bg3);color:var(--fg3)">6. 최종</div>
+          <!-- Dynamic Pipeline Steps (rendered by JS) -->
+          <div style="display:flex;gap:4px;margin-bottom:20px;font-size:10px;flex-wrap:wrap" id="agiPipeline">
+            <div style="color:var(--fg3);padding:6px;font-style:italic">Pipeline steps will appear here...</div>
           </div>
 
           <!-- AGI Status Dashboard -->
@@ -387,20 +377,22 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
                 <div id="agiBar" style="height:100%;width:0%;background:var(--accent);transition:width .3s;border-radius:2px"></div>
               </div>
             </div>
-            <div id="agiDashboard" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:11px">
+            <div id="agiDashboard" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;font-size:11px">
               <div><span style="color:var(--fg3)">Phase:</span> <span id="agiPhase">—</span></div>
-              <div><span style="color:var(--fg3)">Tasks:</span> <span id="agiTasks">0/0</span></div>
+              <div><span style="color:var(--fg3)">Steps:</span> <span id="agiTasks">0/0</span></div>
               <div><span style="color:var(--fg3)">Files:</span> <span id="agiFiles">0</span></div>
-              <div><span style="color:var(--fg3)">Confidence:</span> <span id="agiConf">—</span></div>
+              <div><span style="color:var(--fg3)">Tools:</span> <span id="agiTools">0</span></div>
               <div><span style="color:var(--fg3)">Tokens:</span> <span id="agiTokens">0</span></div>
               <div><span style="color:var(--fg3)">Cost:</span> <span id="agiCost">$0.00</span></div>
+              <div><span style="color:var(--fg3)">Elapsed:</span> <span id="agiElapsed">0s</span></div>
+              <div><span style="color:var(--fg3)">Replans:</span> <span id="agiReplans">0</span></div>
             </div>
           </div>
 
           <!-- AGI Log Output -->
           <h2>Activity Log</h2>
           <div id="agiLog" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;font-family:var(--font);font-size:11px;color:var(--fg3);max-height:calc(100vh - 520px);min-height:200px;overflow-y:auto;line-height:1.6">
-            <div style="color:var(--fg3);opacity:.5">AGI 모드를 선택하고 시작하세요.</div>
+            <div style="color:var(--fg3);opacity:.5">Enter a prompt and click AGI Start to begin autonomous execution.</div>
           </div>
         </div>
       </div>
@@ -912,10 +904,18 @@ function setupDrag(el,filePath){
   el.ondragend=()=>{el.classList.remove('dragging');_dragPath=null;document.querySelectorAll('.drag-over').forEach(x=>x.classList.remove('drag-over'));};
 }
 function setupDrop(el,dirPath){
-  el.ondragover=e=>{e.preventDefault();e.dataTransfer.dropEffect='move';el.classList.add('drag-over');};
+  el.ondragover=e=>{e.preventDefault();e.dataTransfer.dropEffect=_dragPath?'move':'copy';el.classList.add('drag-over');};
   el.ondragleave=()=>el.classList.remove('drag-over');
   el.ondrop=async e=>{
     e.preventDefault();el.classList.remove('drag-over');
+
+    // External file drop from OS (Finder, desktop, etc.)
+    if(e.dataTransfer.files&&e.dataTransfer.files.length>0&&!_dragPath){
+      await handleExternalFileDrop(e.dataTransfer.files,dirPath||'');
+      return;
+    }
+
+    // Internal drag (move file within explorer)
     if(!_dragPath)return;
     const name=_dragPath.split('/').pop();
     const newPath=dirPath?dirPath+'/'+name:name;
@@ -924,6 +924,55 @@ function setupDrop(el,dirPath){
     const t=T.find(x=>x.p===_dragPath);if(t)t.p=newPath;
     _dragPath=null;loadFiles();renderTabs();
   };
+}
+
+/** Handle files dragged from OS (Finder/Desktop/other apps) into the explorer */
+async function handleExternalFileDrop(files,targetDir){
+  let uploaded=0,failed=0;
+  for(const file of files){
+    try{
+      // Read file content
+      const content=await readFileAsText(file);
+      const targetPath=targetDir?targetDir+'/'+file.name:file.name;
+
+      // Upload via PUT API
+      const r=await fetch('/api/file',{
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:targetPath,content})
+      });
+      if(r.ok)uploaded++;
+      else failed++;
+    }catch(err){
+      failed++;
+      console.error('Drop upload failed:',file.name,err);
+    }
+  }
+  // Refresh explorer
+  loadFiles();
+  // Show notification
+  const msg=failed>0
+    ?`Uploaded ${uploaded} file(s), ${failed} failed`
+    :`Uploaded ${uploaded} file(s)`;
+  showDropNotification(msg,failed>0);
+}
+
+function readFileAsText(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result);
+    reader.onerror=()=>reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+function showDropNotification(msg,isError){
+  const el=document.createElement('div');
+  el.style.cssText=`position:fixed;bottom:20px;right:20px;background:${isError?'var(--red)':'var(--green)'};color:#fff;padding:10px 20px;border-radius:8px;font-size:12px;font-family:var(--font);z-index:9999;opacity:0;transition:opacity .3s`;
+  el.textContent=msg;
+  document.body.appendChild(el);
+  requestAnimationFrame(()=>el.style.opacity='1');
+  setTimeout(()=>{el.style.opacity='0';setTimeout(()=>el.remove(),300);},3000);
 }
 
 // ── Multi-select ──
@@ -1012,7 +1061,60 @@ loadFiles=async function(){
     setupDrop(el,dp);
     el.ondblclick=e=>{e.stopPropagation();startRename(el,dp,true);};
   });
+  // Setup global drop zone on the sidebar body (drop files into project root)
+  setupExternalDropZone(document.getElementById('sbBody'),'');
+  // Setup drop zone on editor area too
+  setupExternalDropZone(document.getElementById('edZone'),'');
 };
+
+/** Setup an element as an external file drop zone (files from OS) */
+function setupExternalDropZone(el,targetDir){
+  if(!el||el._extDropSetup)return;
+  el._extDropSetup=true;
+  let dragDepth=0;
+
+  el.addEventListener('dragover',e=>{
+    // Only handle external files (not internal drag)
+    if(_dragPath)return;
+    if(!e.dataTransfer.types.includes('Files'))return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect='copy';
+  });
+
+  el.addEventListener('dragenter',e=>{
+    if(_dragPath)return;
+    if(!e.dataTransfer.types.includes('Files'))return;
+    dragDepth++;
+    if(dragDepth===1){
+      el.style.outline='2px dashed var(--accent)';
+      el.style.outlineOffset='-2px';
+      el.style.background='rgba(88,166,255,0.05)';
+    }
+  });
+
+  el.addEventListener('dragleave',e=>{
+    if(_dragPath)return;
+    dragDepth--;
+    if(dragDepth<=0){
+      dragDepth=0;
+      el.style.outline='';
+      el.style.outlineOffset='';
+      el.style.background='';
+    }
+  });
+
+  el.addEventListener('drop',async e=>{
+    if(_dragPath)return;
+    dragDepth=0;
+    el.style.outline='';
+    el.style.outlineOffset='';
+    el.style.background='';
+    if(!e.dataTransfer.files||e.dataTransfer.files.length===0)return;
+    e.preventDefault();
+    e.stopPropagation();
+    await handleExternalFileDrop(e.dataTransfer.files,targetDir);
+  });
+}
 
 /* ═══ TABS ═══ */
 function openTab(p){let t=T.find(x=>x.p===p);if(!t){t={p,c:'',d:false,o:''};T.push(t)}AT=t;fetch('/api/file?path='+encodeURIComponent(p)).then(r=>r.json()).then(data=>{t.c=data.content;t.o=data.content;t.d=false;renderTabs();renderEd();document.getElementById('sbF').textContent=p;updateBreadcrumb(p);renderOpenEditors()})}
@@ -1069,7 +1171,7 @@ function extractProjectName(prompt){
   return (slug||'project')+'-'+Date.now().toString(36).slice(-4);
 }
 
-let _agiFileCount=0,_agiTasksDone=0,_agiTasksTotal=0,_agiToolCalls=0;
+let _agiFileCount=0,_agiTasksDone=0,_agiTasksTotal=0,_agiToolCalls=0,_agiLlmBuf='';
 function agiLog(msg,color,icon){
   const el=document.getElementById('agiLog');
   const time=new Date().toLocaleTimeString('en',{hour12:false});
@@ -1079,22 +1181,19 @@ function agiLog(msg,color,icon){
 }
 
 function setAgiStep(step,state){
-  // state: 'pending' | 'active' | 'done' | 'error'
-  const el=document.getElementById('agi-s-'+step);
-  if(!el)return;
-  const colors={pending:'var(--bg3)',active:'var(--accent)',done:'var(--green)',error:'var(--red)'};
-  el.style.background=state==='active'?'rgba(88,166,255,0.2)':state==='done'?'rgba(16,163,127,0.2)':state==='error'?'rgba(239,68,68,0.2)':'var(--bg3)';
-  el.style.color=colors[state]||'var(--fg3)';
-  if(state==='active')el.style.fontWeight='700';else el.style.fontWeight='';
+  // Legacy compat — try both old and new ID formats
+  setAgiStepById(step,state);
 }
 
+let _agiElapsedTimer=null;
 function updateAgiDashboard(data){
   if(data.phase)document.getElementById('agiPhase').textContent=data.phase;
   if(data.tasks)document.getElementById('agiTasks').textContent=data.tasks;
   if(data.files!==undefined)document.getElementById('agiFiles').textContent=data.files;
-  if(data.confidence)document.getElementById('agiConf').textContent=data.confidence;
-  if(data.tokens!==undefined)document.getElementById('agiTokens').textContent=data.tokens.toLocaleString();
-  if(data.cost!==undefined)document.getElementById('agiCost').textContent='$'+data.cost.toFixed(4);
+  if(data.tools!==undefined){const el=document.getElementById('agiTools');if(el)el.textContent=data.tools;}
+  if(data.tokens!==undefined)document.getElementById('agiTokens').textContent=typeof data.tokens==='number'?data.tokens.toLocaleString():data.tokens;
+  if(data.cost!==undefined){const el=document.getElementById('agiCost');if(el)el.textContent=typeof data.cost==='number'?'$'+data.cost.toFixed(4):data.cost;}
+  if(data.replans!==undefined){const el=document.getElementById('agiReplans');if(el)el.textContent=data.replans;}
   if(data.percent!==undefined)document.getElementById('agiBar').style.width=data.percent+'%';
   if(data.status){
     const badge=document.getElementById('agiStatusBadge');
@@ -1103,13 +1202,25 @@ function updateAgiDashboard(data){
     badge.style.background=isRun?'rgba(88,166,255,0.15)':isDone?'rgba(16,163,127,0.3)':'var(--bg5)';
     badge.style.color=isRun?'var(--accent)':isDone?'var(--green)':'var(--fg3)';
     document.getElementById('agiDot').style.display=isRun?'':'none';
+    // Elapsed timer
+    if(isRun&&!_agiElapsedTimer){
+      const start=Date.now();
+      _agiElapsedTimer=setInterval(()=>{
+        const s=Math.floor((Date.now()-start)/1000);
+        const m=Math.floor(s/60);const h=Math.floor(m/60);
+        const el=document.getElementById('agiElapsed');
+        if(el)el.textContent=h>0?`${h}h${m%60}m${s%60}s`:m>0?`${m}m${s%60}s`:`${s}s`;
+      },1000);
+    }
+    if(!isRun&&_agiElapsedTimer){clearInterval(_agiElapsedTimer);_agiElapsedTimer=null;}
   }
 }
 
 function stopAgi(){
   AGI_RUNNING=false;
   if(AGI_ABORT)AGI_ABORT.abort();
-  agiLog('■ 사용자가 중지했습니다','var(--yellow)');
+  _agiLlmBuf='';
+  agiLog('Pipeline stopped by user','var(--yellow)');
   updateAgiDashboard({status:'Stopped'});
   document.getElementById('agiStartBtn').style.display='';
   document.getElementById('agiStopBtn').style.display='none';
@@ -1137,7 +1248,47 @@ async function runAgiStep(stepName, task, mode, pct){
   }
 }
 
-async function startAgiFull(){
+// ═══ AGI V2 Pipeline — Dynamic Steps + Inter-Step Memory + Auto-Replan ═══
+
+function renderPipelineSteps(steps){
+  const el=document.getElementById('agiPipeline');
+  el.innerHTML='';
+  steps.forEach((s,i)=>{
+    if(i>0){
+      const arrow=document.createElement('div');
+      arrow.style.cssText='color:var(--fg3);display:flex;align-items:center;font-size:9px';
+      arrow.textContent='→';
+      el.appendChild(arrow);
+    }
+    const div=document.createElement('div');
+    div.className='agi-step';
+    div.id='agi-s-'+s.id;
+    div.style.cssText='flex:1;text-align:center;padding:6px 4px;border-radius:6px;background:var(--bg3);color:var(--fg3);font-size:10px;min-width:60px;transition:all .3s cubic-bezier(.4,0,.2,1)';
+    div.textContent=`${i+1}. ${s.type}`;
+    div.title=s.title;
+    el.appendChild(div);
+  });
+}
+
+function setAgiStepById(stepId,state){
+  const el=document.getElementById('agi-s-'+stepId);
+  if(!el)return;
+  const styles={
+    pending:{bg:'var(--bg3)',color:'var(--fg3)',weight:''},
+    active:{bg:'rgba(88,166,255,0.2)',color:'var(--accent)',weight:'700'},
+    done:{bg:'rgba(16,163,127,0.2)',color:'var(--green)',weight:''},
+    error:{bg:'rgba(239,68,68,0.2)',color:'var(--red)',weight:''},
+    skip:{bg:'var(--bg3)',color:'var(--fg3)',weight:''},
+  };
+  const s=styles[state]||styles.pending;
+  el.style.background=s.bg;
+  el.style.color=s.color;
+  el.style.fontWeight=s.weight;
+  if(state==='active')el.style.boxShadow='0 0 8px rgba(88,166,255,0.3)';
+  else el.style.boxShadow='';
+}
+
+async function startAgiV2(){
   const prompt=document.getElementById('agiPrompt').value.trim();
   if(!prompt||AGI_RUNNING)return;
 
@@ -1148,90 +1299,252 @@ async function startAgiFull(){
   document.getElementById('agiLog').innerHTML='';
   _agiFileCount=0;_agiTasksDone=0;_agiTasksTotal=0;_agiToolCalls=0;
   updateAgiDashboard({files:0,tasks:'0/0',tokens:0,cost:0,confidence:'—'});
-  ['analyze','design','build','verify','improve','review'].forEach(s=>setAgiStep(s,'pending'));
 
-  agiLog('🧠 AGI 파이프라인 시작: '+prompt,'var(--accent)');
-  agiLog('📁 프로젝트: workspace/'+AGI_PROJECT_DIR+'/','var(--fg2)');
-  agiLog('6단계 자동 실행: 분석 → 설계 → 빌드 → 검증+수정 → 개선 → 최종','var(--fg3)');
+  agiLog('AGI Pipeline V2 starting: '+prompt,'var(--accent)');
+  agiLog('Project: workspace/'+AGI_PROJECT_DIR+'/','var(--fg2)');
+  agiLog('Dynamic pipeline — steps auto-generated based on task complexity','var(--fg3)');
   updateAgiDashboard({status:'Running',percent:0});
 
-  const scaffoldInstructions=`
+  try{
+    const ctrl=new AbortController();AGI_ABORT=ctrl;
+    const payload={task:prompt,projectDir:AGI_PROJECT_DIR};
+    const r=await fetch('/api/agi/run',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload),
+      signal:ctrl.signal
+    });
 
-CRITICAL PROJECT STRUCTURE RULES:
-- This is a STANDALONE project in its own directory. You are working in an EMPTY project folder.
-- You MUST create a complete, runnable project structure:
-  1. package.json (MUST include "start" script in scripts. Example: "start": "vite" or "start": "node server.js")
-  2. tsconfig.json (if TypeScript)
-  3. src/ directory for source code
-  4. public/ or app/ for static HTML/CSS/JS
-  5. tests/ for test files
-  6. README.md with setup and run instructions
-- Write EVERY file with COMPLETE content. No placeholders.
-- The project must be runnable with: npm install && npm start
-- Do NOT reference files outside this project directory.`;
+    const reader=r.body.getReader();
+    const decoder=new TextDecoder();
+    let buf='';
+    let pipelineStartTime=Date.now();
+    let currentSteps=[];
+    let completedCount=0;
 
-  try {
-  // Step 1: Analyze — intent, codebase assessment, requirements
-  await runAgiStep('analyze',
-    `[STEP 1: ANALYZE] Analyze this task thoroughly. Understand intent, identify requirements and risks. Task: ${prompt}${scaffoldInstructions}`,
-    'run', 10);
-  if(!AGI_RUNNING){agiFinish();return;}
-  agiLog('── ANALYZE 완료, DESIGN 시작 ──','var(--accent)');
+    while(true){
+      const{done,value}=await reader.read();
+      if(done)break;
+      buf+=decoder.decode(value,{stream:true});
+      const lines=buf.split('\n');buf=lines.pop()||'';
 
-  // Step 2: Design — plan architecture, schema, API, components
-  await runAgiStep('design',
-    `[STEP 2: DESIGN] Create a detailed implementation plan with file list, architecture decisions, and task breakdown for: ${prompt}${scaffoldInstructions}`,
-    'run', 25);
-  if(!AGI_RUNNING){agiFinish();return;}
-  agiLog('── DESIGN 완료, BUILD 시작 ──','var(--accent)');
+      for(const l of lines){
+        if(!l.startsWith('data: '))continue;
+        const d=l.slice(6);
+        if(d==='[DONE]')break;
+        try{
+          const ev=JSON.parse(d);
 
-  // Step 3: Build — implement everything
-  await runAgiStep('build',
-    `[STEP 3: BUILD] Implement the full solution. Write ALL files, create ALL components. Task: ${prompt}. Use ALL available tools. Write COMPLETE file content, no placeholders.${scaffoldInstructions}`,
-    'team', 50);
-  if(!AGI_RUNNING){agiFinish();return;}
-  agiLog('── BUILD 완료, VERIFY 시작 ──','var(--accent)');
+          if(ev.type==='agi.pipeline.start'){
+            currentSteps=ev.plan?.steps||[];
+            renderPipelineSteps(currentSteps);
+            currentSteps.forEach(s=>setAgiStepById(s.id,'pending'));
+            agiLog(`Pipeline: ${currentSteps.length} steps generated (complexity: ${ev.complexity})`,'var(--accent)');
+            updateAgiDashboard({tasks:`0/${currentSteps.length}`});
+          }
+          else if(ev.type==='agi.step.start'){
+            setAgiStepById(ev.stepId,'active');
+            agiLog(`── ${(ev.stepType||'').toUpperCase()}: ${ev.stepTitle} ──`,'var(--accent)');
+            updateAgiDashboard({phase:ev.stepType||''});
+            const pct=Math.round(((ev.completedSteps||0)/Math.max(1,ev.totalSteps||1))*100);
+            updateAgiDashboard({percent:pct});
+          }
+          else if(ev.type==='agi.step.complete'){
+            completedCount++;
+            setAgiStepById(ev.stepId,'done');
+            agiLog(`[DONE] ${(ev.stepType||'').toUpperCase()}: ${ev.summary||'completed'}`,'var(--green)');
+            updateAgiDashboard({tasks:`${completedCount}/${currentSteps.length}`,files:ev.filesCreated||_agiFileCount});
+            if(ev.filesCreated)_agiFileCount=ev.filesCreated;
+          }
+          else if(ev.type==='agi.step.fail'){
+            setAgiStepById(ev.stepId,'error');
+            agiLog(`[FAIL] ${(ev.stepType||'').toUpperCase()}: ${ev.summary||'failed'}`,'var(--red)');
+          }
+          else if(ev.type==='agi.step.skip'){
+            setAgiStepById(ev.stepId,'skip');
+            agiLog(`[SKIP] ${(ev.stepType||'').toUpperCase()}`,'var(--fg3)');
+          }
+          else if(ev.type==='agi.replan'){
+            agiLog(`REPLAN #${ev.replanCount}: ${ev.reason}`,'var(--yellow)');
+            updateAgiDashboard({replans:ev.replanCount||0});
+            if(ev.totalSteps>currentSteps.length){
+              agiLog(`Pipeline expanded: ${currentSteps.length} → ${ev.totalSteps} steps`,'var(--yellow)');
+            }
+          }
+          else if(ev.type==='agi.pipeline.complete'){
+            agiLog(`Pipeline ${ev.success?'COMPLETE':'FINISHED'}: ${ev.completedSteps}/${ev.totalSteps} steps, ${ev.filesCreated||0} files`,'var(--green)');
+            if(ev.replanCount>0)agiLog(`Auto-replanned ${ev.replanCount} times`,'var(--fg3)');
+          }
+          else if(ev.type==='agi.pipeline.fail'){
+            agiLog(`Pipeline FAILED: ${ev.error||'unknown'}`,'var(--red)');
+          }
+          else if(ev.type==='event'){
+            // Show ALL engine events — full transparency
+            const cls=ev.eventType||'';
+            const pl=ev.payload||{};
 
-  // Step 4: Verify + Fix loop (up to 3 iterations)
-  for(let i=1;i<=3&&AGI_RUNNING;i++){
-    const vResult=await runAgiStep('verify',
-      `[STEP 4: VERIFY iteration ${i}] Run ALL verification: type-check, lint, tests, build. Fix any errors found. Task: ${prompt}`,
-      'run', 50+i*10);
-    if(vResult&&vResult.includes('pass'))break;
-    if(i<3)agiLog(`검증 실패 — 수정 후 재시도 (${i}/3)`,'var(--yellow)');
+            if(cls==='tool.completed'){
+              _agiToolCalls++;
+              const ok=pl.ok!==false;
+              const tool=pl.tool||'?';
+              const icon=ok?'ok':'FAIL';
+              const color=ok?'var(--green)':'var(--red)';
+
+              if(tool==='write'&&ok){
+                _agiFileCount++;
+                const fp=pl.output?.path||'';
+                agiLog(`[write] ${fp}`,'var(--green)','W');
+                updateAgiDashboard({files:_agiFileCount});
+              } else if(tool==='read'&&ok){
+                agiLog(`[read] ${pl.output?.path||'file'}`,'var(--fg3)','R');
+              } else if(tool==='bash'){
+                const cmd=(pl.input?.command||'').toString().slice(0,120);
+                const exit=pl.output?.exitCode??pl.exitCode??'?';
+                agiLog(`[bash] ${cmd} → exit ${exit}`,ok?'var(--fg2)':'var(--red)','$');
+              } else if(tool==='grep'&&ok){
+                agiLog(`[grep] ${pl.input?.pattern||'?'} → ${pl.output?.matchCount||'?'} matches`,'var(--fg3)');
+              } else if(tool==='glob'&&ok){
+                agiLog(`[glob] ${pl.input?.pattern||'?'} → ${pl.output?.count||'?'} files`,'var(--fg3)');
+              } else if(tool==='apply_patch'&&ok){
+                agiLog(`[patch] ${pl.output?.path||'?'} (${pl.output?.editsApplied||'?'} edits)`,'var(--accent)');
+              } else if(tool==='multi_patch'){
+                agiLog(`[multi_patch] ${pl.output?.patchCount||'?'} files ${ok?'patched':'FAILED'}`,color);
+              } else if(tool==='git'){
+                agiLog(`[git] ${(pl.input?.args||[]).join(' ')}`,'var(--fg3)');
+              } else if(tool==='lsp_diagnostics'||tool==='diagnostics'){
+                const errs=pl.output?.totalErrors||0;
+                const warns=pl.output?.totalWarnings||0;
+                agiLog(`[diagnostics] ${errs} errors, ${warns} warnings`,errs>0?'var(--red)':'var(--green)');
+              } else if(tool==='web_search'){
+                agiLog(`[search] ${pl.input?.query||'?'}`,'var(--fg3)');
+              } else if(tool==='ls'){
+                agiLog(`[ls] ${pl.output?.totalEntries||'?'} entries`,'var(--fg3)');
+              } else if(tool==='fetch'){
+                agiLog(`[fetch] ${pl.input?.url||'?'}`,'var(--fg3)');
+              } else if(tool==='memory_save'&&ok){
+                agiLog(`[memory] saved: ${pl.input?.key||'?'}`,'var(--accent)');
+              } else if(tool==='call_agent'){
+                agiLog(`[agent] ${pl.input?.agentId||'?'}: ${(pl.input?.task||'').toString().slice(0,80)}`,'var(--accent)');
+              } else {
+                agiLog(`[${tool}] ${icon}`,color);
+              }
+              updateAgiDashboard({tools:_agiToolCalls});
+            }
+            else if(cls==='phase.transition'){
+              const from=pl.from||'?';const to=pl.to||'?';
+              agiLog(`Phase: ${from} → ${to}`,'var(--accent)');
+            }
+            else if(cls==='session.started'){
+              agiLog(`Session started — intent: ${pl.intent||'?'}, scope: ${pl.scope||'?'}, risk: ${pl.risk||'?'}`,'var(--accent)');
+            }
+            else if(cls==='session.completed'){
+              agiLog(`Session completed — status: ${pl.status||'?'}`,'var(--green)');
+            }
+            else if(cls==='enforcer.checklist'){
+              const items=(pl.checklist||[]);
+              if(items.length)agiLog(`Enforcer round ${pl.round||'?'}: ${items.join('; ').slice(0,200)}`,'var(--fg3)');
+            }
+            else if(cls==='enforcer.stuck'){
+              agiLog(`STUCK detected: ${pl.reason||'unknown'}`,'var(--yellow)');
+            }
+            else if(cls==='review.pass'){
+              agiLog(`Review: PASS`,'var(--green)');
+            }
+            else if(cls==='review.fail'){
+              agiLog(`Review: FAIL — will retry`,'var(--red)');
+            }
+            else if(cls==='delegation.started'){
+              agiLog(`Delegation: ${pl.role||'?'} → ${(pl.title||'').slice(0,80)}`,'var(--accent)');
+            }
+            else if(cls==='delegation.completed'){
+              agiLog(`Delegation done: ${pl.role||'?'}`,'var(--green)');
+            }
+            else if(cls==='error.retriable'){
+              agiLog(`Retry: ${(pl.message||'').slice(0,150)}`,'var(--yellow)');
+            }
+            else if(cls==='error.fatal'){
+              agiLog(`FATAL: ${(pl.message||'').slice(0,200)}`,'var(--red)');
+            }
+            else if(cls==='sandbox.applied'){
+              agiLog(`Sandbox applied: ${pl.paths?.length||0} files written to disk`,'var(--green)');
+            }
+            else if(cls==='sandbox.staged'){
+              agiLog(`Staged: ${pl.path||'?'} (${pl.bytes||0} bytes)`,'var(--fg3)');
+            }
+            else if(cls==='cost.update'){
+              const cost=pl.totalCostUsd?`$${Number(pl.totalCostUsd).toFixed(4)}`:'?';
+              agiLog(`Cost: ${cost}, tokens: ${pl.totalTokens||'?'}`,'var(--fg3)');
+              updateAgiDashboard({cost:cost,tokens:pl.totalTokens||0});
+            }
+            else if(cls==='session.checkpoint'){
+              agiLog(`Checkpoint saved (${pl.fileCount||0} files)`,'var(--fg3)');
+            }
+            else if(cls==='session.resumed'){
+              agiLog(`Session resumed${pl.autoRecovery?' (auto-recovery)':''}`,'var(--accent)');
+            }
+            else if(cls.startsWith('provider.')){
+              // provider events — show model info
+            }
+            else {
+              // Unknown event type — still show it
+              agiLog(`[${cls}] ${JSON.stringify(pl).slice(0,150)}`,'var(--fg3)');
+            }
+          }
+          else if(ev.type==='llm'){
+            // Show LLM thinking as streaming text
+            if(ev.text&&ev.text.length>0){
+              _agiLlmBuf=((_agiLlmBuf||'')+ev.text);
+              // Flush to log every 200 chars or on newline
+              if(_agiLlmBuf.length>200||_agiLlmBuf.includes('\n')){
+                const lines=_agiLlmBuf.split('\n');
+                for(const ln of lines){
+                  if(ln.trim().length>3)agiLog(ln.trim().slice(0,300),'var(--fg3)');
+                }
+                _agiLlmBuf='';
+              }
+            }
+          }
+          else if(ev.type==='stdout'){
+            if(ev.text&&ev.text.length>3){
+              agiLog(ev.text.slice(0,300),'var(--fg2)');
+            }
+          }
+          else if(ev.type==='stderr'){
+            if(ev.text&&ev.text.length>3){
+              agiLog(ev.text.slice(0,300),'var(--yellow)');
+            }
+          }
+
+        }catch(parseErr){/* ignore parse errors */}
+      }
+    }
+  }catch(e){
+    if(e.name==='AbortError'){
+      agiLog('Pipeline stopped by user','var(--yellow)');
+    }else{
+      agiLog('Pipeline error: '+(e.message||e),'var(--red)');
+    }
   }
-  if(!AGI_RUNNING){agiFinish();return;}
-  agiLog('── VERIFY 완료, IMPROVE 시작 ──','var(--accent)');
 
-  // Step 5: Improve — security, performance, tests, docs
-  await runAgiStep('improve',
-    `[STEP 5: IMPROVE] Run full improvement: add missing tests, security audit, performance check, add documentation. Task: ${prompt}`,
-    'team', 85);
-  if(!AGI_RUNNING){agiFinish();return;}
-  agiLog('── IMPROVE 완료, FINAL REVIEW 시작 ──','var(--accent)');
-
-  // Step 6: Final review — 40 specialists
-  await runAgiStep('review',
-    `[STEP 6: FINAL REVIEW] Comprehensive final review with all specialist roles. Check: correctness, security, performance, accessibility, error handling, test coverage. Task: ${prompt}`,
-    'team', 95);
-
-  } catch(e) {
-    agiLog('파이프라인 에러: '+(e.message||e),'var(--red)');
-  }
-
-  // Done
-  agiFinish();
-  loadFiles();
-}
-function agiFinish(){
+  // Finish
   updateAgiDashboard({status:'Done',percent:100});
   if(AGI_PROJECT_DIR){
-    agiLog('📁 결과물: workspace/'+AGI_PROJECT_DIR+'/','var(--green)');
-    agiLog('실행: cd workspace/'+AGI_PROJECT_DIR+' && npm install && npm start','var(--fg2)');
+    agiLog('Output: workspace/'+AGI_PROJECT_DIR+'/','var(--green)');
+    agiLog('Run: cd workspace/'+AGI_PROJECT_DIR+' && npm install && npm start','var(--fg2)');
   }
-  agiLog('🎉 AGI 파이프라인 완료!','var(--green)');
+  agiLog('AGI Pipeline V2 complete!','var(--green)');
   AGI_RUNNING=false;
   AGI_PROJECT_DIR=null;
+  document.getElementById('agiStartBtn').style.display='';
+  document.getElementById('agiStopBtn').style.display='none';
+  loadFiles();
+}
+
+// Legacy compat
+async function startAgiFull(){ return startAgiV2(); }
+function agiFinish(){
+  updateAgiDashboard({status:'Done',percent:100});
+  AGI_RUNNING=false;AGI_PROJECT_DIR=null;
   document.getElementById('agiStartBtn').style.display='';
   document.getElementById('agiStopBtn').style.display='none';
 }

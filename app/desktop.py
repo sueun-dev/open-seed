@@ -7,6 +7,7 @@ PROJECT_DIR = os.path.dirname(APP_DIR)
 ICON_PATH = os.path.join(APP_DIR, "icon.png")
 server_process = None
 
+
 def kill_port():
     try:
         r = subprocess.run(["lsof", "-ti", f":{PORT}"], capture_output=True, text=True, timeout=3)
@@ -17,12 +18,18 @@ def kill_port():
         time.sleep(0.5)
     except: pass
 
+def find_node():
+    for p in ["/usr/local/bin/node", "/opt/homebrew/bin/node", "/usr/bin/node"]:
+        if os.path.exists(p): return p
+    return "node"
+
 def start_server():
     global server_process
     env = os.environ.copy()
     env["OPENSEED_DESKTOP"] = "1"
+    env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:" + env.get("PATH", "")
     server_process = subprocess.Popen(
-        ["node", os.path.join(APP_DIR, "server.js"), "--port", str(PORT), "--cwd", PROJECT_DIR],
+        [find_node(), os.path.join(APP_DIR, "server.js"), "--port", str(PORT), "--cwd", PROJECT_DIR],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env
     )
 
