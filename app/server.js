@@ -717,7 +717,7 @@ const server = http.createServer(async (req, res) => {
     const filePath = url.searchParams.get("path");
     if (!filePath) { res.writeHead(400); res.end("Missing path"); return; }
     const abs = require("node:path").resolve(CWD, filePath);
-    if (!safePath(filePath || dirPath || "")) { res.writeHead(403); res.end("Forbidden"); return; }
+    if (!safePath(filePath)) { res.writeHead(403); res.end("Forbidden"); return; }
     try {
       const content = require("node:fs").readFileSync(abs, "utf8");
       const stat = require("node:fs").statSync(abs);
@@ -805,7 +805,7 @@ const server = http.createServer(async (req, res) => {
     const { path: filePath, content } = safeJsonParse(body) || {};
     if (!filePath) { res.writeHead(400); res.end("Missing path"); return; }
     const abs = require("node:path").resolve(CWD, filePath);
-    if (!safePath(filePath || dirPath || "")) { res.writeHead(403); res.end("Forbidden"); return; }
+    if (!safePath(filePath)) { res.writeHead(403); res.end("Forbidden"); return; }
     try {
       const dir = require("node:path").dirname(abs);
       if (!require("node:fs").existsSync(dir)) {
@@ -835,7 +835,7 @@ const server = http.createServer(async (req, res) => {
     const { path: filePath } = safeJsonParse(body) || {};
     if (!filePath) { res.writeHead(400); res.end("Missing path"); return; }
     const abs = require("node:path").resolve(CWD, filePath);
-    if (!safePath(filePath || dirPath || "")) { res.writeHead(403); res.end("Forbidden"); return; }
+    if (!safePath(filePath)) { res.writeHead(403); res.end("Forbidden"); return; }
     try {
       const stat = require("node:fs").statSync(abs);
       if (stat.isDirectory()) {
@@ -881,7 +881,7 @@ const server = http.createServer(async (req, res) => {
     const { path: dirPath } = safeJsonParse(body) || {};
     if (!dirPath) { res.writeHead(400); res.end("Missing path"); return; }
     const abs = require("node:path").resolve(CWD, dirPath);
-    if (!safePath(filePath || dirPath || "")) { res.writeHead(403); res.end("Forbidden"); return; }
+    if (!safePath(dirPath)) { res.writeHead(403); res.end("Forbidden"); return; }
     try {
       require("node:fs").mkdirSync(abs, { recursive: true });
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -889,6 +889,50 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // ── Config API (GET) ──
+  if (url.pathname === "/api/config" && req.method === "GET") {
+    try {
+      const configPath = path.join(CWD, ".agent", "config.json");
+      const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, "utf8")) : {};
+      // Mask API keys for security
+      const safe = JSON.parse(JSON.stringify(config));
+      for (const p of ["openai", "anthropic", "gemini"]) {
+        if (safe.providers?.[p]?.apiKeyEnv) {
+          const key = process.env[safe.providers[p].apiKeyEnv];
+          safe.providers[p].apiKeySet = !!key;
+          safe.providers[p].apiKeyPreview = key ? key.slice(0, 8) + "..." : "(not set)";
+        }
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(safe));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // ── Sessions API (GET) ──
+  if (url.pathname === "/api/sessions" && req.method === "GET") {
+    try {
+      const sessDir = path.join(CWD, ".agent", "sessions");
+      const files = fs.existsSync(sessDir) ? fs.readdirSync(sessDir).filter(f => f.endsWith(".json")).sort().reverse().slice(0, 50) : [];
+      const sessions = [];
+      for (const f of files) {
+        try {
+          const data = JSON.parse(fs.readFileSync(path.join(sessDir, f), "utf8"));
+          sessions.push({ id: data.id || f.replace(".json", ""), task: data.task || "", status: data.status || "unknown", createdAt: data.createdAt || "", phase: data.phase || "" });
+        } catch { /* skip corrupt */ }
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(sessions));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify([]));
     }
     return;
   }
@@ -903,10 +947,37 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/api/doctor" && req.method === "POST") {
-    const result = await runAgent("doctor");
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(result));
+  if (url.pathname === "/api/doctor" && (req.method === "POST" || req.method === "GET")) {
+    try {
+      const checks = [];
+      // Config check
+      const configPath = path.join(CWD, ".agent", "config.json");
+      checks.push({ name: "config", status: fs.existsSync(configPath) ? "ok" : "warn", message: fs.existsSync(configPath) ? "Config found" : "No config — using defaults" });
+      // Provider checks
+      for (const [name, envKey] of [["openai", "OPENAI_API_KEY"], ["anthropic", "ANTHROPIC_API_KEY"]]) {
+        checks.push({ name, status: process.env[envKey] ? "ok" : "warn", message: process.env[envKey] ? `${envKey} set` : `${envKey} not set` });
+      }
+      // OAuth checks
+      const codexAuth = path.join(require("os").homedir(), ".codex", "auth.json");
+      checks.push({ name: "codex-oauth", status: fs.existsSync(codexAuth) ? "ok" : "warn", message: fs.existsSync(codexAuth) ? "Codex OAuth found" : "No Codex OAuth" });
+      // Node
+      checks.push({ name: "node", status: "ok", message: `Node.js ${process.version}` });
+      // Git
+      try { const { execSync } = require("child_process"); checks.push({ name: "git", status: "ok", message: execSync("git --version", { encoding: "utf-8", timeout: 3000 }).trim() }); } catch { checks.push({ name: "git", status: "error", message: "git not found" }); }
+      // Build
+      checks.push({ name: "build", status: fs.existsSync(path.join(CWD, "dist", "cli.js")) ? "ok" : "warn", message: fs.existsSync(path.join(CWD, "dist", "cli.js")) ? "Build exists" : "Run npm run build" });
+      // Workspace
+      const entries = fs.readdirSync(CWD).length;
+      checks.push({ name: "workspace", status: "ok", message: `${entries} entries` });
+
+      const errors = checks.filter(c => c.status === "error").length;
+      const warnings = checks.filter(c => c.status === "warn").length;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ healthy: errors === 0, checks, summary: `${checks.length} checks: ${checks.length - errors - warnings} ok, ${warnings} warn, ${errors} error` }));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ healthy: false, checks: [], error: e.message }));
+    }
     return;
   }
 
