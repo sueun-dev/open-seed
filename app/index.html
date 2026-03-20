@@ -1273,16 +1273,15 @@ async function handleExternalFileDrop(files,targetDir){
         console.warn('File too large (>5MB):',file.name);
         continue;
       }
-      // Skip binary files
-      const binaryExts=['png','jpg','jpeg','gif','ico','woff','woff2','ttf','eot','pdf','zip','tar','gz','mp3','mp4','mov','avi'];
       const ext=file.name.split('.').pop().toLowerCase();
-      if(binaryExts.includes(ext)){
-        failed++;
-        console.warn('Binary file skipped:',file.name);
-        continue;
-      }
 
-      const content=await readFileAsText(file);
+      // Binary files: upload as base64
+      let content;
+      if(_binaryExts.has(ext)){
+        content=await readFileAsBase64(file);
+      }else{
+        content=await readFileAsText(file);
+      }
       const targetPath=targetDir?targetDir+'/'+file.name:file.name;
       const r=await fetch('/api/file',{
         method:'PUT',
@@ -1309,10 +1308,24 @@ function readFileAsText(file){
     const reader=new FileReader();
     reader.onload=()=>resolve(reader.result);
     reader.onerror=()=>reject(reader.error);
-    // Timeout: don't hang forever on problematic files
     const timeout=setTimeout(()=>reject(new Error('Read timeout')),10000);
     reader.onloadend=()=>clearTimeout(timeout);
     reader.readAsText(file);
+  });
+}
+function readFileAsBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{
+      // Extract base64 data from data URL
+      const dataUrl=reader.result;
+      const base64=dataUrl.split(',')[1]||'';
+      resolve('__BASE64__'+base64);
+    };
+    reader.onerror=()=>reject(reader.error);
+    const timeout=setTimeout(()=>reject(new Error('Read timeout')),10000);
+    reader.onloadend=()=>clearTimeout(timeout);
+    reader.readAsDataURL(file);
   });
 }
 
@@ -1476,12 +1489,243 @@ function setupExternalDropZone(el,targetDir){
 }
 
 /* ═══ TABS ═══ */
-function openTab(p){if(p.startsWith('__diff__/')){/* diff pseudo-tab */let t=T.find(x=>x.p===p);if(t){AT=t;renderTabs();renderEd();}return;}let t=T.find(x=>x.p===p);if(!t){t={p,c:'',d:false,o:''};T.push(t)}AT=t;fetch('/api/file?path='+encodeURIComponent(p)).then(r=>r.json()).then(data=>{t.c=data.content;t.o=data.content;t.d=false;renderTabs();renderEd();document.getElementById('sbF').textContent=p;updateBreadcrumb(p);renderOpenEditors();/* Auto-reveal in explorer */const el=document.querySelector(`.fi[data-filepath="${p}"]`);if(el){document.querySelectorAll('.fi.on').forEach(x=>x.classList.remove('on'));el.classList.add('on');el.scrollIntoView({block:'nearest'})}})}
-function renderTabs(){const bar=document.getElementById('tabs');bar.innerHTML='';for(const t of T){const el=document.createElement('div');el.className='tab'+(t===AT?' on':'')+(t.d?' dirty':'');el.innerHTML='<span>'+esc(t.p.split('/').pop())+'</span><span class="x" onclick="event.stopPropagation();closeTab(\''+t.p+'\')">×</span>';el.onclick=()=>{AT=t;renderTabs();renderEd()};bar.appendChild(el)}}
+const _binaryExts=new Set(['png','jpg','jpeg','gif','webp','svg','bmp','avif','ico','mp4','webm','mov','avi','mkv','m4v','mp3','wav','ogg','m4a','aac','flac','pdf','woff','woff2','ttf','eot','zip','tar','gz','7z','rar']);
+const _imageExts=new Set(['png','jpg','jpeg','gif','webp','svg','bmp','avif','ico']);
+const _videoExts=new Set(['mp4','webm','mov','avi','mkv','m4v']);
+const _audioExts=new Set(['mp3','wav','ogg','m4a','aac','flac']);
+
+function getFileExt(p){return(p||'').split('.').pop().toLowerCase();}
+function isBinaryFile(p){return _binaryExts.has(getFileExt(p));}
+
+function openTab(p){
+  // Diff pseudo-tab
+  if(p.startsWith('__diff__/')){let t=T.find(x=>x.p===p);if(t){AT=t;renderTabs();renderEd();}return;}
+
+  let t=T.find(x=>x.p===p);
+  if(!t){t={p,c:'',d:false,o:'',binary:isBinaryFile(p)};T.push(t);}
+  AT=t;
+
+  if(t.binary){
+    // Binary files: don't fetch content, just mark as loaded
+    t.c='[Binary file]';t.o=t.c;t.d=false;
+    renderTabs();renderEd();
+    document.getElementById('sbF').textContent=p;
+    updateBreadcrumb(p);renderOpenEditors();
+  }else{
+    // Text files: fetch content
+    fetch('/api/file?path='+encodeURIComponent(p)).then(r=>r.json()).then(data=>{
+      t.c=data.content;t.o=data.content;t.d=false;
+      renderTabs();renderEd();
+      document.getElementById('sbF').textContent=p;
+      updateBreadcrumb(p);renderOpenEditors();
+      // Auto-reveal in explorer
+      const el=document.querySelector(`.fi[data-filepath="${p}"]`);
+      if(el){document.querySelectorAll('.fi.on').forEach(x=>x.classList.remove('on'));el.classList.add('on');el.scrollIntoView({block:'nearest'});}
+    }).catch(()=>{
+      // Might be binary that wasn't detected — try as binary
+      t.binary=true;t.c='[Binary file]';t.o=t.c;
+      renderTabs();renderEd();
+    });
+  }
+}
+
+function renderTabs(){
+  const bar=document.getElementById('tabs');bar.innerHTML='';
+  for(const t of T){
+    const el=document.createElement('div');
+    el.className='tab'+(t===AT?' on':'')+(t.d?' dirty':'');
+    const ext=getFileExt(t.p);
+    const ic=_fileIcons[ext]||'';
+    const cl=_fileColors[ext]||'';
+    const iconHtml=ic?`<span style="color:${cl};font-size:9px;margin-right:3px">${ic}</span>`:'';
+    el.innerHTML=iconHtml+'<span>'+esc(t.p.split('/').pop())+'</span><span class="x" onclick="event.stopPropagation();closeTab(\''+t.p.replace(/'/g,"\\'")+'\')">×</span>';
+    el.onclick=()=>{AT=t;renderTabs();renderEd()};
+    bar.appendChild(el);
+  }
+}
+
 function closeTab(p){const i=T.findIndex(t=>t.p===p);if(i<0)return;if(T[i].d&&!confirm('Discard?'))return;T.splice(i,1);if(AT?.p===p)AT=T[Math.min(i,T.length-1)]||null;renderTabs();AT?renderEd():showWelcome()}
 
-/* ═══ EDITOR with Syntax Highlighting ═══ */
-function renderEd(){if(!AT){showWelcome();return}const z=document.getElementById('edZone');z.querySelector('.welcome-screen')?.remove();let w=z.querySelector('.code-wrap');if(!w){w=document.createElement('div');w.className='code-wrap';w.innerHTML='<div class="line-gutter" id="lg"></div><div class="code-edit"><textarea id="ce" spellcheck="false"></textarea></div>';z.appendChild(w);const ce=document.getElementById('ce');ce.oninput=()=>{AT.c=ce.value;AT.d=ce.value!==AT.o;renderTabs();updateGutter()};ce.onscroll=()=>{document.getElementById('lg').scrollTop=ce.scrollTop};ce.onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();const s=ce.selectionStart;ce.value=ce.value.substring(0,s)+'  '+ce.value.substring(ce.selectionEnd);ce.selectionStart=ce.selectionEnd=s+2;ce.oninput()}}}document.getElementById('ce').value=AT.c;updateGutter();updateOutline();updateTimeline()}
+/* ═══ EDITOR — renders text, images, video, audio, PDF ═══ */
+function renderEd(){
+  if(!AT){showWelcome();return;}
+  const z=document.getElementById('edZone');
+  z.querySelector('.welcome-screen')?.remove();
+  // Remove any previous viewer
+  z.querySelector('.code-wrap')?.remove();
+  z.querySelector('.media-viewer')?.remove();
+
+  const ext=getFileExt(AT.p);
+  const rawUrl='/api/file/raw?path='+encodeURIComponent(AT.p);
+
+  // ── Image viewer ──
+  if(_imageExts.has(ext)){
+    const v=document.createElement('div');
+    v.className='media-viewer';
+    v.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;overflow:auto;padding:20px;background:var(--bg)';
+    v.innerHTML=`
+      <div style="font-size:11px;color:var(--fg3);margin-bottom:8px">${esc(AT.p)}</div>
+      <img src="${rawUrl}" style="max-width:100%;max-height:calc(100vh - 200px);border-radius:4px;box-shadow:0 2px 12px rgba(0,0,0,.3)" alt="${esc(AT.p)}"
+        onerror="this.outerHTML='<div style=\\'color:var(--red)\\'>Failed to load image</div>'" />
+      <div style="display:flex;gap:12px;font-size:10px;color:var(--fg3);margin-top:8px">
+        <span id="imgInfo">Loading...</span>
+      </div>
+    `;
+    z.appendChild(v);
+    // Get image dimensions
+    const img=v.querySelector('img');
+    img.onload=()=>{
+      const info=document.getElementById('imgInfo');
+      if(info)info.textContent=`${img.naturalWidth} × ${img.naturalHeight} px`;
+    };
+    return;
+  }
+
+  // ── Video viewer ──
+  if(_videoExts.has(ext)){
+    const v=document.createElement('div');
+    v.className='media-viewer';
+    v.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;padding:20px;background:#000';
+    v.innerHTML=`
+      <div style="font-size:11px;color:var(--fg3)">${esc(AT.p)}</div>
+      <video src="${rawUrl}" controls style="max-width:100%;max-height:calc(100vh - 200px);border-radius:4px"
+        onerror="this.outerHTML='<div style=\\'color:var(--red);padding:20px\\'>Failed to load video</div>'">
+        Your browser does not support this video format.
+      </video>
+    `;
+    z.appendChild(v);
+    return;
+  }
+
+  // ── Audio player ──
+  if(_audioExts.has(ext)){
+    const v=document.createElement('div');
+    v.className='media-viewer';
+    v.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px;background:var(--bg)';
+    v.innerHTML=`
+      <div style="font-size:48px">♫</div>
+      <div style="font-size:14px;color:var(--fg)">${esc(AT.p.split('/').pop())}</div>
+      <audio src="${rawUrl}" controls style="width:80%;max-width:500px"
+        onerror="this.outerHTML='<div style=\\'color:var(--red)\\'>Failed to load audio</div>'">
+        Your browser does not support this audio format.
+      </audio>
+    `;
+    z.appendChild(v);
+    return;
+  }
+
+  // ── PDF viewer ──
+  if(ext==='pdf'){
+    const v=document.createElement('div');
+    v.className='media-viewer';
+    v.style.cssText='display:flex;flex-direction:column;height:100%;background:var(--bg)';
+    v.innerHTML=`
+      <div style="font-size:11px;color:var(--fg3);padding:8px 12px;border-bottom:1px solid var(--border)">${esc(AT.p)}</div>
+      <iframe src="${rawUrl}" style="flex:1;border:none;background:#fff" title="PDF Viewer"></iframe>
+    `;
+    z.appendChild(v);
+    return;
+  }
+
+  // ── SVG special: show both rendered + source ──
+  if(ext==='svg'&&!AT.binary){
+    const v=document.createElement('div');
+    v.className='media-viewer';
+    v.style.cssText='display:flex;height:100%;background:var(--bg)';
+    v.innerHTML=`
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:20px;border-right:1px solid var(--border);background:repeating-conic-gradient(var(--bg3) 0% 25%, var(--bg) 0% 50%) 50%/16px 16px">
+        <img src="${rawUrl}" style="max-width:100%;max-height:100%" alt="SVG preview" />
+      </div>
+      <div style="flex:1;overflow:auto;position:relative">
+        <div class="code-wrap" style="height:100%">
+          <div class="line-gutter" id="lg"></div>
+          <div class="code-edit"><textarea id="ce" spellcheck="false"></textarea></div>
+        </div>
+      </div>
+    `;
+    z.appendChild(v);
+    setupCodeEditor();
+    return;
+  }
+
+  // ── Binary file (unknown type) ──
+  if(AT.binary||_binaryExts.has(ext)){
+    const v=document.createElement('div');
+    v.className='media-viewer';
+    v.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px;background:var(--bg)';
+    v.innerHTML=`
+      <div style="font-size:48px;opacity:.3">📄</div>
+      <div style="font-size:14px;color:var(--fg)">${esc(AT.p.split('/').pop())}</div>
+      <div style="font-size:11px;color:var(--fg3)">Binary file cannot be displayed as text</div>
+      <div style="font-size:11px;color:var(--fg3)">.${esc(ext)} file</div>
+      <a href="${rawUrl}" download="${esc(AT.p.split('/').pop())}" style="color:var(--accent);font-size:12px;text-decoration:underline;cursor:pointer">Download file</a>
+    `;
+    z.appendChild(v);
+    return;
+  }
+
+  // ── Markdown preview (split view) ──
+  if(ext==='md'){
+    const v=document.createElement('div');
+    v.className='media-viewer';
+    v.style.cssText='display:flex;height:100%;background:var(--bg)';
+    v.innerHTML=`
+      <div style="flex:1;overflow:auto;position:relative">
+        <div class="code-wrap" style="height:100%">
+          <div class="line-gutter" id="lg"></div>
+          <div class="code-edit"><textarea id="ce" spellcheck="false"></textarea></div>
+        </div>
+      </div>
+      <div style="flex:1;overflow:auto;padding:16px 24px;border-left:1px solid var(--border);font-family:-apple-system,system-ui,sans-serif;font-size:13px;color:var(--fg);line-height:1.6" id="mdPreview"></div>
+    `;
+    z.appendChild(v);
+    setupCodeEditor();
+    renderMarkdownPreview();
+    return;
+  }
+
+  // ── Text/Code editor (default) ──
+  const w=document.createElement('div');
+  w.className='code-wrap';
+  w.innerHTML='<div class="line-gutter" id="lg"></div><div class="code-edit"><textarea id="ce" spellcheck="false"></textarea></div>';
+  z.appendChild(w);
+  setupCodeEditor();
+}
+
+function setupCodeEditor(){
+  const ce=document.getElementById('ce');
+  if(!ce||!AT)return;
+  ce.value=AT.c;
+  ce.oninput=()=>{
+    AT.c=ce.value;AT.d=ce.value!==AT.o;renderTabs();updateGutter();
+    if(getFileExt(AT.p)==='md')renderMarkdownPreview();
+  };
+  ce.onscroll=()=>{const lg=document.getElementById('lg');if(lg)lg.scrollTop=ce.scrollTop;};
+  ce.onkeydown=e=>{
+    if(e.key==='Tab'){e.preventDefault();const s=ce.selectionStart;ce.value=ce.value.substring(0,s)+'  '+ce.value.substring(ce.selectionEnd);ce.selectionStart=ce.selectionEnd=s+2;ce.oninput();}
+  };
+  updateGutter();
+  updateOutline();
+  updateTimeline();
+}
+
+function renderMarkdownPreview(){
+  const el=document.getElementById('mdPreview');
+  if(!el||!AT)return;
+  // Simple markdown to HTML
+  let html=esc(AT.c)
+    .replace(/^### (.+)$/gm,'<h3>$1</h3>')
+    .replace(/^## (.+)$/gm,'<h2>$1</h2>')
+    .replace(/^# (.+)$/gm,'<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+    .replace(/\*(.+?)\*/g,'<i>$1</i>')
+    .replace(/`([^`]+)`/g,'<code style="background:var(--bg3);padding:1px 4px;border-radius:3px">$1</code>')
+    .replace(/^- (.+)$/gm,'<li>$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm,'<li>$2</li>')
+    .replace(/\n\n/g,'<br><br>')
+    .replace(/```(\w*)\n([\s\S]*?)```/g,'<pre style="background:var(--bg3);padding:12px;border-radius:6px;overflow-x:auto"><code>$2</code></pre>');
+  el.innerHTML=html;
+}
 function updateHighlight(){const hl=document.getElementById('hl');if(!hl||!AT)return;const ext=AT.p.split('.').pop();const lang={ts:'typescript',tsx:'typescript',js:'javascript',json:'json',css:'css',html:'xml',md:'markdown',py:'python',sh:'bash'}[ext]||'';let html;if(lang&&hljs.getLanguage(lang)){html=hljs.highlight(AT.c,{language:lang}).value}else{html=esc(AT.c)}hl.innerHTML='<code>'+html+'</code>'}
 function updateGutter(){const g=document.getElementById('lg'),ce=document.getElementById('ce');if(!g||!ce)return;const n=ce.value.split('\n').length;g.innerHTML=Array.from({length:n},(_,i)=>'<div>'+(i+1)+'</div>').join('')}
 function showWelcome(){const z=document.getElementById('edZone');z.querySelector('.code-wrap')?.remove();if(!z.querySelector('.welcome-screen'))z.innerHTML='<div class="welcome-screen" id="welc"><h1>Open <b>Seed</b></h1><p>Autonomous AGI Coding Engine<br>49 subsystems · 40 neural roles · Prometheus Engine<br><br><kbd>⌘⇧A</kbd> AI Chat &nbsp; <kbd>⌘⇧E</kbd> Explorer<br><kbd>⌘S</kbd> Save &nbsp; <kbd>⌘\`</kbd> Terminal</p></div>'}
