@@ -730,6 +730,42 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── Raw File (binary — images, videos, PDFs served with correct MIME) ──
+  if (url.pathname === "/api/file/raw" && req.method === "GET") {
+    const filePath = url.searchParams.get("path");
+    if (!filePath) { res.writeHead(400); res.end("Missing path"); return; }
+    const abs = require("node:path").resolve(CWD, filePath);
+    if (!safePath(filePath)) { res.writeHead(403); res.end("Forbidden"); return; }
+    try {
+      const stat = require("node:fs").statSync(abs);
+      const ext = require("node:path").extname(abs).toLowerCase();
+      const mimeTypes = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+        ".ico": "image/x-icon", ".bmp": "image/bmp", ".avif": "image/avif",
+        ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+        ".avi": "video/x-msvideo", ".mkv": "video/x-matroska", ".m4v": "video/mp4",
+        ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+        ".m4a": "audio/mp4", ".aac": "audio/aac", ".flac": "audio/flac",
+        ".pdf": "application/pdf",
+        ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf",
+        ".zip": "application/zip", ".tar": "application/x-tar", ".gz": "application/gzip",
+      };
+      const contentType = mimeTypes[ext] || "application/octet-stream";
+      const content = require("node:fs").readFileSync(abs);
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Content-Length": stat.size,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, max-age=60"
+      });
+      res.end(content);
+    } catch (e) {
+      res.writeHead(404); res.end("Not found");
+    }
+    return;
+  }
+
   // ── File Write / Create ──
   if (url.pathname === "/api/file" && req.method === "PUT") {
     const body = await readBody(req);
@@ -742,9 +778,17 @@ const server = http.createServer(async (req, res) => {
       if (!require("node:fs").existsSync(dir)) {
         require("node:fs").mkdirSync(dir, { recursive: true });
       }
-      require("node:fs").writeFileSync(abs, content, "utf8");
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, path: filePath, bytes: Buffer.byteLength(content, "utf8") }));
+      // Support base64 binary uploads (prefixed with __BASE64__)
+      if (typeof content === "string" && content.startsWith("__BASE64__")) {
+        const buf = Buffer.from(content.slice(10), "base64");
+        require("node:fs").writeFileSync(abs, buf);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, path: filePath, bytes: buf.length, binary: true }));
+      } else {
+        require("node:fs").writeFileSync(abs, content || "", "utf8");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, path: filePath, bytes: Buffer.byteLength(content || "", "utf8") }));
+      }
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message }));
