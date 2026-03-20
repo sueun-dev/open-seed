@@ -721,7 +721,8 @@ export class ToolRuntime {
 
     const timeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 0;
     const shell = process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "/bin/sh";
-    const shellArgs = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
+    // Use -c (not -lc) to inherit parent PATH without login shell resetting it
+    const shellArgs = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command];
     return new Promise((resolve, reject) => {
       const child = spawn(shell, shellArgs, {
         cwd: this.options.cwd,

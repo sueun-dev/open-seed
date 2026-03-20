@@ -638,9 +638,15 @@ Output: PASS or FAIL with specific reasons.`,
         fs.writeFileSync(tmpPromptFile, prompt, "utf-8");
 
         // CLI expects: node cli.js run "<task>" — pass placeholder, real prompt via env file
+        // Ensure node's directory is in PATH so bash tool can find node/npm/npx
+        const nodeBinDir = path.dirname(NODE_BIN);
+        const childEnv = { ...process.env, AGI_PROMPT_FILE: tmpPromptFile };
+        if (!childEnv.PATH?.includes(nodeBinDir)) {
+          childEnv.PATH = `${nodeBinDir}:${childEnv.PATH || ""}`;
+        }
         const child = spawn(NODE_BIN, [agentCli, mode || "run", "__AGI_PROMPT_FILE__"], {
           cwd: childCwd,
-          env: { ...process.env, AGI_PROMPT_FILE: tmpPromptFile },
+          env: childEnv,
           stdio: ["ignore", "pipe", "pipe"]
         });
 
