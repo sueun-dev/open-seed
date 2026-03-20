@@ -7,72 +7,24 @@
   "scripts": {
     "start": "electron .",
     "web": "node server.js",
-    "dev": "node server.js",
-    "electron": "electron .",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:linux": "electron-builder --linux",
-    "build": "electron-builder"
+    "build:mac": "electron-builder --mac"
   },
   "build": {
     "appId": "com.openseed.app",
     "productName": "Open Seed",
-    "directories": {
-      "output": "../release"
-    },
-    "files": [
-      "main.js",
-      "preload.js",
-      "server.js",
-      "index.html",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "../dist",
-        "to": "engine",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../src",
-        "to": "src",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
+    "directories": { "output": "../release" },
+    "files": ["main.js", "preload.js", "server.js", "index.html", "package.json"],
+    "asarUnpack": ["server.js"],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "darkModeSupport": true
-    },
-    "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ]
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "category": "Development"
-    },
-    "dmg": {
-      "title": "Open Seed",
-      "backgroundColor": "#0d1117"
+      "target": [{"target": "dir"}],
+      "darkModeSupport": true,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     }
   },
-  "dependencies": {
-    "electron": "^32.2.7"
-  },
   "devDependencies": {
+    "electron": "^28.0.0",
     "electron-builder": "^25.1.8"
   }
 }
