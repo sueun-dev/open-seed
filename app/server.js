@@ -3028,10 +3028,51 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     return;
   }
 
-  if (url.pathname === "/api/check-comments" && req.method === "POST") {
-    const result = await runAgent("check-comments");
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(result));
+  if (url.pathname === "/api/scan-code-health" && req.method === "POST") {
+    try {
+      const fs = require("fs"), pathM = require("path");
+      const results = { todos: [], fixmes: [], hacks: [], largeFiles: [], audit: null };
+      // Scan source files for TODO/FIXME/HACK
+      const exts = [".js",".ts",".tsx",".jsx",".cjs",".mjs",".html",".css",".json"];
+      const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent",".research","autoresearch-mega-eval","electron"];
+      function walkDir(dir, depth) {
+        if (depth > 6) return;
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          if (ignoreDirs.includes(e.name)) continue;
+          const full = pathM.join(dir, e.name);
+          if (e.isDirectory()) { walkDir(full, depth + 1); continue; }
+          if (!exts.some(x => e.name.endsWith(x))) continue;
+          try {
+            const stat = fs.statSync(full);
+            if (stat.size > 500 * 1024) results.largeFiles.push({ file: pathM.relative(CWD, full), sizeKB: Math.round(stat.size / 1024) });
+            if (stat.size > 2 * 1024 * 1024) continue; // skip huge files
+            const lines = fs.readFileSync(full, "utf8").split("\n");
+            const rel = pathM.relative(CWD, full);
+            lines.forEach((ln, i) => {
+              const t = ln.trim();
+              if (/\bTODO\b/i.test(t)) results.todos.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
+              if (/\bFIXME\b/i.test(t)) results.fixmes.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
+              if (/\bHACK\b/i.test(t)) results.hacks.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
+            });
+          } catch {}
+        }
+      }
+      walkDir(CWD, 0);
+      // npm audit (quick)
+      try {
+        const { execSync } = require("child_process");
+        const auditOut = execSync("npm audit --json 2>/dev/null", { cwd: CWD, timeout: 10000 }).toString();
+        const auditJson = JSON.parse(auditOut);
+        results.audit = { vulnerabilities: auditJson.metadata?.vulnerabilities || {}, total: auditJson.metadata?.totalDependencies || 0 };
+      } catch { results.audit = null; }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(results));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
 
