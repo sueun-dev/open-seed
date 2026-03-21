@@ -3122,58 +3122,119 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     return;
   }
 
-  if (url.pathname === "/api/scan-code-health" && req.method === "POST") {
+  // ══ Shared AI Auth + Call helpers ══
+  function _getAnthropicAuth() {
+    if (process.env.ANTHROPIC_API_KEY) return { token: process.env.ANTHROPIC_API_KEY, mode: "api_key" };
+    const homedir = require("os").homedir();
+    for (const p of [path.join(homedir, ".claude", ".credentials.json"), path.join(homedir, ".claude", "credentials.json")]) {
+      try { const raw = JSON.parse(fs.readFileSync(p, "utf8")); const token = raw.claudeAiOauth?.accessToken || raw.access_token; if (token) return { token, mode: "oauth" }; } catch {}
+    }
     try {
-      const body = await readBody(req);
-      const { folder } = safeJsonParse(body) || {};
-      const fs = require("fs"), pathM = require("path");
-      const scanRoot = folder ? (folder.startsWith('/') ? folder : pathM.resolve(CWD, folder)) : CWD;
-      if (!require("fs").existsSync(scanRoot)) { res.writeHead(400, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"Folder not found: "+folder})); return; }
-      const results = { todos: [], fixmes: [], hacks: [], largeFiles: [], audit: null, scannedFolder: scanRoot.startsWith(CWD) ? (pathM.relative(CWD, scanRoot) || ".") : scanRoot };
-      // Scan source files for TODO/FIXME/HACK
-      const exts = [".js",".ts",".tsx",".jsx",".cjs",".mjs",".html",".css",".json"];
-      const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent",".research","autoresearch-mega-eval","electron"];
-      function walkDir(dir, depth) {
-        if (depth > 6) return;
-        let entries;
-        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      const token = require("child_process").execSync('security find-generic-password -s "claude-ai-credentials" -w 2>/dev/null', { encoding: "utf8", timeout: 3000 }).trim();
+      if (token) { const parsed = JSON.parse(token); const at = parsed.claudeAiOauth?.accessToken || parsed.access_token; if (at) return { token: at, mode: "oauth" }; }
+    } catch {}
+    return null;
+  }
+  function _getOpenAIAuth() {
+    if (process.env.OPENAI_API_KEY) return { token: process.env.OPENAI_API_KEY, accountId: null };
+    try { const p = path.join(require("os").homedir(), ".codex", "auth.json"); const raw = JSON.parse(fs.readFileSync(p, "utf8")); const token = raw.tokens?.access_token; const accountId = raw.tokens?.account_id; if (token) return { token, accountId }; } catch {}
+    return null;
+  }
+  async function _callAI(provider, messages, maxTokens = 3000) {
+    if (provider === "anthropic") {
+      const auth = _getAnthropicAuth();
+      if (!auth) throw new Error("Anthropic not authenticated — connect via Settings > Providers");
+      const headers = { "Content-Type": "application/json", "anthropic-version": "2023-06-01" };
+      if (auth.mode === "oauth") { headers["authorization"] = `Bearer ${auth.token}`; headers["anthropic-beta"] = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"; }
+      else { headers["x-api-key"] = auth.token; }
+      const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages }) });
+      const d = await r.json(); if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
+      return (d.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+    } else {
+      const auth = _getOpenAIAuth();
+      if (!auth) throw new Error("OpenAI not authenticated — connect via Settings > Providers");
+      const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${auth.token}` };
+      if (auth.accountId) headers["ChatGPT-Account-Id"] = auth.accountId;
+      const r = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model: "gpt-4o", max_tokens: maxTokens, messages }) });
+      const d = await r.json(); if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
+      return d.choices?.[0]?.message?.content || "";
+    }
+  }
+  // Helper: read code files from a directory
+  function _readCodeFiles(scanRoot, maxTotalChars = 80000) {
+    const exts = [".js",".ts",".tsx",".jsx",".cjs",".mjs",".html",".css"];
+    const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent",".research","autoresearch-mega-eval","electron"];
+    const files = [];
+    let totalChars = 0;
+    function walk(dir, depth) {
+      if (depth > 6 || totalChars > maxTotalChars) return;
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
         for (const e of entries) {
           if (ignoreDirs.includes(e.name)) continue;
-          const full = pathM.join(dir, e.name);
-          if (e.isDirectory()) { walkDir(full, depth + 1); continue; }
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) { walk(full, depth + 1); continue; }
           if (!exts.some(x => e.name.endsWith(x))) continue;
           try {
             const stat = fs.statSync(full);
-            if (stat.size > 500 * 1024) results.largeFiles.push({ file: pathM.relative(CWD, full), sizeKB: Math.round(stat.size / 1024) });
-            if (stat.size > 2 * 1024 * 1024) continue; // skip huge files
-            const lines = fs.readFileSync(full, "utf8").split("\n");
-            const rel = pathM.relative(CWD, full);
-            lines.forEach((ln, i) => {
-              const t = ln.trim();
-              // Only match TODO/FIXME/HACK in actual comments (// or /* or # or <!-- or the line starts with the keyword followed by colon)
-              const isComment = /^\s*(\/\/|\/\*|\*|#|<!--)/.test(ln) || /\/\/.*\b(TODO|FIXME|HACK)\b/.test(ln) || /\/\*.*\b(TODO|FIXME|HACK)\b/.test(ln);
-              if (!isComment) return;
-              if (/\bTODO\b[:(\s]/i.test(t) || /^\/\/\s*TODO\b/i.test(t)) results.todos.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
-              if (/\bFIXME\b[:(\s]/i.test(t) || /^\/\/\s*FIXME\b/i.test(t)) results.fixmes.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
-              if (/\bHACK\b[:(\s]/i.test(t) || /^\/\/\s*HACK\b/i.test(t)) results.hacks.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
-            });
+            if (stat.size > 500 * 1024) continue;
+            const content = fs.readFileSync(full, "utf8");
+            const rel = path.relative(CWD, full);
+            files.push({ file: rel, content, sizeKB: Math.round(stat.size / 1024) });
+            totalChars += content.length;
+            if (totalChars > maxTotalChars) return;
           } catch {}
         }
-      }
-      walkDir(scanRoot, 0);
-      // npm audit (quick)
-      try {
-        const { execSync } = require("child_process");
-        const auditOut = execSync("npm audit --json 2>/dev/null", { cwd: CWD, timeout: 10000 }).toString();
-        const auditJson = JSON.parse(auditOut);
-        results.audit = { vulnerabilities: auditJson.metadata?.vulnerabilities || {}, total: auditJson.metadata?.totalDependencies || 0 };
-      } catch { results.audit = null; }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(results));
-    } catch (e) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: e.message }));
+      } catch {}
     }
+    walk(scanRoot, 0);
+    return files;
+  }
+
+  // ── AI Code Analysis (read code → AI identifies issues by risk) ──
+  if (url.pathname === "/api/scan-code-health" && req.method === "POST") {
+    const body = await readBody(req);
+    const { folder } = safeJsonParse(body) || {};
+
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
+    const send = (type, data) => { try { res.write(`data: ${JSON.stringify({type,data})}\n\n`); } catch {} };
+
+    try {
+      const scanRoot = folder ? (folder.startsWith('/') ? folder : path.resolve(CWD, folder)) : CWD;
+      if (!fs.existsSync(scanRoot)) { send("error", "Folder not found: " + folder); res.end(); return; }
+
+      send("status", "Reading code files...");
+      const codeFiles = _readCodeFiles(scanRoot);
+      send("status", `Read ${codeFiles.length} files. AI is analyzing code...`);
+
+      if (codeFiles.length === 0) { send("result", { issues: [], fileCount: 0, scannedFolder: folder || "." }); send("done", null); res.end(); return; }
+
+      // Build code summary for AI (truncate if too large)
+      const codeSummary = codeFiles.map(f => `=== ${f.file} (${f.sizeKB}KB) ===\n${f.content.slice(0, 3000)}`).join("\n\n").slice(0, 60000);
+
+      // AI reads all code and identifies real issues ranked by risk
+      const analysis = await _callAI("anthropic", [{
+        role: "user",
+        content: `You are a senior code auditor. Read ALL the code below and identify real issues.\n\nCategorize issues by severity:\n- 🔴 CRITICAL: Security vulnerabilities, data loss risks, crashes\n- 🟠 HIGH: Bugs, logic errors, race conditions, memory leaks\n- 🟡 MEDIUM: Bad patterns, performance issues, missing error handling\n- 🔵 LOW: Code smells, style issues, minor improvements\n\nFor each issue provide:\n- file, line number, severity (critical/high/medium/low)\n- category (security/bug/performance/pattern/style)\n- description (1-2 sentences, specific)\n- suggested fix (brief)\n\nOutput ONLY JSON array: [{"file":"...","line":N,"severity":"critical|high|medium|low","category":"...","description":"...","suggestedFix":"..."}]\n\nRules:\n- Only report REAL issues. Not style preferences.\n- Ignore test data strings that happen to contain keywords like "todo"\n- Focus on things that could actually break in production\n- Max 20 issues, prioritize by severity\n\nCode:\n${codeSummary}`
+      }], 4000);
+
+      let issues = [];
+      try {
+        const match = analysis.match(/\[[\s\S]*\]/);
+        if (match) issues = JSON.parse(match[0]);
+      } catch {}
+
+      // Sort by severity
+      const sevOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+      issues.sort((a, b) => (sevOrder[a.severity] ?? 4) - (sevOrder[b.severity] ?? 4));
+
+      send("analysis", analysis);
+      send("result", { issues, fileCount: codeFiles.length, scannedFolder: folder || "." });
+      send("done", null);
+    } catch (e) {
+      send("error", e.message);
+    }
+    res.end();
     return;
   }
 
@@ -3185,78 +3246,6 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
 
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
     const send = (type, data) => { try { res.write(`data: ${JSON.stringify({type,data})}\n\n`); } catch {} };
-
-    // Resolve auth token — supports both API key and OAuth
-    function getAnthropicAuth() {
-      // 1. API key from env
-      if (process.env.ANTHROPIC_API_KEY) return { token: process.env.ANTHROPIC_API_KEY, mode: "api_key" };
-      // 2. OAuth from ~/.claude/.credentials.json
-      const homedir = require("os").homedir();
-      for (const p of [path.join(homedir, ".claude", ".credentials.json"), path.join(homedir, ".claude", "credentials.json")]) {
-        try {
-          const raw = JSON.parse(fs.readFileSync(p, "utf8"));
-          const token = raw.claudeAiOauth?.accessToken || raw.access_token;
-          if (token) return { token, mode: "oauth" };
-        } catch {}
-      }
-      // 3. macOS keychain
-      try {
-        const token = require("child_process").execSync('security find-generic-password -s "claude-ai-credentials" -w 2>/dev/null', { encoding: "utf8", timeout: 3000 }).trim();
-        if (token) {
-          const parsed = JSON.parse(token);
-          const at = parsed.claudeAiOauth?.accessToken || parsed.access_token;
-          if (at) return { token: at, mode: "oauth" };
-        }
-      } catch {}
-      return null;
-    }
-    function getOpenAIAuth() {
-      // 1. API key from env
-      if (process.env.OPENAI_API_KEY) return { token: process.env.OPENAI_API_KEY, accountId: null };
-      // 2. OAuth from ~/.codex/auth.json
-      try {
-        const p = path.join(require("os").homedir(), ".codex", "auth.json");
-        const raw = JSON.parse(fs.readFileSync(p, "utf8"));
-        const token = raw.tokens?.access_token;
-        const accountId = raw.tokens?.account_id;
-        if (token) return { token, accountId };
-      } catch {}
-      return null;
-    }
-
-    async function callAI(provider, messages, maxTokens = 3000) {
-      if (provider === "anthropic") {
-        const auth = getAnthropicAuth();
-        if (!auth) throw new Error("Anthropic not authenticated — connect via Settings > Providers");
-        const headers = { "Content-Type": "application/json", "anthropic-version": "2023-06-01" };
-        if (auth.mode === "oauth") {
-          headers["authorization"] = `Bearer ${auth.token}`;
-          headers["anthropic-beta"] = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14";
-        } else {
-          headers["x-api-key"] = auth.token;
-        }
-        const r = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST", headers,
-          body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages })
-        });
-        const d = await r.json();
-        if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
-        return (d.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-      } else {
-        const auth = getOpenAIAuth();
-        if (!auth) throw new Error("OpenAI not authenticated — connect via Settings > Providers");
-        const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${auth.token}` };
-        if (auth.accountId) headers["ChatGPT-Account-Id"] = auth.accountId;
-        const baseUrl = auth.accountId ? "https://api.openai.com/v1/chat/completions" : "https://api.openai.com/v1/chat/completions";
-        const r = await fetch(baseUrl, {
-          method: "POST", headers,
-          body: JSON.stringify({ model: "gpt-4o", max_tokens: maxTokens, messages })
-        });
-        const d = await r.json();
-        if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
-        return d.choices?.[0]?.message?.content || "";
-      }
-    }
 
     try {
       // Read source files
@@ -3286,7 +3275,7 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
         role: "user",
         content: `You are a precise code fixer. Below are code issues. Propose minimal fixes.\n\nRULES:\n- Fix ONLY the listed issues. Do NOT touch surrounding code.\n- Smallest possible change for each fix.\n- Each fix: exact old_string → new_string replacement.\n- JSON format: [{"file":"...","old":"exact old text","new":"exact new text","reason":"one sentence","confidence":"high|medium|low"}]\n\nIssues:\n${issueList}\n\nCode:\n${fileSnippets}\n\nRespond with ONLY the JSON array.`
       });
-      const round1Claude = await callAI("anthropic", claudeHistory);
+      const round1Claude = await _callAI("anthropic", claudeHistory);
       claudeHistory.push({ role: "assistant", content: round1Claude });
       send("claude", round1Claude);
 
@@ -3296,7 +3285,7 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
         role: "user",
         content: `Original issues:\n${issueList}\n\nSource code:\n${fileSnippets}\n\nClaude proposed these fixes:\n${round1Claude}\n\nReview EACH fix. For each one respond:\n- APPROVE: fix is correct and minimal\n- REJECT: fix is wrong, unnecessary, or over-engineered (explain why)\n- MODIFY: fix idea is right but implementation needs adjustment (provide your exact version)\n\nJSON format: [{"index":0,"verdict":"APPROVE|REJECT|MODIFY","reason":"...","modified_old":"if MODIFY","modified_new":"if MODIFY"}]\n\nBe strict. Only approve what's truly needed.`
       });
-      const round1OpenAI = await callAI("openai", openaiHistory);
+      const round1OpenAI = await _callAI("openai", openaiHistory);
       openaiHistory.push({ role: "assistant", content: round1OpenAI });
       send("openai", round1OpenAI);
 
@@ -3316,7 +3305,7 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
           role: "user",
           content: `OpenAI reviewed your fixes:\n${lastOpenAIResponse}\n\nRespond to their feedback:\n- For APPROVED fixes: keep them exactly as-is.\n- For REJECTED fixes: either accept the rejection (drop the fix) or argue why it's needed with a better justification. Be honest — if they're right, drop it.\n- For MODIFIED fixes: accept their version if it's better, or counter-propose with reasoning.\n\nOutput your UPDATED fix list as JSON: [{"file":"...","old":"...","new":"...","reason":"...","status":"kept|revised|dropped","confidence":"high|medium|low"}]\n\nYou MUST converge toward agreement. Do not stubbornly keep rejected fixes unless you have a strong technical reason.`
         });
-        lastClaudeResponse = await callAI("anthropic", claudeHistory);
+        lastClaudeResponse = await _callAI("anthropic", claudeHistory);
         claudeHistory.push({ role: "assistant", content: lastClaudeResponse });
         send("claude", lastClaudeResponse);
 
@@ -3326,7 +3315,7 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
           role: "user",
           content: `Claude revised the fixes based on your feedback:\n${lastClaudeResponse}\n\nReview again. Same rules:\n- APPROVE fixes that are now correct and minimal\n- REJECT fixes that are still wrong or unnecessary\n- MODIFY if close but needs tweaking\n\nJSON: [{"index":0,"verdict":"APPROVE|REJECT|MODIFY","reason":"...","modified_old":"if MODIFY","modified_new":"if MODIFY"}]\n\n${roundCount >= MAX_ROUNDS - 1 ? "IMPORTANT: This is the final round. You MUST reach a definitive verdict on every fix — no more MODIFY, only APPROVE or REJECT." : "Try to converge. If a fix has been debated for 2+ rounds without agreement, lean toward REJECT to keep things safe."}`
         });
-        lastOpenAIResponse = await callAI("openai", openaiHistory);
+        lastOpenAIResponse = await _callAI("openai", openaiHistory);
         openaiHistory.push({ role: "assistant", content: lastOpenAIResponse });
         send("openai", lastOpenAIResponse);
 
@@ -3342,7 +3331,7 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
         role: "user",
         content: `Final OpenAI verdict:\n${lastOpenAIResponse}\n\nProduce the FINAL changeset. STRICT RULES:\n- Include ONLY fixes with APPROVE verdict.\n- For any remaining MODIFY: use OpenAI's version.\n- EXCLUDE all REJECTED fixes completely.\n- Output ONLY valid JSON array: [{"file":"...","old":"exact old string from source","new":"exact new string","reason":"..."}]\n- If nothing survived, return []\n- The "old" field MUST be an exact substring from the source code that can be found with string.includes().\n- Double-check every "old" string against the source code provided above.`
       });
-      const finalConsensus = await callAI("anthropic", claudeHistory);
+      const finalConsensus = await _callAI("anthropic", claudeHistory);
       send("consensus", finalConsensus);
 
       // Parse

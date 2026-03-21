@@ -4170,50 +4170,70 @@ async function runCodeHealthScan(){
   const btn=document.getElementById('docScanBtn');
   const log=document.getElementById('docLog');
   const folder=(document.getElementById('docScanFolder').value||'').trim();
-  btn.disabled=true;btn.textContent='Scanning...';
+  btn.disabled=true;btn.textContent='AI Analyzing...';
   log.style.display='block';
-  log.innerHTML='<div style="color:var(--fg3);padding:8px 0">🔍 Scanning '+(folder?'"'+esc(folder)+'"':'project root')+'...</div>';
+  log.innerHTML='<div style="color:var(--fg3);padding:8px 0">🤖 AI is reading '+(folder?'"'+esc(folder)+'"':'project root')+' and analyzing code...</div>';
+
   try{
-    const d=await(await fetch('/api/scan-code-health',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder})})).json();
-    if(d.error){log.innerHTML+='<div style="color:var(--red)">Error: '+esc(d.error)+'</div>';return}
-    let h='';
-    // Summary bar
-    const tc=d.todos.length,fc=d.fixmes.length,hc=d.hacks.length,lc=d.largeFiles.length;
-    h+='<div style="display:flex;gap:12px;margin:8px 0 12px;flex-wrap:wrap">';
-    h+='<span style="background:rgba(59,130,246,.15);color:#60a5fa;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">TODO: '+tc+'</span>';
-    h+='<span style="background:rgba(245,158,11,.15);color:#f59e0b;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">FIXME: '+fc+'</span>';
-    h+='<span style="background:rgba(239,68,68,.15);color:#ef4444;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">HACK: '+hc+'</span>';
-    h+='<span style="background:rgba(139,92,246,.15);color:#8b5cf6;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">Large Files: '+lc+'</span>';
-    h+='</div>';
-    // TODOs
-    if(tc){h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">📝 TODOs ('+tc+')</div>';d.todos.slice(0,30).forEach(t=>{h+='<div style="font-size:11px;padding:2px 0;color:var(--fg2)"><span style="color:var(--fg3)">'+esc(t.file)+':'+t.line+'</span> '+esc(t.text)+'</div>'}); if(tc>30)h+='<div style="color:var(--fg3);font-size:10px;margin-top:2px">...and '+(tc-30)+' more</div>'}
-    // FIXMEs
-    if(fc){h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">⚠️ FIXMEs ('+fc+')</div>';d.fixmes.slice(0,20).forEach(t=>{h+='<div style="font-size:11px;padding:2px 0;color:var(--fg2)"><span style="color:var(--fg3)">'+esc(t.file)+':'+t.line+'</span> '+esc(t.text)+'</div>'})}
-    // HACKs
-    if(hc){h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">🔴 HACKs ('+hc+')</div>';d.hacks.slice(0,20).forEach(t=>{h+='<div style="font-size:11px;padding:2px 0;color:var(--fg2)"><span style="color:var(--fg3)">'+esc(t.file)+':'+t.line+'</span> '+esc(t.text)+'</div>'})}
-    // Large files
-    if(lc){h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">📦 Large Files >500KB ('+lc+')</div>';d.largeFiles.forEach(f=>{h+='<div style="font-size:11px;padding:2px 0;color:var(--fg2)">'+esc(f.file)+' <span style="color:var(--fg3)">('+f.sizeKB+'KB)</span></div>'})}
-    // npm audit
-    if(d.audit){
-      const v=d.audit.vulnerabilities||{};
-      const crit=(v.critical||0),hi=(v.high||0),med=(v.moderate||0),lo=(v.low||0);
-      const total=crit+hi+med+lo;
-      h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">🛡️ npm Audit</div>';
-      if(total===0)h+='<div style="font-size:11px;color:var(--green)">No known vulnerabilities found ('+d.audit.total+' packages scanned)</div>';
-      else h+='<div style="font-size:11px;color:var(--fg2)">'+total+' vulnerabilities: <span style="color:var(--red)">'+crit+' critical</span>, <span style="color:#f59e0b">'+hi+' high</span>, '+med+' moderate, '+lo+' low</div>';
+    const resp=await fetch('/api/scan-code-health',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder})});
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+    let buf='',issues=[];
+
+    while(true){
+      const{done,value}=await reader.read();
+      if(done)break;
+      buf+=decoder.decode(value,{stream:true});
+      const lines=buf.split('\n');
+      buf=lines.pop();
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const ev=JSON.parse(line.slice(6));
+          if(ev.type==='status')log.innerHTML+='<div style="color:var(--fg3);font-size:11px;padding:2px 0">'+esc(ev.data)+'</div>';
+          else if(ev.type==='error')log.innerHTML+='<div style="color:var(--red);font-size:11px">'+esc(ev.data)+'</div>';
+          else if(ev.type==='result'){
+            issues=ev.data.issues||[];
+            let h='<div style="margin:12px 0 8px;font-weight:700;font-size:13px;color:var(--fg)">Analysis: '+issues.length+' issue'+(issues.length!==1?'s':'')+' found in '+ev.data.fileCount+' files</div>';
+            // Severity summary
+            const sev={critical:0,high:0,medium:0,low:0};
+            issues.forEach(i=>sev[i.severity]=(sev[i.severity]||0)+1);
+            h+='<div style="display:flex;gap:10px;margin:6px 0 14px;flex-wrap:wrap">';
+            if(sev.critical)h+='<span style="background:rgba(239,68,68,.15);color:#ef4444;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">🔴 Critical: '+sev.critical+'</span>';
+            if(sev.high)h+='<span style="background:rgba(245,158,11,.15);color:#f59e0b;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">🟠 High: '+sev.high+'</span>';
+            if(sev.medium)h+='<span style="background:rgba(59,130,246,.15);color:#60a5fa;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">🟡 Medium: '+sev.medium+'</span>';
+            if(sev.low)h+='<span style="background:rgba(139,92,246,.15);color:#8b5cf6;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">🔵 Low: '+sev.low+'</span>';
+            h+='</div>';
+            // Issue list grouped by severity
+            const sevIcons={critical:'🔴',high:'🟠',medium:'🟡',low:'🔵'};
+            const sevColors={critical:'var(--red)',high:'#f59e0b',medium:'#60a5fa',low:'#8b5cf6'};
+            issues.forEach((issue,idx)=>{
+              h+='<div style="padding:8px 10px;margin:4px 0;background:var(--bg2);border-radius:6px;border-left:3px solid '+(sevColors[issue.severity]||'var(--border)')+'">';
+              h+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">';
+              h+='<span>'+(sevIcons[issue.severity]||'⚪')+'</span>';
+              h+='<span style="font-size:10px;font-weight:600;color:'+(sevColors[issue.severity]||'var(--fg)')+'">'+esc((issue.severity||'').toUpperCase())+'</span>';
+              h+='<span style="font-size:10px;color:var(--fg3)">'+esc(issue.category||'')+'</span>';
+              h+='<span style="font-size:10px;color:var(--fg3);margin-left:auto">'+esc(issue.file||'')+':'+(issue.line||'')+'</span>';
+              h+='</div>';
+              h+='<div style="font-size:11px;color:var(--fg2);line-height:1.5">'+esc(issue.description||'')+'</div>';
+              if(issue.suggestedFix)h+='<div style="font-size:10px;color:var(--fg3);margin-top:3px">💡 '+esc(issue.suggestedFix)+'</div>';
+              h+='</div>';
+            });
+            if(!issues.length)h+='<div style="color:var(--green);font-size:12px;padding:8px 0">✅ AI found no significant issues in this code.</div>';
+            // AI Debate button
+            if(issues.length>0){
+              window._lastScanIssues=issues;
+              h+='<div style="margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--border)">';
+              h+='<button class="save-btn" onclick="runAiDebateFix()" id="aiFixBtn" style="font-size:11px;padding:6px 16px;margin:0;background:linear-gradient(135deg,#8b5cf6,#3b82f6);color:#fff;border:none;border-radius:6px;cursor:pointer">🤖 Debate & Fix (Claude vs OpenAI)</button>';
+              h+=' <span style="font-size:10px;color:var(--fg3);margin-left:8px">Two AIs debate up to 5 rounds — only consensus fixes applied</span>';
+              h+='</div>';
+            }
+            log.innerHTML+=h;
+          }
+        }catch{}
+      }
+      log.scrollTop=log.scrollHeight;
     }
-    if(!tc&&!fc&&!hc&&!lc)h+='<div style="color:var(--green);font-size:12px;padding:8px 0">✅ Code is clean — no TODOs, FIXMEs, HACKs, or oversized files found.</div>';
-    // Store issues for AI fix & add button
-    const allIssues=[...d.todos.map(t=>({...t,type:'TODO'})),...d.fixmes.map(t=>({...t,type:'FIXME'})),...d.hacks.map(t=>({...t,type:'HACK'}))];
-    window._lastScanIssues=allIssues;
-    if(allIssues.length>0){
-      h+='<div style="margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--border)">';
-      h+='<button class="save-btn" onclick="runAiDebateFix()" id="aiFixBtn" style="font-size:11px;padding:6px 16px;margin:0;background:linear-gradient(135deg,#8b5cf6,#3b82f6);color:#fff;border:none;border-radius:6px;cursor:pointer">🤖 AI Dual-Review Fix (Claude + OpenAI)</button>';
-      h+=' <span style="font-size:10px;color:var(--fg3);margin-left:8px">Claude + GPT debate up to 5 rounds (10 turns) — only consensus fixes applied</span>';
-      h+='</div>';
-    }
-    log.innerHTML+=h;
-    log.scrollTop=log.scrollHeight;
   }catch(e){log.innerHTML+='<div style="color:var(--red)">'+esc(e.message)+'</div>'}
   finally{btn.disabled=false;btn.textContent='Scan Code Health'}
 }
