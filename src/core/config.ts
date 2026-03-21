@@ -198,7 +198,7 @@ export async function loadConfig(cwd: string): Promise<AgentConfig> {
   }
   const raw = await fs.readFile(configPath, "utf8");
   const parsed = JSON.parse(raw) as Partial<AgentConfig>;
-  return {
+  const merged: AgentConfig = {
     ...defaultConfig,
     ...parsed,
     providers: {
@@ -256,6 +256,28 @@ export async function loadConfig(cwd: string): Promise<AgentConfig> {
     },
     rules: parsed.rules ?? defaultConfig.rules
   };
+
+  // Environment variable overrides for model selection (from UI model picker)
+  const envProvider = process.env.OPENSEED_PROVIDER;
+  const envModel = process.env.OPENSEED_MODEL;
+  if (envProvider && envModel) {
+    const validProviders = ["openai", "anthropic", "gemini"] as const;
+    if (validProviders.includes(envProvider as typeof validProviders[number])) {
+      const p = envProvider as typeof validProviders[number];
+      merged.routing.categories = {
+        planning: p,
+        research: p,
+        execution: p,
+        frontend: p,
+        review: p
+      };
+      if (merged.providers[p]) {
+        merged.providers[p].defaultModel = envModel;
+      }
+    }
+  }
+
+  return merged;
 }
 
 export async function writeDefaultConfig(cwd: string): Promise<string> {

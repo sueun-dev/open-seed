@@ -28,7 +28,8 @@ export class SessionStore {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       resumedFrom,
-      tasks: []
+      tasks: [],
+      pid: process.pid
     };
     await this.saveSnapshot(session);
     await this.appendEvent(session.id, {

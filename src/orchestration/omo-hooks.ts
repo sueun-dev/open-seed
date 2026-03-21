@@ -187,7 +187,7 @@ export class BackgroundTaskManager {
     const completed = this.getCompleted();
     if (completed.length === 0) return "";
     return completed.map(t =>
-      `[${t.status.toUpperCase()}] ${t.description}${t.result ? `: ${t.result.slice(0, 200)}` : ""}`
+      `[${t.status.toUpperCase()}] ${t.description}${t.result ? `: ${t.result}` : ""}`
     ).join("\n");
   }
 }

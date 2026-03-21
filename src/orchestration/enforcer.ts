@@ -66,7 +66,10 @@ export function createEnforcerState(
   });
 
   // conditional: build verification
-  if (config?.requireBuild !== false && shouldRequireBuild(intent)) {
+  // [FIX] Skip build/test requirements when AGI_BLOCKED_TOOLS blocks write tools (analysis step)
+  const agiBlockedTools = process.env.AGI_BLOCKED_TOOLS || "";
+  const isAnalysisPhase = agiBlockedTools.includes("write");
+  if (!isAnalysisPhase && config?.requireBuild !== false && shouldRequireBuild(intent)) {
     checklist.push({
       id: "build-green",
       label: "Build passes",
@@ -76,7 +79,7 @@ export function createEnforcerState(
   }
 
   // conditional: test verification
-  if (config?.requireTests !== false && shouldRequireTests(intent)) {
+  if (!isAnalysisPhase && config?.requireTests !== false && shouldRequireTests(intent)) {
     checklist.push({
       id: "tests-green",
       label: "Tests pass",

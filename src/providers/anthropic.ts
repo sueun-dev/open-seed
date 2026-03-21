@@ -251,6 +251,16 @@ const ROLE_MAX_TOKENS: Record<string, number> = {
 const DEFAULT_MAX_TOKENS = 4096;
 
 function resolveMaxTokens(request: ProviderRequest, config: ProviderConfig): number {
+  // Caller override takes precedence (e.g., AGI pipeline analysis step needs more output)
+  if (request.maxTokens && request.maxTokens > 0) {
+    return request.maxTokens;
+  }
+  // Environment override for AGI pipeline steps
+  const envOverride = process.env.AGI_MAX_OUTPUT_TOKENS;
+  if (envOverride) {
+    const parsed = parseInt(envOverride, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
   // Use role-specific limit if known, otherwise default
   const roleTokens = ROLE_MAX_TOKENS[request.role] ?? DEFAULT_MAX_TOKENS;
   // Long prompts need more output room
