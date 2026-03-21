@@ -563,12 +563,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
               <button class="save-btn" onclick="runCodeHealthScan()" id="docScanBtn" style="font-size:11px;padding:6px 14px;margin:0;background:var(--bg5);color:var(--fg2)">Scan Code Health</button>
               <button class="save-btn" onclick="exportDoctorReport()" style="font-size:11px;padding:6px 14px;margin:0;background:var(--bg5);color:var(--fg2)" title="Export diagnostic report">Export</button>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
-              <label style="font-size:11px;color:var(--fg3);white-space:nowrap">Scan folder:</label>
+            <div id="docDropZone" style="margin-top:10px;border:2px dashed var(--border);border-radius:6px;padding:8px 12px;transition:all .2s;display:flex;align-items:center;gap:8px">
+              <label style="font-size:11px;color:var(--fg3);white-space:nowrap">Scan target:</label>
               <div style="flex:1;display:flex;align-items:center;gap:6px">
-                <input type="text" id="docScanFolder" placeholder="/ (project root)" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;color:var(--fg);font-family:var(--font)">
+                <input type="text" id="docScanFolder" placeholder="Drop folder/file here or type path (empty = project root)" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;color:var(--fg);font-family:var(--font)">
                 <button onclick="browseScanFolder()" style="background:var(--bg5);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:10px;color:var(--fg2);cursor:pointer" title="Browse folders">📁 Browse</button>
               </div>
+              <div id="docDropHint" style="display:none;font-size:10px;color:var(--accent);font-weight:600;white-space:nowrap">Drop here!</div>
             </div>
           </div>
           <div class="doc-progress" id="docProgress"><div class="doc-progress-bar" id="docProgressBar"></div></div>
@@ -4051,6 +4052,49 @@ function exportDoctorReport(){
   const blob=new Blob([lines.join('\n')],{type:'text/markdown'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='diagnostic-report.md';a.click();
 }
+// ── Drag & drop for scan target ──
+(function(){
+  const zone=document.getElementById('docDropZone');
+  const input=document.getElementById('docScanFolder');
+  const hint=document.getElementById('docDropHint');
+  if(!zone)return;
+  let dragCount=0;
+  zone.addEventListener('dragenter',e=>{e.preventDefault();e.stopPropagation();dragCount++;zone.style.borderColor='var(--accent)';zone.style.background='rgba(0,122,204,.08)';hint.style.display='block'});
+  zone.addEventListener('dragleave',e=>{e.preventDefault();e.stopPropagation();dragCount--;if(dragCount<=0){dragCount=0;zone.style.borderColor='var(--border)';zone.style.background='none';hint.style.display='none'}});
+  zone.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation()});
+  zone.addEventListener('drop',async e=>{
+    e.preventDefault();e.stopPropagation();
+    dragCount=0;zone.style.borderColor='var(--border)';zone.style.background='none';hint.style.display='none';
+    // Try to get path from dataTransfer
+    const items=e.dataTransfer.items;
+    const files=e.dataTransfer.files;
+    // Method 1: webkitGetAsEntry (Chrome/Edge/Safari) — gets relative path
+    if(items&&items.length>0&&items[0].webkitGetAsEntry){
+      const entry=items[0].webkitGetAsEntry();
+      if(entry){
+        // entry.fullPath starts with / — it's relative to the drop root
+        const name=entry.name;
+        // Send to server to resolve
+        try{
+          const r=await(await fetch('/api/resolve-drop-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,isDirectory:entry.isDirectory})})).json();
+          if(r.path){input.value=r.path;input.style.borderColor='var(--green)';setTimeout(()=>input.style.borderColor='',1500)}
+          else if(r.error){input.placeholder=r.error}
+        }catch{}
+        return;
+      }
+    }
+    // Method 2: files — get name and ask server to find it
+    if(files&&files.length>0){
+      const name=files[0].name;
+      const relPath=files[0].webkitRelativePath||'';
+      try{
+        const r=await(await fetch('/api/resolve-drop-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,relativePath:relPath,isDirectory:false})})).json();
+        if(r.path){input.value=r.path;input.style.borderColor='var(--green)';setTimeout(()=>input.style.borderColor='',1500)}
+      }catch{}
+    }
+  });
+})();
+
 // ── Folder browser for scan target ──
 async function browseScanFolder(){
   const input=document.getElementById('docScanFolder');
