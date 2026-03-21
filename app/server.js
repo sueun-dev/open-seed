@@ -3150,9 +3150,12 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
             const rel = pathM.relative(CWD, full);
             lines.forEach((ln, i) => {
               const t = ln.trim();
-              if (/\bTODO\b/i.test(t)) results.todos.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
-              if (/\bFIXME\b/i.test(t)) results.fixmes.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
-              if (/\bHACK\b/i.test(t)) results.hacks.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
+              // Only match TODO/FIXME/HACK in actual comments (// or /* or # or <!-- or the line starts with the keyword followed by colon)
+              const isComment = /^\s*(\/\/|\/\*|\*|#|<!--)/.test(ln) || /\/\/.*\b(TODO|FIXME|HACK)\b/.test(ln) || /\/\*.*\b(TODO|FIXME|HACK)\b/.test(ln);
+              if (!isComment) return;
+              if (/\bTODO\b[:(\s]/i.test(t) || /^\/\/\s*TODO\b/i.test(t)) results.todos.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
+              if (/\bFIXME\b[:(\s]/i.test(t) || /^\/\/\s*FIXME\b/i.test(t)) results.fixmes.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
+              if (/\bHACK\b[:(\s]/i.test(t) || /^\/\/\s*HACK\b/i.test(t)) results.hacks.push({ file: rel, line: i + 1, text: t.slice(0, 120) });
             });
           } catch {}
         }
@@ -3183,24 +3186,70 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
     const send = (type, data) => { try { res.write(`data: ${JSON.stringify({type,data})}\n\n`); } catch {} };
 
+    // Resolve auth token — supports both API key and OAuth
+    function getAnthropicAuth() {
+      // 1. API key from env
+      if (process.env.ANTHROPIC_API_KEY) return { token: process.env.ANTHROPIC_API_KEY, mode: "api_key" };
+      // 2. OAuth from ~/.claude/.credentials.json
+      const homedir = require("os").homedir();
+      for (const p of [path.join(homedir, ".claude", ".credentials.json"), path.join(homedir, ".claude", "credentials.json")]) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+          const token = raw.claudeAiOauth?.accessToken || raw.access_token;
+          if (token) return { token, mode: "oauth" };
+        } catch {}
+      }
+      // 3. macOS keychain
+      try {
+        const token = require("child_process").execSync('security find-generic-password -s "claude-ai-credentials" -w 2>/dev/null', { encoding: "utf8", timeout: 3000 }).trim();
+        if (token) {
+          const parsed = JSON.parse(token);
+          const at = parsed.claudeAiOauth?.accessToken || parsed.access_token;
+          if (at) return { token: at, mode: "oauth" };
+        }
+      } catch {}
+      return null;
+    }
+    function getOpenAIAuth() {
+      // 1. API key from env
+      if (process.env.OPENAI_API_KEY) return { token: process.env.OPENAI_API_KEY, accountId: null };
+      // 2. OAuth from ~/.codex/auth.json
+      try {
+        const p = path.join(require("os").homedir(), ".codex", "auth.json");
+        const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+        const token = raw.tokens?.access_token;
+        const accountId = raw.tokens?.account_id;
+        if (token) return { token, accountId };
+      } catch {}
+      return null;
+    }
+
     async function callAI(provider, messages, maxTokens = 3000) {
       if (provider === "anthropic") {
-        const key = process.env.ANTHROPIC_API_KEY;
-        if (!key) throw new Error("ANTHROPIC_API_KEY not set");
+        const auth = getAnthropicAuth();
+        if (!auth) throw new Error("Anthropic not authenticated — connect via Settings > Providers");
+        const headers = { "Content-Type": "application/json", "anthropic-version": "2023-06-01" };
+        if (auth.mode === "oauth") {
+          headers["authorization"] = `Bearer ${auth.token}`;
+          headers["anthropic-beta"] = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14";
+        } else {
+          headers["x-api-key"] = auth.token;
+        }
         const r = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+          method: "POST", headers,
           body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages })
         });
         const d = await r.json();
         if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
         return (d.content || []).filter(b => b.type === "text").map(b => b.text).join("");
       } else {
-        const key = process.env.OPENAI_API_KEY;
-        if (!key) throw new Error("OPENAI_API_KEY not set");
-        const r = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+        const auth = getOpenAIAuth();
+        if (!auth) throw new Error("OpenAI not authenticated — connect via Settings > Providers");
+        const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${auth.token}` };
+        if (auth.accountId) headers["ChatGPT-Account-Id"] = auth.accountId;
+        const baseUrl = auth.accountId ? "https://api.openai.com/v1/chat/completions" : "https://api.openai.com/v1/chat/completions";
+        const r = await fetch(baseUrl, {
+          method: "POST", headers,
           body: JSON.stringify({ model: "gpt-4o", max_tokens: maxTokens, messages })
         });
         const d = await r.json();
