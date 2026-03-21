@@ -3130,7 +3130,7 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
       try { const raw = JSON.parse(fs.readFileSync(p, "utf8")); const token = raw.claudeAiOauth?.accessToken || raw.access_token; if (token) return { token, mode: "oauth" }; } catch {}
     }
     try {
-      const token = require("child_process").execSync('security find-generic-password -s "claude-ai-credentials" -w 2>/dev/null', { encoding: "utf8", timeout: 3000 }).trim();
+      const token = require("child_process").execSync('security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null', { encoding: "utf8", timeout: 3000 }).trim();
       if (token) { const parsed = JSON.parse(token); const at = parsed.claudeAiOauth?.accessToken || parsed.access_token; if (at) return { token: at, mode: "oauth" }; }
     } catch {}
     return null;
