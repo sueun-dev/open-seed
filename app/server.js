@@ -3028,6 +3028,52 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     return;
   }
 
+  // ── Resolve dropped file/folder path ──
+  if (url.pathname === "/api/resolve-drop-path" && req.method === "POST") {
+    const body = await readBody(req);
+    const { name, relativePath, isDirectory } = safeJsonParse(body) || {};
+    if (!name) { res.writeHead(400, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"No name"})); return; }
+
+    // Search for the name in the project directory (max 3 levels deep)
+    function findInDir(dir, target, depth) {
+      if (depth > 3) return null;
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent",".research"];
+        for (const e of entries) {
+          if (ignoreDirs.includes(e.name)) continue;
+          if (e.name === target) {
+            const full = path.join(dir, e.name);
+            const stat = fs.statSync(full);
+            if (isDirectory && stat.isDirectory()) return path.relative(CWD, full);
+            if (!isDirectory && stat.isFile()) return path.relative(CWD, path.dirname(full));
+            return path.relative(CWD, full);
+          }
+          if (e.isDirectory()) {
+            const found = findInDir(path.join(dir, e.name), target, depth + 1);
+            if (found) return found;
+          }
+        }
+      } catch {}
+      return null;
+    }
+
+    // Direct check first
+    const directPath = path.join(CWD, name);
+    let resolved = null;
+    if (fs.existsSync(directPath)) {
+      const stat = fs.statSync(directPath);
+      resolved = stat.isDirectory() ? name : path.dirname(name);
+      if (resolved === '.') resolved = '';
+    } else {
+      resolved = findInDir(CWD, name, 0);
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(resolved !== null ? { path: resolved } : { error: `"${name}" not found in project` }));
+    return;
+  }
+
   // ── Browse folders API ──
   if (url.pathname === "/api/browse-folders" && req.method === "GET") {
     const rel = url.searchParams?.get("path") || "";
