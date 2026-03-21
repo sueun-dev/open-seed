@@ -723,10 +723,27 @@ export class ToolRuntime {
     const shell = process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "/bin/sh";
     // Use -c (not -lc) to inherit parent PATH without login shell resetting it
     const shellArgs = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command];
+
+    // FIX: Always ensure node/npm are findable — inject node's bin dir into PATH
+    // This fixes exit 127 "command not found: node" in AGI pipeline child processes
+    const bashEnv = { ...process.env };
+    const nodeBinDir = path.dirname(process.execPath);
+    const commonNodePaths = [
+      nodeBinDir,
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      "/usr/bin",
+    ];
+    const currentPath = bashEnv.PATH || "";
+    const missingPaths = commonNodePaths.filter(p => !currentPath.includes(p));
+    if (missingPaths.length > 0) {
+      bashEnv.PATH = `${missingPaths.join(":")}:${currentPath}`;
+    }
+
     return new Promise((resolve, reject) => {
       const child = spawn(shell, shellArgs, {
         cwd: this.options.cwd,
-        env: process.env
+        env: bashEnv
       });
       let stdout = "";
       let stderr = "";

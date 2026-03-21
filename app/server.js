@@ -440,11 +440,28 @@ const server = http.createServer(async (req, res) => {
       } catch { if (fs.existsSync(srcConfig)) fs.copyFileSync(srcConfig, dstConfig); }
     }
 
-    // Write AGENTS.md to guide the inner engine
-    const agentsMd = path.join(childCwd, "AGENTS.md");
-    if (!fs.existsSync(agentsMd)) {
-      try { fs.writeFileSync(agentsMd, `# AGI Pipeline Target\nThis directory is the working directory for an AGI pipeline task.\nFirst check what exists (glob/ls), then act accordingly.\nIf empty: create everything from scratch.\nIf files exist: work with them.\nAlways write COMPLETE file content — no placeholders.\n`, "utf8"); } catch {}
+    // Clean leftover .agent/ artifacts from previous AGI runs to prevent confusion
+    const prevAgentDir = path.join(childCwd, ".agent");
+    if (fs.existsSync(prevAgentDir)) {
+      try { fs.rmSync(prevAgentDir, { recursive: true, force: true }); } catch {}
     }
+
+    // Write AGENTS.md to guide the inner engine — comprehensive rules
+    const agentsMd = path.join(childCwd, "AGENTS.md");
+    try { fs.writeFileSync(agentsMd, `# AGI Pipeline Target
+
+## CRITICAL RULES
+1. You are building a REAL, RUNNABLE APPLICATION — not writing architecture documents.
+2. When told to BUILD: write actual application source code (HTML, JS, Python, etc.), NOT JSON exports or design docs.
+3. Every file you write must contain REAL, EXECUTABLE code — no module.exports of design objects.
+4. The end result must be something a user can RUN (e.g. \`npm start\`, \`python app.py\`, open index.html).
+5. Write COMPLETE file content — no placeholders, no TODOs, no "..." ellipsis.
+6. Check what exists first (glob/ls), then build from there.
+7. If the directory is empty: create everything from scratch.
+8. If files exist: work with them.
+9. Use \`bash\` tool to run npm install, tests, builds — verify your work.
+10. Do NOT keep reading the same file over and over. Read once, then act.
+`, "utf8"); } catch {}
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -462,7 +479,7 @@ const server = http.createServer(async (req, res) => {
     // Assess complexity
     const words = task.split(/\s+/).length;
     const dirFiles = fs.readdirSync(childCwd).filter(f => !f.startsWith(".") && f !== "node_modules");
-    const isFullApp = /full.*app|complete.*project|entire.*system|from.*scratch|만들어|생성|구현|개발해|빌드|게임|앱|사이트|서비스|플랫폼|시스템/i.test(task);
+    const isFullApp = /full.*app|complete.*project|entire.*system|from.*scratch|만들어|생성|구현|개발해|빌드|게임|앱|사이트|서비스|플랫폼|시스템|웹|서버|클라이언트|온라인|멀티플레이어|shooting|game|server|website|platform/i.test(task);
     const isSimple = !isFullApp && /fix.*bug|rename|add.*comment|update.*version|change.*color|수정|고쳐|바꿔/i.test(task);
     const needsDebate = /architect|design|pattern|approach|strategy|tradeoff|choose|select|compare|migrate|아키텍처|설계/i.test(task);
     let complexity = "moderate";
@@ -488,8 +505,9 @@ const server = http.createServer(async (req, res) => {
       steps.push({ id: mkId("design"), type: "design", title: "Architecture & Design", mode: "run", maxTurns: 40, maxRetries: 1, useStrategyBranching: false });
     }
 
-    // Always: build
-    steps.push({ id: mkId("build"), type: "build", title: "Build & Implement", mode: "team", maxTurns: 200, maxRetries: 2, useStrategyBranching: true });
+    // Always: build — give it LOTS of turns for complex apps
+    const buildTurns = complexity === "complex" ? 500 : complexity === "moderate" ? 300 : 150;
+    steps.push({ id: mkId("build"), type: "build", title: "Build & Implement", mode: "team", maxTurns: buildTurns, maxRetries: 2, useStrategyBranching: true });
 
     // Always: verify
     steps.push({ id: mkId("verify"), type: "verify", title: "Verify & Test", mode: "run", maxTurns: 50, maxRetries: 0, useStrategyBranching: false });
@@ -531,7 +549,7 @@ const server = http.createServer(async (req, res) => {
     function buildStepPrompt(step) {
       const sections = [];
       sections.push(`# AGI Pipeline — ${step.title}`);
-      sections.push(`## Original Task\n${task}`);
+      sections.push(`## Original Task (NEVER FORGET THIS)\n**"${task}"**\nEverything you do must serve this task. If you find yourself writing design documents instead of application code, STOP and refocus on the task.`);
 
       // [FIX #2, #4] Inter-step memory: ALL prior results with FULL content — no truncation
       if (ctx.stepResults.length > 0) {
@@ -587,7 +605,21 @@ const server = http.createServer(async (req, res) => {
 
       // Universal build rules
       if (step.type === "build") {
-        sections.push(`\nRULES:\n- Write files DIRECTLY in the current working directory — no wrapper folders.\n- Write EVERY file with COMPLETE content. No placeholders, no TODOs.\n- If package.json doesn't exist, create it first with a "start" script.\n- The result must be runnable.`);
+        sections.push(`\n## MANDATORY BUILD RULES
+- Write files DIRECTLY in the current working directory — no wrapper folders.
+- Write EVERY file with COMPLETE, EXECUTABLE code. No placeholders, no TODOs.
+- If package.json doesn't exist, create it first with ALL deps and a "start" script.
+- Run \`npm install\` after creating package.json.
+- The result MUST be runnable with \`npm start\` or equivalent.
+- REMINDER: You are building "${task}" — write the ACTUAL APPLICATION CODE for this, not design documents.`);
+      }
+
+      // Enforce no-write for analysis steps
+      if (step.type === "analyze" || step.type === "design" || step.type === "debate") {
+        sections.push(`\n## TOOL RESTRICTION
+You MUST NOT use the write, apply_patch, or multi_patch tools in this step.
+Only use: read, glob, grep, bash (for inspection only), repo_map, lsp_diagnostics, session_history.
+If you write any file in this step, it will corrupt the pipeline. Analysis/design output goes in your TEXT response only.`);
       }
 
       return sections.join("\n\n");
@@ -595,34 +627,138 @@ const server = http.createServer(async (req, res) => {
 
     function getStepInstructions(type) {
       const m = {
-        analyze: `First, check the working directory (use glob **/* or bash ls). Then:
-- If the directory is empty: analyze what needs to be built from scratch. Output technology stack, features, architecture approach, and file structure plan.
-- If files exist: read the key files and analyze the current state, what needs changing, risks, and complexity.
-Output your analysis as structured text. Do NOT create files in this step.`,
-        debate: "Multi-agent design debate. Present architecture options with reasoning, risks, and alternatives. Recommend the best approach.",
-        design: `Based on the analysis, create a DETAILED implementation plan:
-1. File structure (every file path to create/modify)
-2. Architecture and component breakdown
-3. API design (if applicable)
-4. Data models
-5. Dependencies
-6. Implementation order
-Output as text. Do NOT create files in this step.`,
-        build: `IMPLEMENT EVERYTHING based on the design.
-- Use the WRITE tool for EVERY file. Write COMPLETE content — no placeholders, no TODOs, no "...".
-- If starting from scratch: create package.json first with all deps and "start" script.
-- If modifying existing code: read first, then write the full updated file.
-- The result MUST be runnable. DO NOT STOP until every planned file is written.`,
-        verify: `Run checks with bash tool: npm install, npm run build, npm test, or equivalent.
+        analyze: `## RULES FOR THIS STEP
+- You are in ANALYSIS ONLY mode. **DO NOT use the write, apply_patch, or multi_patch tools.**
+- If you use any write tool in this step, the pipeline will fail.
+
+## WHAT TO DO
+1. Check the working directory: use glob **/* or bash ls -la
+2. If the directory is EMPTY or only has AGENTS.md:
+   - This is a greenfield project. Analyze what needs to be built FROM SCRATCH.
+   - Output: technology stack, features list, architecture approach, file structure plan.
+   - Be SPECIFIC: list every file that needs to be created with its purpose.
+3. If real project files exist:
+   - Read the key files and analyze the current state.
+   - Output: what exists, what needs changing, risks, complexity.
+
+OUTPUT FORMAT: structured text analysis. NO files created.`,
+
+        debate: `Multi-agent design debate. Present 2-3 architecture options with concrete reasoning.
+For each option: pros, cons, risks, estimated complexity.
+Recommend the BEST approach with specific justification.
+**DO NOT use write tools. Analysis only.**`,
+
+        design: `## RULES FOR THIS STEP
+- You are in DESIGN ONLY mode. **DO NOT use the write, apply_patch, or multi_patch tools.**
+- If you use any write tool in this step, the pipeline will fail.
+
+## WHAT TO DO
+Based on the analysis, create a DETAILED implementation plan:
+1. **File manifest**: Every single file path to create, with its exact purpose
+   Example: "server/index.js — Express HTTP server with WebSocket upgrade"
+   Example: "public/index.html — Game client HTML with Canvas element"
+   Example: "public/game.js — Client-side game loop, rendering, input handling"
+2. **Architecture**: Component breakdown, data flow, communication protocol
+3. **API design**: Endpoints, WebSocket events, request/response formats
+4. **Data models**: Key data structures and their relationships
+5. **Dependencies**: npm packages, CDN libraries, external services
+6. **Implementation order**: Which files to create first and why
+
+Be EXTREMELY specific. The BUILD step will follow this plan literally.
+OUTPUT FORMAT: structured text plan. NO files created.`,
+
+        build: `## CRITICAL: YOU ARE THE BUILDER. WRITE ACTUAL CODE.
+
+### WHAT "BUILD" MEANS
+- Write REAL, RUNNABLE APPLICATION CODE.
+- NOT architecture documents. NOT JSON exports. NOT design objects.
+- Every file must contain EXECUTABLE code that does something when run.
+
+### EXAMPLES OF WRONG OUTPUT (DO NOT DO THIS)
+\`\`\`js
+// WRONG — this is a design document, not application code
+module.exports = { project: { name: "...", goal: "..." }, architecture: { ... } };
+\`\`\`
+
+### EXAMPLES OF CORRECT OUTPUT
+\`\`\`js
+// CORRECT — this is a real server
+const express = require('express');
+const app = express();
+app.get('/', (req, res) => res.sendFile(__dirname + '/public/index.html'));
+app.listen(3000, () => console.log('Server running on port 3000'));
+\`\`\`
+
+### PROCESS
+1. Read the design plan from the prior step results above.
+2. Create package.json FIRST with all dependencies and a working "start" script.
+3. Run \`bash: npm install\` to install dependencies.
+4. Write EVERY file listed in the design plan with COMPLETE, WORKING code.
+5. Each file must be FULL — no placeholders, no TODOs, no "...".
+6. After writing all files, run \`bash: npm start\` or equivalent to verify it works.
+7. DO NOT STOP until every planned file is written and the app starts.
+
+### EFFICIENCY RULES
+- Read each file AT MOST ONCE. Do not re-read files you already know the contents of.
+- Write files in dependency order: package.json → server → client → tests.
+- If npm install fails, check package.json for typos and fix immediately.`,
+
+        verify: `## VERIFY THAT THE APPLICATION WORKS
+
+### PROCESS
+1. Run \`bash: ls -la\` to see all files
+2. Run \`bash: cat package.json\` to check scripts
+3. Run \`bash: npm install\` (if node project)
+4. Run \`bash: npm start &\` or equivalent to start the application
+5. If it's a web app, run \`bash: curl http://localhost:PORT\` to check it responds
+6. Run \`bash: npm test\` if tests exist
+7. Check for common issues: missing files, broken imports, syntax errors
+
+### CRITICAL CHECK
+Ask yourself: "Does this actually implement what was requested in the ORIGINAL TASK?"
+- If the task asked for a GAME but only architecture documents exist → FAIL
+- If the task asked for a SERVER but no server code exists → FAIL
+- If files exist but the app crashes on start → FAIL
+
 Report ALL errors with file paths and line numbers. Do NOT fix anything — just report.`,
-        fix: "Fix ALL reported errors. Read each broken file, find root cause, write the corrected version, then verify the fix works.",
-        improve: "Optimize what exists: security fixes, performance, missing tests, edge cases. Do not rewrite from scratch.",
-        review: `Read the key source files and verify:
-1. Does the code fulfill the original task?
-2. Are all features complete?
-3. Is it runnable?
-4. Any security issues?
-Output: PASS or FAIL with specific reasons.`,
+
+        fix: `Fix ALL reported errors from the verify step.
+1. Read each broken file
+2. Identify the root cause (not just the symptom)
+3. Write the COMPLETE corrected file (not just a patch)
+4. Run the verification again to confirm the fix works
+5. If npm install failed: fix package.json and re-run
+6. If the app won't start: check entry point, imports, syntax`,
+
+        improve: `Optimize what exists WITHOUT rewriting from scratch:
+- Security: input validation, XSS prevention, SQL injection prevention
+- Performance: caching, efficient algorithms, lazy loading
+- Missing features: anything from the original task not yet implemented
+- Edge cases: error handling, empty states, boundary conditions
+- Tests: add basic tests if none exist
+DO NOT create architecture documents. Only improve actual code.`,
+
+        review: `## FINAL REVIEW — BE STRICT
+
+### CHECK EACH OF THESE (answer yes/no for each):
+1. **Task completion**: Does the output actually do what the original task asked for?
+   - Read the ORIGINAL TASK above carefully.
+   - If it asked for a "게임" (game), is there actual game code with rendering, game loop, input handling?
+   - If it asked for a "서버" (server), is there actual server code that listens on a port?
+   - If it asked for an "앱" (app), is there actual application code?
+   - Architecture documents, design exports, and JSON configs do NOT count as completing the task.
+
+2. **Runnability**: Can a user actually run this? (npm start works, or open index.html works)
+
+3. **Completeness**: Are ALL features from the task implemented, not just the skeleton?
+
+4. **Code quality**: No placeholder code, no TODOs, no "..." ellipsis?
+
+### VERDICT
+- Output **FAIL** if any of checks 1-3 are "no". Be honest.
+- Output **PASS** only if the application genuinely fulfills the original task.
+- Include specific reasons for your verdict.
+- If FAIL: list exactly what's missing or broken.`,
       };
       return m[type] || "";
     }
@@ -709,7 +845,7 @@ Output: PASS or FAIL with specific reasons.`,
           const text = chunk.toString();
           stderr += text;
           // Forward stderr to UI — important for debugging visibility
-          sendAgi("stderr", { text: text.slice(0, 500) });
+          sendAgi("stderr", { text });
         });
 
         child.on("close", (code) => {
@@ -853,8 +989,8 @@ Output: PASS or FAIL with specific reasons.`,
         sendAgi(evtType, {
           stepId: step.id, stepType: step.type, stepTitle: step.title,
           status: result.status,
-          // SSE event gets a short summary for UI display; full data is in ctx.stepResults
-          summary: (result.summary || "").slice(-2000),
+          // SSE event — send last 4000 chars for UI display; full data is in ctx.stepResults
+          summary: (result.summary || "").slice(-4000),
           totalSteps: steps.length,
           completedSteps: ctx.stepResults.filter(r => r.status === "completed").length,
           filesCreated: ctx.allFiles.length,
