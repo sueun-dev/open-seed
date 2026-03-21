@@ -3034,9 +3034,9 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     const { name, relativePath, isDirectory } = safeJsonParse(body) || {};
     if (!name) { res.writeHead(400, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"No name"})); return; }
 
-    // Search for the name in the project directory (max 3 levels deep)
+    // Search for the name in the project directory (max 5 levels deep)
     function findInDir(dir, target, depth) {
-      if (depth > 3) return null;
+      if (depth > 5) return null;
       try {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent",".research"];
