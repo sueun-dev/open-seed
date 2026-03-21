@@ -3028,10 +3028,37 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     return;
   }
 
+  // ── Browse folders API ──
+  if (url.pathname === "/api/browse-folders" && req.method === "GET") {
+    const rel = url.searchParams?.get("path") || "";
+    const target = path.resolve(CWD, rel);
+    // Security: must be within CWD
+    if (!target.startsWith(CWD)) { res.writeHead(403); res.end("Access denied"); return; }
+    try {
+      const entries = fs.readdirSync(target, { withFileTypes: true });
+      const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent",".research","autoresearch-mega-eval","electron"];
+      const dirs = entries
+        .filter(e => e.isDirectory() && !e.name.startsWith('.') && !ignoreDirs.includes(e.name))
+        .map(e => ({ name: e.name, path: path.relative(CWD, path.join(target, e.name)) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ current: path.relative(CWD, target) || ".", dirs }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
   if (url.pathname === "/api/scan-code-health" && req.method === "POST") {
     try {
+      const body = await readBody(req);
+      const { folder } = safeJsonParse(body) || {};
       const fs = require("fs"), pathM = require("path");
-      const results = { todos: [], fixmes: [], hacks: [], largeFiles: [], audit: null };
+      const scanRoot = folder ? pathM.resolve(CWD, folder) : CWD;
+      // Security: must be within CWD
+      if (!scanRoot.startsWith(CWD)) { res.writeHead(403, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"Access denied"})); return; }
+      const results = { todos: [], fixmes: [], hacks: [], largeFiles: [], audit: null, scannedFolder: pathM.relative(CWD, scanRoot) || "." };
       // Scan source files for TODO/FIXME/HACK
       const exts = [".js",".ts",".tsx",".jsx",".cjs",".mjs",".html",".css",".json"];
       const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent",".research","autoresearch-mega-eval","electron"];
@@ -3059,7 +3086,7 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
           } catch {}
         }
       }
-      walkDir(CWD, 0);
+      walkDir(scanRoot, 0);
       // npm audit (quick)
       try {
         const { execSync } = require("child_process");
@@ -3073,6 +3100,133 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e.message }));
     }
+    return;
+  }
+
+  // ── Dual-AI Debate Fix API (Claude + OpenAI discuss & fix code issues) ──
+  if (url.pathname === "/api/ai-debate-fix" && req.method === "POST") {
+    const body = await readBody(req);
+    const { issues, mode } = safeJsonParse(body) || {};
+    if (!issues || !issues.length) { res.writeHead(400, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"No issues provided"})); return; }
+
+    // SSE for real-time debate streaming
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
+    const send = (type, data) => { try { res.write(`data: ${JSON.stringify({type,data})}\n\n`); } catch {} };
+
+    // Helper: call an AI provider
+    async function callAI(provider, messages, maxTokens = 2000) {
+      if (provider === "anthropic") {
+        const key = process.env.ANTHROPIC_API_KEY;
+        if (!key) throw new Error("ANTHROPIC_API_KEY not set");
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages })
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
+        return (d.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+      } else {
+        const key = process.env.OPENAI_API_KEY;
+        if (!key) throw new Error("OPENAI_API_KEY not set");
+        const r = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+          body: JSON.stringify({ model: "gpt-4o", max_tokens: maxTokens, messages })
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
+        return d.choices?.[0]?.message?.content || "";
+      }
+    }
+
+    try {
+      // Step 1: Read the source files involved
+      const fileContents = {};
+      for (const issue of issues.slice(0, 10)) {
+        if (!fileContents[issue.file]) {
+          try { fileContents[issue.file] = fs.readFileSync(path.join(CWD, issue.file), "utf8"); } catch {}
+        }
+      }
+
+      const issueList = issues.slice(0, 10).map((i, idx) => `${idx + 1}. [${i.type}] ${i.file}:${i.line} — ${i.text}`).join("\n");
+      const fileSnippets = Object.entries(fileContents).map(([f, c]) => {
+        const lines = c.split("\n");
+        // Only include relevant lines (±10 around each issue)
+        const relevantLines = new Set();
+        issues.filter(i => i.file === f).forEach(i => {
+          for (let l = Math.max(0, i.line - 11); l < Math.min(lines.length, i.line + 10); l++) relevantLines.add(l);
+        });
+        const snippets = [...relevantLines].sort((a, b) => a - b).map(l => `${l + 1}: ${lines[l]}`).join("\n");
+        return `=== ${f} ===\n${snippets}`;
+      }).join("\n\n");
+
+      send("status", "Round 1: Claude analyzing issues...");
+
+      // Round 1: Claude proposes fixes
+      const claudeProposal = await callAI("anthropic", [{
+        role: "user",
+        content: `You are a code reviewer. Below are code issues found in a project. Propose minimal, focused fixes.\n\nRules:\n- Fix ONLY the listed issues. Do NOT refactor surrounding code.\n- Keep changes as small as possible.\n- For each fix, provide the exact old_string → new_string replacement.\n- Use JSON format: [{"file":"...","old":"...","new":"...","reason":"one sentence"}]\n\nIssues:\n${issueList}\n\nRelevant code:\n${fileSnippets}\n\nRespond ONLY with the JSON array. No explanation outside the JSON.`
+      }]);
+
+      send("claude", claudeProposal);
+      send("status", "Round 2: OpenAI reviewing Claude's proposals...");
+
+      // Round 2: OpenAI reviews
+      const openaiReview = await callAI("openai", [{
+        role: "system",
+        content: "You are a strict code reviewer. Your job is to prevent over-engineering. Review the proposed fixes and for each one decide: APPROVE, REJECT (with reason), or MODIFY (with your version). Be conservative — reject anything that changes more than necessary."
+      }, {
+        role: "user",
+        content: `Original issues:\n${issueList}\n\nRelevant code:\n${fileSnippets}\n\nClaude's proposed fixes:\n${claudeProposal}\n\nFor each proposed fix, respond with JSON: [{"index":0,"verdict":"APPROVE|REJECT|MODIFY","reason":"...","modified_new":"only if MODIFY"}]`
+      }]);
+
+      send("openai", openaiReview);
+      send("status", "Round 3: Reaching consensus...");
+
+      // Round 3: Claude reconciles
+      const consensus = await callAI("anthropic", [{
+        role: "user",
+        content: `You proposed these fixes:\n${claudeProposal}\n\nOpenAI reviewed them:\n${openaiReview}\n\nNow produce the FINAL set of changes. Rules:\n- Include only APPROVED fixes (keep as-is) and MODIFIED fixes (use OpenAI's version).\n- Exclude REJECTED fixes entirely.\n- Output ONLY a JSON array: [{"file":"...","old":"exact old string","new":"exact new string","reason":"..."}]\n- If no fixes survive, return []\n- The old/new strings must be EXACT matches from the source code.`
+      }]);
+
+      send("consensus", consensus);
+
+      // Parse final changes
+      let changes = [];
+      try {
+        const jsonMatch = consensus.match(/\[[\s\S]*\]/);
+        if (jsonMatch) changes = JSON.parse(jsonMatch[0]);
+      } catch {}
+
+      send("result", { changes, roundCount: 3 });
+      send("done", null);
+    } catch (e) {
+      send("error", e.message);
+    }
+    res.end();
+    return;
+  }
+
+  // ── Apply AI-debated fixes ──
+  if (url.pathname === "/api/ai-apply-fix" && req.method === "POST") {
+    const body = await readBody(req);
+    const { changes } = safeJsonParse(body) || {};
+    if (!changes || !changes.length) { res.writeHead(400, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"No changes"})); return; }
+
+    const results = [];
+    for (const c of changes) {
+      try {
+        const filePath = path.join(CWD, c.file);
+        let content = fs.readFileSync(filePath, "utf8");
+        if (!content.includes(c.old)) { results.push({ file: c.file, ok: false, error: "old string not found" }); continue; }
+        content = content.replace(c.old, c.new);
+        fs.writeFileSync(filePath, content, "utf8");
+        results.push({ file: c.file, ok: true, reason: c.reason });
+      } catch (e) { results.push({ file: c.file, ok: false, error: e.message }); }
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ results }));
     return;
   }
 

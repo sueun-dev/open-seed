@@ -563,6 +563,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
               <button class="save-btn" onclick="runCodeHealthScan()" id="docScanBtn" style="font-size:11px;padding:6px 14px;margin:0;background:var(--bg5);color:var(--fg2)">Scan Code Health</button>
               <button class="save-btn" onclick="exportDoctorReport()" style="font-size:11px;padding:6px 14px;margin:0;background:var(--bg5);color:var(--fg2)" title="Export diagnostic report">Export</button>
             </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+              <label style="font-size:11px;color:var(--fg3);white-space:nowrap">Scan folder:</label>
+              <div style="flex:1;display:flex;align-items:center;gap:6px">
+                <input type="text" id="docScanFolder" placeholder="/ (project root)" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;color:var(--fg);font-family:var(--font)">
+                <button onclick="browseScanFolder()" style="background:var(--bg5);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:10px;color:var(--fg2);cursor:pointer" title="Browse folders">📁 Browse</button>
+              </div>
+            </div>
           </div>
           <div class="doc-progress" id="docProgress"><div class="doc-progress-bar" id="docProgressBar"></div></div>
           <div class="doc-summary" id="docSummary">
@@ -4044,14 +4051,53 @@ function exportDoctorReport(){
   const blob=new Blob([lines.join('\n')],{type:'text/markdown'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='diagnostic-report.md';a.click();
 }
+// ── Folder browser for scan target ──
+async function browseScanFolder(){
+  const input=document.getElementById('docScanFolder');
+  const currentPath=input.value.trim()||'';
+  // Create popup
+  let popup=document.getElementById('folderBrowsePopup');
+  if(popup){popup.remove()}
+  popup=document.createElement('div');
+  popup.id='folderBrowsePopup';
+  popup.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg1);border:1px solid var(--border);border-radius:8px;padding:0;width:380px;max-height:450px;z-index:1000;box-shadow:0 8px 32px rgba(0,0,0,.5);display:flex;flex-direction:column';
+  popup.innerHTML='<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between"><b style="font-size:12px;color:var(--fg)">Select Folder</b><button onclick="this.closest(\'#folderBrowsePopup\').remove()" style="background:none;border:none;color:var(--fg3);cursor:pointer;font-size:14px">✕</button></div><div id="folderBrowseNav" style="padding:6px 14px;font-size:10px;color:var(--fg3)"></div><div id="folderBrowseList" style="flex:1;overflow-y:auto;padding:4px 8px;max-height:300px"></div><div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end"><button onclick="document.getElementById(\'docScanFolder\').value=\'\';this.closest(\'#folderBrowsePopup\').remove()" style="background:var(--bg5);border:1px solid var(--border);border-radius:4px;padding:4px 12px;font-size:11px;color:var(--fg2);cursor:pointer">Root (/)</button></div>';
+  document.body.appendChild(popup);
+  loadFolderList(currentPath);
+}
+async function loadFolderList(browsePath){
+  const list=document.getElementById('folderBrowseList');
+  const nav=document.getElementById('folderBrowseNav');
+  if(!list)return;
+  list.innerHTML='<div style="color:var(--fg3);font-size:11px;padding:8px">Loading...</div>';
+  try{
+    const d=await(await fetch('/api/browse-folders?path='+encodeURIComponent(browsePath||''))).json();
+    nav.innerHTML='📂 '+esc(d.current||'.');
+    let h='';
+    if(browsePath){
+      const parent=browsePath.split('/').slice(0,-1).join('/');
+      h+='<div onclick="loadFolderList(\''+esc(parent)+'\')" style="padding:6px 10px;cursor:pointer;border-radius:4px;font-size:11px;color:var(--fg2);display:flex;align-items:center;gap:6px" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'none\'">⬆️ ..</div>';
+    }
+    d.dirs.forEach(dir=>{
+      h+='<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'none\'">';
+      h+='<span onclick="loadFolderList(\''+esc(dir.path)+'\')" style="flex:1;color:var(--fg2);display:flex;align-items:center;gap:6px">📁 '+esc(dir.name)+'</span>';
+      h+='<button onclick="document.getElementById(\'docScanFolder\').value=\''+esc(dir.path)+'\';document.getElementById(\'folderBrowsePopup\').remove()" style="background:var(--accent);color:#fff;border:none;border-radius:3px;padding:2px 8px;font-size:10px;cursor:pointer">Select</button>';
+      h+='</div>';
+    });
+    if(!d.dirs.length)h+='<div style="color:var(--fg3);font-size:11px;padding:8px">No subfolders</div>';
+    list.innerHTML=h;
+  }catch(e){list.innerHTML='<div style="color:var(--red);font-size:11px;padding:8px">'+esc(e.message)+'</div>'}
+}
+
 async function runCodeHealthScan(){
   const btn=document.getElementById('docScanBtn');
   const log=document.getElementById('docLog');
+  const folder=(document.getElementById('docScanFolder').value||'').trim();
   btn.disabled=true;btn.textContent='Scanning...';
   log.style.display='block';
-  log.innerHTML='<div style="color:var(--fg3);padding:8px 0">🔍 Scanning workspace code health...</div>';
+  log.innerHTML='<div style="color:var(--fg3);padding:8px 0">🔍 Scanning '+(folder?'"'+esc(folder)+'"':'project root')+'...</div>';
   try{
-    const d=await(await fetch('/api/scan-code-health',{method:'POST'})).json();
+    const d=await(await fetch('/api/scan-code-health',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder})})).json();
     if(d.error){log.innerHTML+='<div style="color:var(--red)">Error: '+esc(d.error)+'</div>';return}
     let h='';
     // Summary bar
@@ -4080,10 +4126,127 @@ async function runCodeHealthScan(){
       else h+='<div style="font-size:11px;color:var(--fg2)">'+total+' vulnerabilities: <span style="color:var(--red)">'+crit+' critical</span>, <span style="color:#f59e0b">'+hi+' high</span>, '+med+' moderate, '+lo+' low</div>';
     }
     if(!tc&&!fc&&!hc&&!lc)h+='<div style="color:var(--green);font-size:12px;padding:8px 0">✅ Code is clean — no TODOs, FIXMEs, HACKs, or oversized files found.</div>';
+    // Store issues for AI fix & add button
+    const allIssues=[...d.todos.map(t=>({...t,type:'TODO'})),...d.fixmes.map(t=>({...t,type:'FIXME'})),...d.hacks.map(t=>({...t,type:'HACK'}))];
+    window._lastScanIssues=allIssues;
+    if(allIssues.length>0){
+      h+='<div style="margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--border)">';
+      h+='<button class="save-btn" onclick="runAiDebateFix()" id="aiFixBtn" style="font-size:11px;padding:6px 16px;margin:0;background:linear-gradient(135deg,#8b5cf6,#3b82f6);color:#fff;border:none;border-radius:6px;cursor:pointer">🤖 AI Dual-Review Fix (Claude + OpenAI)</button>';
+      h+=' <span style="font-size:10px;color:var(--fg3);margin-left:8px">Two AIs debate minimal fixes, only consensus changes are applied</span>';
+      h+='</div>';
+    }
     log.innerHTML+=h;
     log.scrollTop=log.scrollHeight;
   }catch(e){log.innerHTML+='<div style="color:var(--red)">'+esc(e.message)+'</div>'}
   finally{btn.disabled=false;btn.textContent='Scan Code Health'}
+}
+
+// ── Dual-AI Debate Fix ──
+async function runAiDebateFix(){
+  const issues=window._lastScanIssues;
+  if(!issues||!issues.length)return;
+  const btn=document.getElementById('aiFixBtn');
+  const log=document.getElementById('docLog');
+  btn.disabled=true;btn.textContent='AI Debating...';
+
+  // Build debate UI
+  let debateHtml='<div id="aiDebatePanel" style="margin-top:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden">';
+  debateHtml+='<div style="background:linear-gradient(135deg,#8b5cf6,#3b82f6);padding:10px 16px;display:flex;align-items:center;gap:10px">';
+  debateHtml+='<span style="font-size:13px;font-weight:700;color:#fff">🤖 AI Dual-Review</span>';
+  debateHtml+='<span id="aiDebateStatus" style="font-size:10px;color:rgba(255,255,255,.8);margin-left:auto">Starting...</span>';
+  debateHtml+='</div>';
+  debateHtml+='<div id="aiDebateLog" style="padding:12px;max-height:500px;overflow-y:auto;font-size:11px;background:var(--bg1)"></div>';
+  debateHtml+='<div id="aiDebateActions" style="display:none;padding:10px 16px;border-top:1px solid var(--border);background:var(--bg2)"></div>';
+  debateHtml+='</div>';
+  log.innerHTML+=debateHtml;
+
+  const debateLog=document.getElementById('aiDebateLog');
+  const debateStatus=document.getElementById('aiDebateStatus');
+  const debateActions=document.getElementById('aiDebateActions');
+
+  function addMsg(role,text,color){
+    const labels={claude:'Claude (Anthropic)',openai:'GPT-4o (OpenAI)',status:'System',consensus:'Consensus',error:'Error'};
+    const colors={claude:'#c084fc',openai:'#60a5fa',status:'var(--fg3)',consensus:'var(--green)',error:'var(--red)'};
+    const icon={claude:'🟣',openai:'🔵',status:'⚙️',consensus:'🤝',error:'❌'};
+    debateLog.innerHTML+=`<div style="margin-bottom:10px"><div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span>${icon[role]||'💬'}</span><b style="color:${colors[role]||'var(--fg)'};font-size:11px">${labels[role]||role}</b></div><div style="padding:6px 10px;background:var(--bg2);border-radius:6px;border-left:3px solid ${colors[role]||'var(--border)'};color:var(--fg2);font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto">${esc(text)}</div></div>`;
+    debateLog.scrollTop=debateLog.scrollHeight;
+    log.scrollTop=log.scrollHeight;
+  }
+
+  try{
+    const resp=await fetch('/api/ai-debate-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issues:issues.slice(0,10)})});
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+    let buf='';
+    let finalChanges=[];
+
+    while(true){
+      const{done,value}=await reader.read();
+      if(done)break;
+      buf+=decoder.decode(value,{stream:true});
+      const lines=buf.split('\n');
+      buf=lines.pop();
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const ev=JSON.parse(line.slice(6));
+          if(ev.type==='status'){debateStatus.textContent=ev.data;addMsg('status',ev.data)}
+          else if(ev.type==='claude')addMsg('claude',ev.data);
+          else if(ev.type==='openai')addMsg('openai',ev.data);
+          else if(ev.type==='consensus')addMsg('consensus',ev.data);
+          else if(ev.type==='error')addMsg('error',ev.data);
+          else if(ev.type==='result'){
+            finalChanges=ev.data.changes||[];
+            debateStatus.textContent=`Done — ${finalChanges.length} fix${finalChanges.length!==1?'es':''} agreed`;
+          }
+          else if(ev.type==='done'){
+            if(finalChanges.length>0){
+              let actH='<div style="margin-bottom:6px;font-weight:600;font-size:11px;color:var(--fg)">'+finalChanges.length+' agreed fix'+(finalChanges.length!==1?'es':'')+':</div>';
+              finalChanges.forEach((c,i)=>{actH+='<div style="font-size:10px;color:var(--fg2);padding:2px 0">'+esc(c.file)+': '+esc(c.reason||'')+'</div>'});
+              actH+='<div style="margin-top:8px;display:flex;gap:8px">';
+              actH+='<button class="save-btn" onclick="applyAiFixes()" id="aiApplyBtn" style="font-size:11px;padding:5px 14px;margin:0;background:var(--green);color:#fff;border:none;border-radius:4px">Apply All Fixes</button>';
+              actH+='<button class="save-btn" onclick="dismissAiFixes()" style="font-size:11px;padding:5px 14px;margin:0;background:var(--bg5);color:var(--fg2);border:none;border-radius:4px">Dismiss</button>';
+              actH+='</div>';
+              debateActions.innerHTML=actH;
+              debateActions.style.display='block';
+              window._aiDebateChanges=finalChanges;
+            } else {
+              addMsg('status','No fixes survived the debate — both AIs agreed no changes needed.');
+            }
+          }
+        }catch{}
+      }
+    }
+  }catch(e){addMsg('error',e.message)}
+  finally{btn.disabled=false;btn.textContent='🤖 AI Dual-Review Fix (Claude + OpenAI)'}
+}
+
+async function applyAiFixes(){
+  const changes=window._aiDebateChanges;
+  if(!changes||!changes.length)return;
+  const btn=document.getElementById('aiApplyBtn');
+  btn.disabled=true;btn.textContent='Applying...';
+  try{
+    const r=await(await fetch('/api/ai-apply-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({changes})})).json();
+    const debateLog=document.getElementById('aiDebateLog');
+    const ok=r.results.filter(x=>x.ok).length,fail=r.results.filter(x=>!x.ok).length;
+    let h='<div style="margin-top:8px;padding:8px 12px;background:rgba(16,163,127,.1);border-radius:6px;font-size:11px">';
+    h+='<b style="color:var(--green)">✅ Applied '+ok+' fix'+(ok!==1?'es':'')+'</b>';
+    if(fail)h+=' <span style="color:var(--red)">('+fail+' failed)</span>';
+    r.results.forEach(x=>{h+='<div style="padding:2px 0;color:'+(x.ok?'var(--green)':'var(--red)')+'">'+esc(x.file)+': '+(x.ok?x.reason||'OK':x.error)+'</div>'});
+    h+='</div>';
+    debateLog.innerHTML+=h;
+    debateLog.scrollTop=debateLog.scrollHeight;
+    document.getElementById('aiDebateActions').style.display='none';
+  }catch(e){alert('Apply failed: '+e.message)}
+  finally{btn.disabled=false;btn.textContent='Apply All Fixes'}
+}
+
+function dismissAiFixes(){
+  window._aiDebateChanges=null;
+  document.getElementById('aiDebateActions').style.display='none';
+  const debateLog=document.getElementById('aiDebateLog');
+  debateLog.innerHTML+='<div style="color:var(--fg3);font-size:10px;padding:4px 0">Fixes dismissed.</div>';
 }
 
 async function checkAuth(){
