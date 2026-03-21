@@ -3103,18 +3103,16 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     return;
   }
 
-  // ── Dual-AI Debate Fix API (Claude + OpenAI discuss & fix code issues) ──
+  // ── Dual-AI Debate Fix API (Claude + OpenAI, up to 5 rounds each = 10 turns max) ──
   if (url.pathname === "/api/ai-debate-fix" && req.method === "POST") {
     const body = await readBody(req);
-    const { issues, mode } = safeJsonParse(body) || {};
+    const { issues } = safeJsonParse(body) || {};
     if (!issues || !issues.length) { res.writeHead(400, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"No issues provided"})); return; }
 
-    // SSE for real-time debate streaming
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
     const send = (type, data) => { try { res.write(`data: ${JSON.stringify({type,data})}\n\n`); } catch {} };
 
-    // Helper: call an AI provider
-    async function callAI(provider, messages, maxTokens = 2000) {
+    async function callAI(provider, messages, maxTokens = 3000) {
       if (provider === "anthropic") {
         const key = process.env.ANTHROPIC_API_KEY;
         if (!key) throw new Error("ANTHROPIC_API_KEY not set");
@@ -3141,65 +3139,105 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     }
 
     try {
-      // Step 1: Read the source files involved
+      // Read source files
       const fileContents = {};
       for (const issue of issues.slice(0, 10)) {
         if (!fileContents[issue.file]) {
           try { fileContents[issue.file] = fs.readFileSync(path.join(CWD, issue.file), "utf8"); } catch {}
         }
       }
-
       const issueList = issues.slice(0, 10).map((i, idx) => `${idx + 1}. [${i.type}] ${i.file}:${i.line} — ${i.text}`).join("\n");
       const fileSnippets = Object.entries(fileContents).map(([f, c]) => {
         const lines = c.split("\n");
-        // Only include relevant lines (±10 around each issue)
         const relevantLines = new Set();
         issues.filter(i => i.file === f).forEach(i => {
-          for (let l = Math.max(0, i.line - 11); l < Math.min(lines.length, i.line + 10); l++) relevantLines.add(l);
+          for (let l = Math.max(0, i.line - 15); l < Math.min(lines.length, i.line + 15); l++) relevantLines.add(l);
         });
-        const snippets = [...relevantLines].sort((a, b) => a - b).map(l => `${l + 1}: ${lines[l]}`).join("\n");
-        return `=== ${f} ===\n${snippets}`;
+        return `=== ${f} ===\n` + [...relevantLines].sort((a, b) => a - b).map(l => `${l + 1}: ${lines[l]}`).join("\n");
       }).join("\n\n");
 
-      send("status", "Round 1: Claude analyzing issues...");
+      const MAX_ROUNDS = 5; // 5 rounds = Claude speaks 5 times, OpenAI speaks 5 times = 10 turns
+      const claudeHistory = []; // Anthropic messages
+      const openaiHistory = [{ role: "system", content: "You are a strict senior code reviewer at a top tech company. Your job: prevent over-engineering, reject unnecessary changes, ensure minimal diffs. Be direct and opinionated. When you see a good fix, APPROVE it. When it's overkill, REJECT it and explain why. When it's close but needs adjustment, MODIFY it with your exact version. You must reach a final consensus — no open-ended suggestions." }];
 
-      // Round 1: Claude proposes fixes
-      const claudeProposal = await callAI("anthropic", [{
+      // ── Round 1: Claude initial proposal ──
+      send("status", "Round 1/5: Claude analyzing issues and proposing fixes...");
+      claudeHistory.push({
         role: "user",
-        content: `You are a code reviewer. Below are code issues found in a project. Propose minimal, focused fixes.\n\nRules:\n- Fix ONLY the listed issues. Do NOT refactor surrounding code.\n- Keep changes as small as possible.\n- For each fix, provide the exact old_string → new_string replacement.\n- Use JSON format: [{"file":"...","old":"...","new":"...","reason":"one sentence"}]\n\nIssues:\n${issueList}\n\nRelevant code:\n${fileSnippets}\n\nRespond ONLY with the JSON array. No explanation outside the JSON.`
-      }]);
+        content: `You are a precise code fixer. Below are code issues. Propose minimal fixes.\n\nRULES:\n- Fix ONLY the listed issues. Do NOT touch surrounding code.\n- Smallest possible change for each fix.\n- Each fix: exact old_string → new_string replacement.\n- JSON format: [{"file":"...","old":"exact old text","new":"exact new text","reason":"one sentence","confidence":"high|medium|low"}]\n\nIssues:\n${issueList}\n\nCode:\n${fileSnippets}\n\nRespond with ONLY the JSON array.`
+      });
+      const round1Claude = await callAI("anthropic", claudeHistory);
+      claudeHistory.push({ role: "assistant", content: round1Claude });
+      send("claude", round1Claude);
 
-      send("claude", claudeProposal);
-      send("status", "Round 2: OpenAI reviewing Claude's proposals...");
-
-      // Round 2: OpenAI reviews
-      const openaiReview = await callAI("openai", [{
-        role: "system",
-        content: "You are a strict code reviewer. Your job is to prevent over-engineering. Review the proposed fixes and for each one decide: APPROVE, REJECT (with reason), or MODIFY (with your version). Be conservative — reject anything that changes more than necessary."
-      }, {
+      // ── Round 1: OpenAI reviews ──
+      send("status", "Round 1/5: OpenAI reviewing Claude's proposals...");
+      openaiHistory.push({
         role: "user",
-        content: `Original issues:\n${issueList}\n\nRelevant code:\n${fileSnippets}\n\nClaude's proposed fixes:\n${claudeProposal}\n\nFor each proposed fix, respond with JSON: [{"index":0,"verdict":"APPROVE|REJECT|MODIFY","reason":"...","modified_new":"only if MODIFY"}]`
-      }]);
+        content: `Original issues:\n${issueList}\n\nSource code:\n${fileSnippets}\n\nClaude proposed these fixes:\n${round1Claude}\n\nReview EACH fix. For each one respond:\n- APPROVE: fix is correct and minimal\n- REJECT: fix is wrong, unnecessary, or over-engineered (explain why)\n- MODIFY: fix idea is right but implementation needs adjustment (provide your exact version)\n\nJSON format: [{"index":0,"verdict":"APPROVE|REJECT|MODIFY","reason":"...","modified_old":"if MODIFY","modified_new":"if MODIFY"}]\n\nBe strict. Only approve what's truly needed.`
+      });
+      const round1OpenAI = await callAI("openai", openaiHistory);
+      openaiHistory.push({ role: "assistant", content: round1OpenAI });
+      send("openai", round1OpenAI);
 
-      send("openai", openaiReview);
-      send("status", "Round 3: Reaching consensus...");
+      // Check if there are disagreements
+      let hasDisagreement = /REJECT|MODIFY/i.test(round1OpenAI);
+      let roundCount = 1;
+      let lastClaudeResponse = round1Claude;
+      let lastOpenAIResponse = round1OpenAI;
 
-      // Round 3: Claude reconciles
-      const consensus = await callAI("anthropic", [{
+      // ── Rounds 2-5: Continue debating until consensus or max rounds ──
+      while (hasDisagreement && roundCount < MAX_ROUNDS) {
+        roundCount++;
+
+        // Claude responds to OpenAI's review
+        send("status", `Round ${roundCount}/5: Claude responding to OpenAI's feedback...`);
+        claudeHistory.push({
+          role: "user",
+          content: `OpenAI reviewed your fixes:\n${lastOpenAIResponse}\n\nRespond to their feedback:\n- For APPROVED fixes: keep them exactly as-is.\n- For REJECTED fixes: either accept the rejection (drop the fix) or argue why it's needed with a better justification. Be honest — if they're right, drop it.\n- For MODIFIED fixes: accept their version if it's better, or counter-propose with reasoning.\n\nOutput your UPDATED fix list as JSON: [{"file":"...","old":"...","new":"...","reason":"...","status":"kept|revised|dropped","confidence":"high|medium|low"}]\n\nYou MUST converge toward agreement. Do not stubbornly keep rejected fixes unless you have a strong technical reason.`
+        });
+        lastClaudeResponse = await callAI("anthropic", claudeHistory);
+        claudeHistory.push({ role: "assistant", content: lastClaudeResponse });
+        send("claude", lastClaudeResponse);
+
+        // OpenAI reviews again
+        send("status", `Round ${roundCount}/5: OpenAI reviewing Claude's revised proposals...`);
+        openaiHistory.push({
+          role: "user",
+          content: `Claude revised the fixes based on your feedback:\n${lastClaudeResponse}\n\nReview again. Same rules:\n- APPROVE fixes that are now correct and minimal\n- REJECT fixes that are still wrong or unnecessary\n- MODIFY if close but needs tweaking\n\nJSON: [{"index":0,"verdict":"APPROVE|REJECT|MODIFY","reason":"...","modified_old":"if MODIFY","modified_new":"if MODIFY"}]\n\n${roundCount >= MAX_ROUNDS - 1 ? "IMPORTANT: This is the final round. You MUST reach a definitive verdict on every fix — no more MODIFY, only APPROVE or REJECT." : "Try to converge. If a fix has been debated for 2+ rounds without agreement, lean toward REJECT to keep things safe."}`
+        });
+        lastOpenAIResponse = await callAI("openai", openaiHistory);
+        openaiHistory.push({ role: "assistant", content: lastOpenAIResponse });
+        send("openai", lastOpenAIResponse);
+
+        // Check if still disagreeing
+        hasDisagreement = /MODIFY/i.test(lastOpenAIResponse);
+        // On final round, force conclusion regardless
+        if (roundCount >= MAX_ROUNDS) hasDisagreement = false;
+      }
+
+      // ── Final consensus: Claude produces the definitive changeset ──
+      send("status", `Finalizing consensus after ${roundCount} round${roundCount > 1 ? "s" : ""}...`);
+      claudeHistory.push({
         role: "user",
-        content: `You proposed these fixes:\n${claudeProposal}\n\nOpenAI reviewed them:\n${openaiReview}\n\nNow produce the FINAL set of changes. Rules:\n- Include only APPROVED fixes (keep as-is) and MODIFIED fixes (use OpenAI's version).\n- Exclude REJECTED fixes entirely.\n- Output ONLY a JSON array: [{"file":"...","old":"exact old string","new":"exact new string","reason":"..."}]\n- If no fixes survive, return []\n- The old/new strings must be EXACT matches from the source code.`
-      }]);
+        content: `Final OpenAI verdict:\n${lastOpenAIResponse}\n\nProduce the FINAL changeset. STRICT RULES:\n- Include ONLY fixes with APPROVE verdict.\n- For any remaining MODIFY: use OpenAI's version.\n- EXCLUDE all REJECTED fixes completely.\n- Output ONLY valid JSON array: [{"file":"...","old":"exact old string from source","new":"exact new string","reason":"..."}]\n- If nothing survived, return []\n- The "old" field MUST be an exact substring from the source code that can be found with string.includes().\n- Double-check every "old" string against the source code provided above.`
+      });
+      const finalConsensus = await callAI("anthropic", claudeHistory);
+      send("consensus", finalConsensus);
 
-      send("consensus", consensus);
-
-      // Parse final changes
+      // Parse
       let changes = [];
       try {
-        const jsonMatch = consensus.match(/\[[\s\S]*\]/);
+        const jsonMatch = finalConsensus.match(/\[[\s\S]*?\]/);
         if (jsonMatch) changes = JSON.parse(jsonMatch[0]);
+        // Validate: filter out changes where old string doesn't exist in source
+        changes = changes.filter(c => {
+          const content = fileContents[c.file];
+          return content && content.includes(c.old);
+        });
       } catch {}
 
-      send("result", { changes, roundCount: 3 });
+      send("result", { changes, roundCount, totalTurns: roundCount * 2 });
       send("done", null);
     } catch (e) {
       send("error", e.message);

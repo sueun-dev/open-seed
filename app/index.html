@@ -4132,7 +4132,7 @@ async function runCodeHealthScan(){
     if(allIssues.length>0){
       h+='<div style="margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--border)">';
       h+='<button class="save-btn" onclick="runAiDebateFix()" id="aiFixBtn" style="font-size:11px;padding:6px 16px;margin:0;background:linear-gradient(135deg,#8b5cf6,#3b82f6);color:#fff;border:none;border-radius:6px;cursor:pointer">🤖 AI Dual-Review Fix (Claude + OpenAI)</button>';
-      h+=' <span style="font-size:10px;color:var(--fg3);margin-left:8px">Two AIs debate minimal fixes, only consensus changes are applied</span>';
+      h+=' <span style="font-size:10px;color:var(--fg3);margin-left:8px">Claude + GPT debate up to 5 rounds (10 turns) — only consensus fixes applied</span>';
       h+='</div>';
     }
     log.innerHTML+=h;
@@ -4197,7 +4197,8 @@ async function runAiDebateFix(){
           else if(ev.type==='error')addMsg('error',ev.data);
           else if(ev.type==='result'){
             finalChanges=ev.data.changes||[];
-            debateStatus.textContent=`Done — ${finalChanges.length} fix${finalChanges.length!==1?'es':''} agreed`;
+            const rn=ev.data.roundCount||1,tt=ev.data.totalTurns||2;
+            debateStatus.textContent=`Done — ${finalChanges.length} fix${finalChanges.length!==1?'es':''} agreed (${rn} round${rn>1?'s':''}, ${tt} turns)`;
           }
           else if(ev.type==='done'){
             if(finalChanges.length>0){
