@@ -3031,46 +3031,72 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
   // ── Resolve dropped file/folder path ──
   if (url.pathname === "/api/resolve-drop-path" && req.method === "POST") {
     const body = await readBody(req);
-    const { name, relativePath, isDirectory } = safeJsonParse(body) || {};
-    if (!name) { res.writeHead(400, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"No name"})); return; }
+    const { fullPath, name, isDirectory } = safeJsonParse(body) || {};
 
-    // Search for the name in the project directory (max 5 levels deep)
-    function findInDir(dir, target, depth) {
-      if (depth > 5) return null;
-      try {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent",".research"];
-        for (const e of entries) {
-          if (ignoreDirs.includes(e.name)) continue;
-          if (e.name === target) {
-            const full = path.join(dir, e.name);
-            const stat = fs.statSync(full);
-            if (isDirectory && stat.isDirectory()) return path.relative(CWD, full);
-            if (!isDirectory && stat.isFile()) return path.relative(CWD, path.dirname(full));
-            return path.relative(CWD, full);
-          }
-          if (e.isDirectory()) {
-            const found = findInDir(path.join(dir, e.name), target, depth + 1);
-            if (found) return found;
-          }
+    let resolved = null;
+
+    // Method 1: Full absolute path from file:// URL (most reliable)
+    if (fullPath && fullPath.startsWith('/')) {
+      if (fullPath.startsWith(CWD)) {
+        // Inside project — convert to relative
+        const rel = path.relative(CWD, fullPath);
+        try {
+          const stat = fs.statSync(fullPath);
+          resolved = stat.isDirectory() ? rel : path.dirname(rel);
+          if (resolved === '.') resolved = '';
+        } catch {
+          resolved = path.dirname(rel);
+          if (resolved === '.') resolved = '';
         }
-      } catch {}
-      return null;
+      } else {
+        // Outside project — use absolute path directly for scan
+        try {
+          const stat = fs.statSync(fullPath);
+          resolved = stat.isDirectory() ? fullPath : path.dirname(fullPath);
+        } catch {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: `Path not found: ${fullPath}` }));
+          return;
+        }
+      }
     }
 
-    // Direct check first
-    const directPath = path.join(CWD, name);
-    let resolved = null;
-    if (fs.existsSync(directPath)) {
-      const stat = fs.statSync(directPath);
-      resolved = stat.isDirectory() ? name : path.dirname(name);
-      if (resolved === '.') resolved = '';
-    } else {
-      resolved = findInDir(CWD, name, 0);
+    // Method 2: Search by name (fallback)
+    if (resolved === null && name) {
+      function findInDir(dir, target, depth) {
+        if (depth > 5) return null;
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent"];
+          for (const e of entries) {
+            if (ignoreDirs.includes(e.name)) continue;
+            if (e.name === target) {
+              const full = path.join(dir, e.name);
+              const stat = fs.statSync(full);
+              if (stat.isDirectory()) return path.relative(CWD, full);
+              return path.relative(CWD, path.dirname(full));
+            }
+            if (e.isDirectory()) {
+              const found = findInDir(path.join(dir, e.name), target, depth + 1);
+              if (found) return found;
+            }
+          }
+        } catch {}
+        return null;
+      }
+      // Direct check
+      const directPath = path.join(CWD, name);
+      if (fs.existsSync(directPath)) {
+        const stat = fs.statSync(directPath);
+        resolved = stat.isDirectory() ? name : path.dirname(name);
+        if (resolved === '.') resolved = '';
+      } else {
+        resolved = findInDir(CWD, name, 0);
+      }
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(resolved !== null ? { path: resolved } : { error: `"${name}" not found in project` }));
+    res.end(JSON.stringify(resolved !== null ? { path: resolved } : { error: `"${name || fullPath}" not found in project` }));
     return;
   }
 
@@ -3101,10 +3127,9 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
       const body = await readBody(req);
       const { folder } = safeJsonParse(body) || {};
       const fs = require("fs"), pathM = require("path");
-      const scanRoot = folder ? pathM.resolve(CWD, folder) : CWD;
-      // Security: must be within CWD
-      if (!scanRoot.startsWith(CWD)) { res.writeHead(403, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"Access denied"})); return; }
-      const results = { todos: [], fixmes: [], hacks: [], largeFiles: [], audit: null, scannedFolder: pathM.relative(CWD, scanRoot) || "." };
+      const scanRoot = folder ? (folder.startsWith('/') ? folder : pathM.resolve(CWD, folder)) : CWD;
+      if (!require("fs").existsSync(scanRoot)) { res.writeHead(400, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:"Folder not found: "+folder})); return; }
+      const results = { todos: [], fixmes: [], hacks: [], largeFiles: [], audit: null, scannedFolder: scanRoot.startsWith(CWD) ? (pathM.relative(CWD, scanRoot) || ".") : scanRoot };
       // Scan source files for TODO/FIXME/HACK
       const exts = [".js",".ts",".tsx",".jsx",".cjs",".mjs",".html",".css",".json"];
       const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent",".research","autoresearch-mega-eval","electron"];
