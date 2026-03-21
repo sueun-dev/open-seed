@@ -2635,7 +2635,7 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
 
   // ── Browse: list folders anywhere on disk ──
   if (url.pathname === "/api/browse" && req.method === "GET") {
-    const dir = url.searchParams.get("path") || os.homedir();
+    const dir = url.searchParams.get("path") || require("os").homedir();
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       const dirs = [];
@@ -2973,31 +2973,54 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
 
   if (url.pathname === "/api/doctor" && (req.method === "POST" || req.method === "GET")) {
     try {
+      const { execSync } = require("child_process");
       const checks = [];
-      // Config check
-      const configPath = path.join(CWD, ".agent", "config.json");
-      checks.push({ name: "config", status: fs.existsSync(configPath) ? "ok" : "warn", message: fs.existsSync(configPath) ? "Config found" : "No config — using defaults" });
-      // Provider checks
-      for (const [name, envKey] of [["openai", "OPENAI_API_KEY"], ["anthropic", "ANTHROPIC_API_KEY"]]) {
-        checks.push({ name, status: process.env[envKey] ? "ok" : "warn", message: process.env[envKey] ? `${envKey} set` : `${envKey} not set` });
+      const timed = (name, category, fn) => { const s = Date.now(); try { const r = fn(); checks.push({ ...r, name, category, durationMs: Date.now() - s }); } catch (e) { checks.push({ name, category, status: "error", message: e.message, durationMs: Date.now() - s }); } };
+
+      // ── Environment ──
+      timed("Node.js", "Environment", () => ({ status: "ok", message: `${process.version} (${process.platform} ${process.arch})` }));
+      timed("npm", "Environment", () => { const v = execSync("npm --version", { encoding: "utf-8", timeout: 5000 }).trim(); return { status: "ok", message: `v${v}` }; });
+      timed("Git", "Environment", () => { const v = execSync("git --version", { encoding: "utf-8", timeout: 3000 }).trim(); return { status: "ok", message: v }; });
+      timed("Shell", "Environment", () => ({ status: "ok", message: process.env.SHELL || "unknown" }));
+      timed("Memory", "Environment", () => { const mem = process.memoryUsage(); const mb = Math.round(mem.heapUsed / 1024 / 1024); return { status: mb > 500 ? "warn" : "ok", message: `${mb}MB heap used` }; });
+      timed("Disk (CWD)", "Environment", () => { try { const out = execSync(`df -h "${CWD}" | tail -1`, { encoding: "utf-8", timeout: 3000 }).trim(); const parts = out.split(/\s+/); return { status: parseInt(parts[4]) > 90 ? "warn" : "ok", message: `${parts[3]} free (${parts[4]} used)` }; } catch { return { status: "ok", message: "Unable to check" }; } });
+
+      // ── Providers ──
+      for (const [name, envKey] of [["OpenAI", "OPENAI_API_KEY"], ["Anthropic", "ANTHROPIC_API_KEY"], ["Gemini", "GEMINI_API_KEY"]]) {
+        timed(name + " API Key", "Providers", () => ({ status: process.env[envKey] ? "ok" : "warn", message: process.env[envKey] ? `${envKey} set (${process.env[envKey].slice(0,8)}...)` : `${envKey} not set` }));
       }
-      // OAuth checks
-      const codexAuth = path.join(require("os").homedir(), ".codex", "auth.json");
-      checks.push({ name: "codex-oauth", status: fs.existsSync(codexAuth) ? "ok" : "warn", message: fs.existsSync(codexAuth) ? "Codex OAuth found" : "No Codex OAuth" });
-      // Node
-      checks.push({ name: "node", status: "ok", message: `Node.js ${process.version}` });
-      // Git
-      try { const { execSync } = require("child_process"); checks.push({ name: "git", status: "ok", message: execSync("git --version", { encoding: "utf-8", timeout: 3000 }).trim() }); } catch { checks.push({ name: "git", status: "error", message: "git not found" }); }
-      // Build
-      checks.push({ name: "build", status: fs.existsSync(path.join(CWD, "dist", "cli.js")) ? "ok" : "warn", message: fs.existsSync(path.join(CWD, "dist", "cli.js")) ? "Build exists" : "Run npm run build" });
-      // Workspace
-      const entries = fs.readdirSync(CWD).length;
-      checks.push({ name: "workspace", status: "ok", message: `${entries} entries` });
+      timed("Codex OAuth", "Providers", () => { const p = path.join(require("os").homedir(), ".codex", "auth.json"); return { status: fs.existsSync(p) ? "ok" : "warn", message: fs.existsSync(p) ? "Token found" : "Not configured — run: codex auth login" }; });
+      timed("Claude OAuth", "Providers", () => { const p = path.join(require("os").homedir(), ".claude"); return { status: fs.existsSync(p) ? "ok" : "warn", message: fs.existsSync(p) ? "Claude config found" : "Not configured — run: claude auth login" }; });
+
+      // ── Workspace ──
+      timed("Config File", "Workspace", () => { const p = path.join(CWD, ".agent", "config.json"); if (!fs.existsSync(p)) return { status: "warn", message: "No config — using defaults" }; const sz = fs.statSync(p).size; return { status: "ok", message: `Found (${sz} bytes)` }; });
+      timed("package.json", "Workspace", () => { const p = path.join(CWD, "package.json"); if (!fs.existsSync(p)) return { status: "warn", message: "Not found" }; const pkg = JSON.parse(fs.readFileSync(p, "utf8")); return { status: "ok", message: `${pkg.name || "unnamed"}@${pkg.version || "0.0.0"}` }; });
+      timed("node_modules", "Workspace", () => { const p = path.join(CWD, "node_modules"); return { status: fs.existsSync(p) ? "ok" : "warn", message: fs.existsSync(p) ? "Installed" : "Missing — run: npm install" }; });
+      timed("Build Output", "Workspace", () => { const p = path.join(CWD, "dist", "cli.js"); return { status: fs.existsSync(p) ? "ok" : "warn", message: fs.existsSync(p) ? "dist/cli.js exists" : "Not built — run: npm run build" }; });
+      timed("File Count", "Workspace", () => { const n = fs.readdirSync(CWD).length; return { status: "ok", message: `${n} entries in root` }; });
+      timed(".gitignore", "Workspace", () => { const p = path.join(CWD, ".gitignore"); return { status: fs.existsSync(p) ? "ok" : "warn", message: fs.existsSync(p) ? "Present" : "Missing — secrets may be committed" }; });
+
+      // ── Git ──
+      timed("Git Repo", "Git", () => { try { execSync("git rev-parse --is-inside-work-tree", { cwd: CWD, encoding: "utf-8", timeout: 3000 }); return { status: "ok", message: "Valid repository" }; } catch { return { status: "warn", message: "Not a git repository" }; } });
+      timed("Git Branch", "Git", () => { try { const b = execSync("git branch --show-current", { cwd: CWD, encoding: "utf-8", timeout: 3000 }).trim(); return { status: "ok", message: b || "detached HEAD" }; } catch { return { status: "warn", message: "Unable to determine" }; } });
+      timed("Uncommitted Changes", "Git", () => { try { const s = execSync("git status --porcelain", { cwd: CWD, encoding: "utf-8", timeout: 5000 }).trim(); const n = s ? s.split("\n").length : 0; return { status: n > 20 ? "warn" : "ok", message: n === 0 ? "Clean working tree" : `${n} changed file(s)` }; } catch { return { status: "warn", message: "Unable to check" }; } });
+      timed("Remote", "Git", () => { try { const r = execSync("git remote get-url origin", { cwd: CWD, encoding: "utf-8", timeout: 3000 }).trim(); return { status: "ok", message: r }; } catch { return { status: "warn", message: "No remote configured" }; } });
+
+      // ── Tools ──
+      for (const [tool, cmd] of [["TypeScript", "npx tsc --version"], ["ESLint", "npx eslint --version"], ["Prettier", "npx prettier --version"]]) {
+        timed(tool, "Tools", () => { try { const v = execSync(cmd, { cwd: CWD, encoding: "utf-8", timeout: 10000, stdio: ["pipe","pipe","pipe"] }).trim(); return { status: "ok", message: v }; } catch { return { status: "warn", message: "Not available" }; } });
+      }
+      timed("Playwright", "Tools", () => { try { require.resolve("playwright"); return { status: "ok", message: "Installed" }; } catch { return { status: "warn", message: "Not installed" }; } });
+
+      // ── Security ──
+      timed(".env Protection", "Security", () => { const gi = path.join(CWD, ".gitignore"); if (!fs.existsSync(gi)) return { status: "warn", message: "No .gitignore" }; const c = fs.readFileSync(gi, "utf8"); return { status: c.includes(".env") ? "ok" : "warn", message: c.includes(".env") ? ".env in .gitignore" : ".env NOT in .gitignore — secrets at risk" }; });
+      timed("Exposed Secrets", "Security", () => { const envFile = path.join(CWD, ".env"); if (!fs.existsSync(envFile)) return { status: "ok", message: "No .env file in root" }; try { const tracked = execSync(`git ls-files --error-unmatch .env`, { cwd: CWD, encoding: "utf-8", timeout: 3000, stdio: ["pipe","pipe","pipe"] }); return { status: "error", message: ".env is tracked by git — REMOVE IT" }; } catch { return { status: "ok", message: ".env exists but not tracked" }; } });
 
       const errors = checks.filter(c => c.status === "error").length;
       const warnings = checks.filter(c => c.status === "warn").length;
+      const okCount = checks.filter(c => c.status === "ok").length;
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ healthy: errors === 0, checks, summary: `${checks.length} checks: ${checks.length - errors - warnings} ok, ${warnings} warn, ${errors} error` }));
+      res.end(JSON.stringify({ healthy: errors === 0, checks, summary: `${checks.length} checks: ${okCount} ok, ${warnings} warn, ${errors} error` }));
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ healthy: false, checks: [], error: e.message }));
@@ -3431,11 +3454,32 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
 
   // ── Settings API ──
   if (url.pathname === "/api/settings" && req.method === "GET") {
-    const configPath = path.join(CWD, ".agent", "config.json");
+    const scope = url.searchParams?.get("scope") || "workspace";
+    const configPath = scope === "user"
+      ? path.join(require("os").homedir(), ".open-seed", "config.json")
+      : path.join(CWD, ".agent", "config.json");
     try {
       const content = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "{}";
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(content);
+      // For workspace scope, merge user (global) defaults underneath
+      if (scope === "workspace") {
+        const userPath = path.join(require("os").homedir(), ".open-seed", "config.json");
+        const userCfg = fs.existsSync(userPath) ? safeJsonParse(fs.readFileSync(userPath, "utf8")) || {} : {};
+        const wsCfg = safeJsonParse(content) || {};
+        // workspace overrides user — shallow merge per top-level key
+        const merged = { ...userCfg };
+        for (const [k, v] of Object.entries(wsCfg)) {
+          if (v && typeof v === "object" && !Array.isArray(v) && merged[k] && typeof merged[k] === "object") {
+            merged[k] = { ...merged[k], ...v };
+          } else {
+            merged[k] = v;
+          }
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(merged));
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(content);
+      }
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e.message }));
@@ -3447,7 +3491,10 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     const body = await readBody(req);
     const parsed = safeJsonParse(body);
     if (!parsed) { res.writeHead(400); res.end("Invalid JSON"); return; }
-    const configPath = path.join(CWD, ".agent", "config.json");
+    const scope = url.searchParams?.get("scope") || "workspace";
+    const configPath = scope === "user"
+      ? path.join(require("os").homedir(), ".open-seed", "config.json")
+      : path.join(CWD, ".agent", "config.json");
     try {
       const dir = path.dirname(configPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
