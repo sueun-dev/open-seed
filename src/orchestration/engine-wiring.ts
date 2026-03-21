@@ -391,7 +391,7 @@ export async function runParallelAgents(params: {
 
         try {
           const output = await params.executeFn(task.roleId, task.prompt);
-          params.bgManager.complete(task.id, output.slice(0, 500));
+          params.bgManager.complete(task.id, output);
 
           await params.eventBus.fire("worker.completed", "engine", params.sessionId, {
             taskId: task.id, roleId: task.roleId, success: true

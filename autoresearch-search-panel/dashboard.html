@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Autoresearch Dashboard — Search Panel</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;background:#fafbfc;color:#24292f;padding:24px 32px}
+h1{font-size:20px;font-weight:600;margin-bottom:4px}
+.subtitle{color:#656d76;font-size:13px;margin-bottom:24px}
+.status-bar{display:flex;gap:16px;margin-bottom:24px;padding:12px 16px;background:#fff;border:1px solid #d0d7de;border-radius:8px}
+.stat{text-align:center}
+.stat .val{font-size:24px;font-weight:700;color:#0969da}
+.stat .lbl{font-size:11px;color:#656d76;text-transform:uppercase;letter-spacing:.5px}
+.stat.green .val{color:#1a7f37}
+.stat.red .val{color:#cf222e}
+.stat.blue .val{color:#0969da}
+.chart-wrap{background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:16px;margin-bottom:24px}
+table{width:100%;border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #d0d7de;border-radius:8px;overflow:hidden;margin-bottom:24px}
+th{background:#f6f8fa;font-weight:600;text-align:left;padding:8px 12px;border-bottom:1px solid #d0d7de;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#656d76}
+td{padding:8px 12px;border-bottom:1px solid #eaeef2}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.badge.baseline{background:#ddf4ff;color:#0969da}
+.badge.keep{background:#dafbe1;color:#1a7f37}
+.badge.discard{background:#ffebe9;color:#cf222e}
+.eval-bar{display:flex;align-items:center;gap:8px;margin:4px 0}
+.eval-bar .bar{flex:1;height:8px;background:#eaeef2;border-radius:4px;overflow:hidden}
+.eval-bar .fill{height:100%;border-radius:4px;transition:width .3s}
+.eval-bar .fill.good{background:#1a7f37}
+.eval-bar .fill.mid{background:#bf8700}
+.eval-bar .fill.bad{background:#cf222e}
+.done-banner{background:#dafbe1;border:1px solid #1a7f37;border-radius:8px;padding:16px;text-align:center;font-weight:600;color:#1a7f37;margin-bottom:24px;display:none}
+</style>
+</head>
+<body>
+<h1>Autoresearch: Search Panel VS Code Fidelity</h1>
+<p class="subtitle">Optimizing search panel to match VS Code's native search UI</p>
+<div class="done-banner" id="doneBanner">Optimization Complete!</div>
+<div class="status-bar" id="statusBar">
+  <div class="stat blue"><div class="val" id="sExp">0</div><div class="lbl">Experiments</div></div>
+  <div class="stat green"><div class="val" id="sBase">0%</div><div class="lbl">Baseline</div></div>
+  <div class="stat green"><div class="val" id="sBest">0%</div><div class="lbl">Best Score</div></div>
+  <div class="stat"><div class="val" id="sStatus">...</div><div class="lbl">Status</div></div>
+</div>
+<div class="chart-wrap"><canvas id="chart" height="80"></canvas></div>
+<h2 style="font-size:14px;margin-bottom:8px">Experiments</h2>
+<table><thead><tr><th>#</th><th>Score</th><th>Pass Rate</th><th>Status</th><th>Description</th></tr></thead><tbody id="expBody"></tbody></table>
+<h2 style="font-size:14px;margin-bottom:8px">Eval Breakdown</h2>
+<div id="evalBreakdown"></div>
+<script>
+let chart;
+async function refresh(){
+  try{
+    const r=await fetch('results.json?t='+Date.now());
+    const d=await r.json();
+    document.getElementById('sExp').textContent=d.experiments.length;
+    document.getElementById('sBase').textContent=d.baseline_score.toFixed(0)+'%';
+    document.getElementById('sBest').textContent=d.best_score.toFixed(0)+'%';
+    document.getElementById('sStatus').textContent=d.status==='complete'?'Done':'Running #'+d.current_experiment;
+    if(d.status==='complete'){document.getElementById('doneBanner').style.display='block'}
+    const tbody=document.getElementById('expBody');
+    tbody.innerHTML=d.experiments.map(e=>`<tr><td>${e.id}</td><td>${e.score}/${e.max_score}</td><td>${e.pass_rate.toFixed(1)}%</td><td><span class="badge ${e.status}">${e.status}</span></td><td>${e.description}</td></tr>`).join('');
+    const eb=document.getElementById('evalBreakdown');
+    eb.innerHTML=d.eval_breakdown.map(e=>{
+      const pct=e.total?Math.round(e.pass_count/e.total*100):0;
+      const cls=pct>=80?'good':pct>=50?'mid':'bad';
+      return `<div class="eval-bar"><span style="width:320px;font-size:12px">${e.name}</span><div class="bar"><div class="fill ${cls}" style="width:${pct}%"></div></div><span style="font-size:11px;color:#656d76;width:60px;text-align:right">${e.pass_count}/${e.total} (${pct}%)</span></div>`;
+    }).join('');
+    const labels=d.experiments.map(e=>'#'+e.id);
+    const data=d.experiments.map(e=>e.pass_rate);
+    if(chart){chart.data.labels=labels;chart.data.datasets[0].data=data;chart.update()}
+    else{chart=new Chart(document.getElementById('chart'),{type:'line',data:{labels,datasets:[{label:'Pass Rate %',data,borderColor:'#0969da',backgroundColor:'rgba(9,105,218,.1)',fill:true,tension:.3,pointRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'}}}}})}
+  }catch(e){console.log('Waiting for data...')}
+}
+refresh();
+setInterval(refresh,10000);
+</script>
+</body>
+</html>

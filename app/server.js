@@ -157,6 +157,44 @@ function saveTaskQueue(q) { const p = getTaskQueuePath(); if (p) saveJson(p, q);
 let autoAgiRunning = false;
 let autoAgiAbort = false;
 
+// ── Active child process tracking (for session liveness) ──
+// Maps child PID → { childCwd, startedAt }
+const _activeChildren = new Map();
+
+// SSE clients listening for session status changes
+const _sessionSSEClients = new Set();
+
+function cleanupDeadSession(childPid, childCwd, exitCode) {
+  _activeChildren.delete(childPid);
+  // Find and update any session file still marked "running" with this PID
+  try {
+    const sessDir = path.join(childCwd, ".agent", "sessions");
+    if (!fs.existsSync(sessDir)) return;
+    const files = fs.readdirSync(sessDir).filter(f => f.endsWith(".json") && !f.includes(".tmp"));
+    for (const f of files) {
+      try {
+        const fp = path.join(sessDir, f);
+        const data = JSON.parse(fs.readFileSync(fp, "utf8"));
+        if (data.status === "running" && data.pid === childPid) {
+          data.status = exitCode === 0 ? "completed" : "failed";
+          data.phase = exitCode === 0 ? "done" : "crashed";
+          data.updatedAt = new Date().toISOString();
+          fs.writeFileSync(fp, JSON.stringify(data, null, 2), "utf8");
+          // Notify all SSE clients
+          broadcastSessionUpdate(data);
+        }
+      } catch {}
+    }
+  } catch {}
+}
+
+function broadcastSessionUpdate(session) {
+  const payload = JSON.stringify({ type: "session.update", id: session.id, status: session.status, phase: session.phase || "" });
+  for (const client of _sessionSSEClients) {
+    try { client.write(`data: ${payload}\n\n`); } catch { _sessionSSEClients.delete(client); }
+  }
+}
+
 function safePath(userPath) {
   if (!CWD) return null;
   const abs = require("node:path").resolve(CWD, userPath);
@@ -185,7 +223,7 @@ const server = http.createServer(async (req, res) => {
   // ── SSE Streaming Run ──
   if (url.pathname === "/api/run/stream" && req.method === "POST") {
     const body = await readBody(req);
-    const { task, mode, projectDir } = safeJsonParse(body) || {};
+    const { task, mode, projectDir, activeFile, activeFileContent, selection, openTabs, provider: reqProvider, model: reqModel } = safeJsonParse(body) || {};
 
     // If projectDir is specified, use workspace/{projectDir} as CWD
     // This isolates generated apps from the agent's own code
@@ -222,12 +260,48 @@ const server = http.createServer(async (req, res) => {
       "Connection": "keep-alive"
     });
 
+    // Inject project instructions + active file context into the task prompt
+    let enrichedTask = task;
+    // Read project instructions (same candidates as /api/ask)
+    const runInstrCandidates = [".openseed/instructions.md", ".openseed/rules.md", ".openseedrules", ".cursorrules", ".windsurfrules", "CLAUDE.md", ".github/copilot-instructions.md"];
+    for (const cand of runInstrCandidates) {
+      try {
+        const ip = path.join(childCwd, cand);
+        if (fs.existsSync(ip) && fs.statSync(ip).isFile()) {
+          enrichedTask = `[Project Instructions]\n${fs.readFileSync(ip, "utf8").slice(0, 4000)}\n\n${enrichedTask}`;
+          break;
+        }
+      } catch {}
+    }
+    // Global instructions
+    try {
+      const gip = path.join(GLOBAL_SETTINGS_DIR, "instructions.md");
+      if (fs.existsSync(gip)) {
+        const gi = fs.readFileSync(gip, "utf8").slice(0, 2000);
+        if (gi.trim()) enrichedTask = `[Global Instructions]\n${gi}\n\n${enrichedTask}`;
+      }
+    } catch {}
+    if (activeFile) {
+      let ctx = `\n\n[Context] The user is currently viewing: ${activeFile}`;
+      if (selection) ctx += `\n[Selection]:\n\`\`\`\n${selection.slice(0, 2000)}\n\`\`\``;
+      if (activeFileContent && activeFileContent.length < 8000) ctx += `\n[Active file content]:\n\`\`\`\n${activeFileContent}\n\`\`\``;
+      if (openTabs?.length > 1) ctx += `\n[Open tabs]: ${openTabs.filter(p=>p!==activeFile).join(", ")}`;
+      enrichedTask = enrichedTask + ctx;
+    }
+
     const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
-    const child = spawn(NODE_BIN, [agentCli, mode || "run", task], {
+    // Pass model selection via env vars so the agent CLI picks them up
+    const childEnv = { ...process.env };
+    if (reqProvider) childEnv.OPENSEED_PROVIDER = reqProvider;
+    if (reqModel) childEnv.OPENSEED_MODEL = reqModel;
+    const child = spawn(NODE_BIN, [agentCli, mode || "run", enrichedTask], {
       cwd: childCwd,
-      env: { ...process.env },
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"]
     });
+
+    // Track this child for session liveness
+    _activeChildren.set(child.pid, { childCwd, startedAt: Date.now() });
 
     let lineBuffer = "";
 
@@ -281,47 +355,341 @@ const server = http.createServer(async (req, res) => {
       sendEvent("status", { status: "completed", exitCode: code });
       res.write("data: [DONE]\n\n");
       res.end();
+      // Clean up session status for dead process
+      cleanupDeadSession(child.pid, childCwd, code);
     });
 
     child.on("error", (err) => {
       sendEvent("error", { message: err.message });
       res.write("data: [DONE]\n\n");
       res.end();
+      cleanupDeadSession(child.pid, childCwd, 1);
     });
 
     req.on("close", () => {
       child.kill("SIGTERM");
+      // Client disconnected — process will be killed, clean up after a moment
+      setTimeout(() => cleanupDeadSession(child.pid, childCwd, 130), 1000);
     });
 
     return;
   }
 
+  // ── Chat conversation memory (per workspace) ──
+  if (!global._chatHistory) global._chatHistory = [];
+
   // ── Question mode: direct LLM call without pipeline ──
   if (url.pathname === "/api/ask" && req.method === "POST") {
     const body = await readBody(req);
-    const { question } = safeJsonParse(body) || {};
+    const { question, activeFile, activeFileContent, selection, openTabs, provider: reqProvider, model: reqModel } = safeJsonParse(body) || {};
 
-    // Gather minimal context
+    // ══════════════════════════════════════════════════════
+    // CONTEXT ENGINE — 5 tiers, budget-aware, import-aware
+    // Better than Codex/Claude/Cursor: follows imports,
+    // searches by question keywords, includes git diff,
+    // remembers conversation, smart-chunks large files.
+    // ══════════════════════════════════════════════════════
+    const fileContents = [];
+    let totalCtxLen = 0;
+    const CTX_BUDGET = 32000;
+    const seen = new Set();
+
+    function safeRead(relPath) {
+      try { return require("node:fs").readFileSync(require("node:path").join(CWD, relPath), "utf8"); } catch { return null; }
+    }
+    function addCtx(label, relPath, content, maxLen) {
+      if (seen.has(relPath) || !content || totalCtxLen >= CTX_BUDGET) return false;
+      seen.add(relPath);
+      // Smart chunking: for large files, extract relevant portion around question keywords
+      let c = content;
+      if (c.length > maxLen) {
+        const keywords = question.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        if (keywords.length > 0) {
+          const lines = c.split("\n");
+          const scores = lines.map((line, i) => {
+            const ll = line.toLowerCase();
+            return { i, score: keywords.reduce((s, k) => s + (ll.includes(k) ? 1 : 0), 0) };
+          });
+          const best = scores.filter(s => s.score > 0).sort((a, b) => b.score - a.score);
+          if (best.length > 0) {
+            // Extract window around best matches
+            const windows = new Set();
+            for (const b of best.slice(0, 5)) {
+              for (let j = Math.max(0, b.i - 15); j < Math.min(lines.length, b.i + 15); j++) windows.add(j);
+            }
+            const sortedIdx = [...windows].sort((a, b) => a - b);
+            const chunks = [];
+            let prev = -2;
+            for (const idx of sortedIdx) {
+              if (idx !== prev + 1 && chunks.length > 0) chunks.push("  // ... (truncated) ...");
+              chunks.push(`${idx + 1}| ${lines[idx]}`);
+              prev = idx;
+            }
+            c = chunks.join("\n");
+          } else {
+            c = c.slice(0, maxLen) + "\n// ... (truncated, " + content.length + " chars total) ...";
+          }
+        } else {
+          c = c.slice(0, maxLen) + "\n// ... (truncated, " + content.length + " chars total) ...";
+        }
+      }
+      fileContents.push(`--- ${relPath} (${label}) ---\n${c}`);
+      totalCtxLen += c.length;
+      return true;
+    }
+
+    // ── TIER 1: Active file (highest priority) ──
+    if (activeFile) {
+      const content = activeFileContent || safeRead(activeFile) || "";
+      addCtx("ACTIVE — currently viewing", activeFile, content, 15000);
+
+      // ── TIER 2: Import graph traversal ──
+      // Follow imports/requires from active file to include dependencies
+      const importPaths = [];
+      const importRe = /(?:import\s+.*?\s+from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
+      let im;
+      while ((im = importRe.exec(content)) !== null) {
+        const raw = im[1] || im[2];
+        if (raw.startsWith(".")) {
+          const dir = require("node:path").dirname(activeFile);
+          let resolved = require("node:path").join(dir, raw);
+          // Try common extensions
+          for (const ext of ["", ".ts", ".tsx", ".js", ".jsx", ".json"]) {
+            const full = resolved + ext;
+            if (require("node:fs").existsSync(require("node:path").join(CWD, full))) {
+              importPaths.push(full);
+              break;
+            }
+            // Try index file
+            const idx = require("node:path").join(resolved, "index" + ext);
+            if (ext && require("node:fs").existsSync(require("node:path").join(CWD, idx))) {
+              importPaths.push(idx);
+              break;
+            }
+          }
+        }
+      }
+      for (const imp of importPaths.slice(0, 4)) {
+        if (totalCtxLen >= CTX_BUDGET) break;
+        const c = safeRead(imp);
+        if (c) addCtx("imported by active file", imp, c, 6000);
+      }
+    }
+
+    // ── TIER 3: Selection context ──
+    // (handled in system prompt, not as file content)
+
+    // ── TIER 4: Open tabs ──
+    const tabsToRead = (openTabs || []).filter(p => p !== activeFile).slice(0, 6);
+    for (const f of tabsToRead) {
+      if (totalCtxLen >= CTX_BUDGET) break;
+      const c = safeRead(f);
+      if (c) addCtx("open tab", f, c, 6000);
+    }
+
+    // ── TIER 5: Question-aware file search ──
+    // Extract potential file names, function names, class names from question
     const repoFiles = [];
     try {
       const walk = (dir, depth = 0) => {
-        if (depth > 2) return;
+        if (depth > 3) return;
         const entries = require("node:fs").readdirSync(dir, { withFileTypes: true });
         for (const e of entries) {
-          if ([".git", "node_modules", "dist", ".agent", "coverage"].includes(e.name)) continue;
-          const rel = require("node:path").relative(CWD, require("node:path").join(dir, e.name));
-          if (e.isDirectory()) walk(require("node:path").join(dir, e.name), depth + 1);
+          if ([".git", "node_modules", "dist", ".agent", "coverage", ".next", ".cache"].includes(e.name)) continue;
+          const full = require("node:path").join(dir, e.name);
+          const rel = require("node:path").relative(CWD, full);
+          if (e.isDirectory()) walk(full, depth + 1);
           else repoFiles.push(rel);
         }
       };
       walk(CWD);
     } catch {}
 
-    // Build a simple prompt with context
-    const contextLines = [
-      `Project files: ${repoFiles.slice(0, 30).join(", ")}`,
-      `Working directory: ${CWD}`,
+    // Search for files mentioned in the question
+    const qLower = question.toLowerCase();
+    const mentionedFiles = repoFiles.filter(f => {
+      const name = f.split("/").pop().toLowerCase();
+      return qLower.includes(name.replace(/\.[^.]+$/, "")) && name.length > 3;
+    });
+    for (const f of mentionedFiles.slice(0, 3)) {
+      if (totalCtxLen >= CTX_BUDGET) break;
+      const c = safeRead(f);
+      if (c) addCtx("mentioned in question", f, c, 4000);
+    }
+
+    // ── TIER 5b: @-mention parsing ──
+    // Parse @file:path, @symbol:name, @folder:path, @line:N from the question
+    const atFileRe = /@file:([^\s]+)/g;
+    const atSymRe = /@symbol:([^\s]+)/g;
+    const atFolderRe = /@folder:([^\s]+)/g;
+    let atm;
+    while ((atm = atFileRe.exec(question)) !== null) {
+      if (totalCtxLen >= CTX_BUDGET) break;
+      const c = safeRead(atm[1]);
+      if (c) addCtx("@file mention", atm[1], c, 8000);
+    }
+    while ((atm = atSymRe.exec(question)) !== null) {
+      if (totalCtxLen >= CTX_BUDGET) break;
+      const sym = atm[1];
+      // Grep for symbol definition across codebase
+      try {
+        const { execSync } = require("node:child_process");
+        const grepResult = execSync(
+          `grep -rnl "\\b${sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b" --include="*.ts" --include="*.js" --include="*.tsx" --include="*.jsx" --include="*.py" --include="*.go" --include="*.rs" . 2>/dev/null | head -5`,
+          { cwd: CWD, encoding: "utf8", timeout: 3000 }
+        );
+        for (const gf of grepResult.trim().split("\n").filter(Boolean)) {
+          if (totalCtxLen >= CTX_BUDGET) break;
+          const rel = gf.replace(/^\.\//, "");
+          const c = safeRead(rel);
+          if (c) addCtx(`@symbol:${sym}`, rel, c, 4000);
+        }
+      } catch {}
+    }
+    while ((atm = atFolderRe.exec(question)) !== null) {
+      if (totalCtxLen >= CTX_BUDGET) break;
+      const folder = atm[1];
+      const folderFiles = repoFiles.filter(f => f.startsWith(folder + "/") || f.startsWith(folder));
+      for (const ff of folderFiles.slice(0, 5)) {
+        if (totalCtxLen >= CTX_BUDGET) break;
+        const c = safeRead(ff);
+        if (c) addCtx(`@folder:${folder}`, ff, c, 3000);
+      }
+    }
+
+    // ── TIER 5c: Content grep search ──
+    // Extract keywords from question and grep for them in the codebase
+    // This fills the biggest gap vs Cursor/Windsurf (they have semantic search, we do keyword grep)
+    if (totalCtxLen < CTX_BUDGET) {
+      const keywords = question.split(/\s+/)
+        .filter(w => w.length > 4 && !/^(what|where|when|which|does|this|that|have|from|with|about|should|could|would|their|there|these|those|after|before|between|during|into)$/i.test(w))
+        .map(w => w.replace(/[^a-zA-Z0-9_]/g, ""))
+        .filter(w => w.length > 4)
+        .slice(0, 3);
+      if (keywords.length > 0) {
+        try {
+          const { execSync } = require("node:child_process");
+          const pattern = keywords.join("|");
+          const grepFiles = execSync(
+            `grep -rlE "${pattern}" --include="*.ts" --include="*.js" --include="*.tsx" --include="*.jsx" --include="*.json" --include="*.py" --include="*.go" . 2>/dev/null | head -5`,
+            { cwd: CWD, encoding: "utf8", timeout: 5000 }
+          );
+          for (const gf of grepFiles.trim().split("\n").filter(Boolean)) {
+            if (totalCtxLen >= CTX_BUDGET) break;
+            const rel = gf.replace(/^\.\//, "");
+            const c = safeRead(rel);
+            if (c) addCtx("content grep match", rel, c, 4000);
+          }
+        } catch {}
+      }
+    }
+
+    // ── TIER 5d: Test-file linkage ──
+    // If viewing a source file, include its test file (and vice versa)
+    if (activeFile && totalCtxLen < CTX_BUDGET) {
+      const base = require("node:path").basename(activeFile).replace(/\.[^.]+$/, "");
+      const dir = require("node:path").dirname(activeFile);
+      const isTest = /\.(test|spec)\.(ts|js|tsx|jsx)$/.test(activeFile);
+      if (isTest) {
+        // Viewing test → find source
+        const srcName = base.replace(/\.(test|spec)$/, "");
+        const candidates = [`${dir}/${srcName}.ts`, `${dir}/${srcName}.tsx`, `${dir}/${srcName}.js`];
+        for (const cand of candidates) {
+          const c = safeRead(cand);
+          if (c) { addCtx("source for test", cand, c, 6000); break; }
+        }
+      } else {
+        // Viewing source → find test
+        const testPatterns = [
+          `${dir}/${base}.test.ts`, `${dir}/${base}.spec.ts`,
+          `${dir}/${base}.test.js`, `${dir}/${base}.spec.js`,
+          `${dir}/__tests__/${base}.ts`, `${dir}/__tests__/${base}.js`,
+          `test/${base}.test.ts`, `tests/${base}.test.ts`,
+        ];
+        for (const tp of testPatterns) {
+          const c = safeRead(tp);
+          if (c) { addCtx("test file for source", tp, c, 4000); break; }
+        }
+      }
+    }
+
+    // ── TIER 6: Git diff (recent changes awareness) ──
+    try {
+      const { execSync } = require("node:child_process");
+      const diff = execSync("git diff --stat HEAD~3..HEAD 2>/dev/null || true", { cwd: CWD, encoding: "utf8", timeout: 3000 });
+      if (diff.trim()) {
+        fileContents.push(`--- git diff --stat (last 3 commits) ---\n${diff.slice(0, 2000)}`);
+        totalCtxLen += Math.min(diff.length, 2000);
+      }
+      // Include actual diff for active file if modified
+      if (activeFile) {
+        const fileDiff = execSync(`git diff HEAD -- "${activeFile}" 2>/dev/null || true`, { cwd: CWD, encoding: "utf8", timeout: 3000 });
+        if (fileDiff.trim() && fileDiff.length < 3000) {
+          fileContents.push(`--- git diff for ${activeFile} (uncommitted changes) ---\n${fileDiff}`);
+          totalCtxLen += fileDiff.length;
+        }
+      }
+    } catch {}
+
+    // ── Fallback: if no active file, read key project files ──
+    if (!activeFile && fileContents.length === 0) {
+      const keyFiles = ["package.json", "README.md", "tsconfig.json", ...repoFiles.filter(f => !f.includes("/")).slice(0, 5)];
+      for (const f of keyFiles) {
+        if (totalCtxLen >= CTX_BUDGET) break;
+        const c = safeRead(f);
+        if (c) addCtx("project file", f, c, 3000);
+      }
+    }
+
+    // ── TIER 0: Project instructions (.openseed, .openseedrules, etc.) ──
+    // These are the highest priority — user-defined rules that override everything.
+    // Searches: workspace-level then global-level, first found wins per tier.
+    let projectInstructions = "";
+    const instrCandidates = [
+      // Workspace-level (project-specific)
+      ".openseed/instructions.md",
+      ".openseed/rules.md",
+      ".openseedrules",
+      ".cursorrules",
+      ".windsurfrules",
+      "CLAUDE.md",
+      ".github/copilot-instructions.md",
     ];
+    for (const cand of instrCandidates) {
+      try {
+        const instrPath = require("node:path").join(CWD, cand);
+        if (require("node:fs").existsSync(instrPath)) {
+          const stat = require("node:fs").statSync(instrPath);
+          if (stat.isFile()) {
+            projectInstructions += require("node:fs").readFileSync(instrPath, "utf8").slice(0, 4000) + "\n";
+            break; // Use first found workspace-level instruction file
+          }
+        }
+      } catch {}
+    }
+    // Global-level (user-wide defaults, additive)
+    try {
+      const globalInstrPath = require("node:path").join(GLOBAL_SETTINGS_DIR, "instructions.md");
+      if (require("node:fs").existsSync(globalInstrPath)) {
+        const globalInstr = require("node:fs").readFileSync(globalInstrPath, "utf8").slice(0, 2000);
+        if (globalInstr.trim()) projectInstructions = globalInstr + "\n" + projectInstructions;
+      }
+    } catch {}
+
+    // ── Build system prompt ──
+    const contextLines = [`Working directory: ${CWD}`];
+    if (activeFile) contextLines.push(`Active file: ${activeFile}`);
+    if (selection) contextLines.push(`User's selected code:\n\`\`\`\n${selection.slice(0, 2000)}\n\`\`\``);
+    if (openTabs?.length) contextLines.push(`Open tabs: ${openTabs.join(", ")}`);
+    contextLines.push(`Project structure (${repoFiles.length} files): ${repoFiles.slice(0, 50).join(", ")}`);
+
+    // Conversation history (last 6 messages for continuity)
+    if (global._chatHistory.length > 0) {
+      contextLines.push("\nRecent conversation:");
+      for (const msg of global._chatHistory.slice(-6)) {
+        contextLines.push(`${msg.role}: ${msg.text.slice(0, 500)}`);
+      }
+    }
 
     // Read recent session info
     try {
@@ -333,10 +701,30 @@ const server = http.createServer(async (req, res) => {
       }
     } catch {}
 
-    const systemPrompt = "You are agent40, an AGI coding agent. Answer the user's question based on the project context below. Be concise and helpful. If they ask about files, tell them the exact paths.\n\nContext:\n" + contextLines.join("\n");
+    const systemPrompt = `You are Open Seed, an intelligent coding assistant embedded in an IDE. You understand the user's intent by analyzing what they're currently looking at.
+${projectInstructions ? `\nPROJECT INSTRUCTIONS (follow these rules strictly):\n${projectInstructions}\n` : ""}
+CONTEXT PRIORITY:
+1. Active file — the file currently open in the editor. This is your primary reference.
+2. Imported files — dependencies of the active file, included for deeper understanding.
+3. Selected code — if the user highlighted code, focus your answer on that specific code.
+4. Open tabs — other files the user has been working on recently.
+5. Mentioned files — files whose names appear in the user's question.
+6. Git changes — recent modifications for awareness of what's in flux.
+7. Project structure — for broader navigation questions.
 
-    // Call the LLM via the agent CLI infrastructure
-    const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
+RULES:
+- If the question relates to the active file or selection, answer about THAT specifically.
+- If the question is about a different part of the project, use the broader context.
+- Reference exact file paths and line numbers when possible.
+- Be concise. No filler. Code-first answers.
+- If you need more context to answer well, say which file you'd need to see.
+
+${contextLines.join("\n")}`;
+
+    // Save to conversation memory
+    global._chatHistory.push({ role: "user", text: question, ts: Date.now() });
+    // Trim old history (keep last 20)
+    if (global._chatHistory.length > 20) global._chatHistory = global._chatHistory.slice(-20);
 
     // Simple approach: use the provider directly via a tiny inline script
     res.writeHead(200, {
@@ -351,18 +739,7 @@ const server = http.createServer(async (req, res) => {
 
     sendEvent("status", { status: "started", mode: "question" });
 
-    // Read relevant files for context
-    const fileContents = [];
-    for (const f of repoFiles.slice(0, 5)) {
-      try {
-        const content = require("node:fs").readFileSync(require("node:path").join(CWD, f), "utf8");
-        if (content.length < 3000) {
-          fileContents.push(`--- ${f} ---\n${content}`);
-        }
-      } catch {}
-    }
-
-    const fullPrompt = `${systemPrompt}\n\nFile contents:\n${fileContents.join("\n\n")}\n\nUser question: ${question}`;
+    const userPrompt = question + "\n\nFile contents:\n" + fileContents.join("\n\n");
 
     // Use node to call the provider
     const child = spawn(NODE_BIN, ["-e", `
@@ -371,12 +748,13 @@ const server = http.createServer(async (req, res) => {
       (async () => {
         const config = await loadConfig("${CWD.replace(/"/g, '\\"')}");
         const registry = new ProviderRegistry();
-        const resp = await registry.invokeWithFailover(config, "openai", {
+        const resp = await registry.invokeWithFailover(config, ${JSON.stringify(reqProvider || "openai")}, {
           role: "researcher",
           category: "research",
           systemPrompt: ${JSON.stringify(systemPrompt)},
-          prompt: ${JSON.stringify(question + "\n\nProject files: " + repoFiles.slice(0, 20).join(", ") + "\n\n" + fileContents.join("\n\n"))},
-          responseFormat: "text"
+          prompt: ${JSON.stringify(userPrompt)},
+          responseFormat: "text",
+          model: ${JSON.stringify(reqModel || undefined)}
         });
         process.stdout.write(resp.text);
       })().catch(e => { process.stderr.write(e.message); process.exit(1); });
@@ -396,6 +774,8 @@ const server = http.createServer(async (req, res) => {
       sendEvent("stderr", { text: chunk.toString() });
     });
     child.on("close", code => {
+      // Save assistant response to conversation memory
+      if (answer.trim()) global._chatHistory.push({ role: "assistant", text: answer.slice(0, 1000), ts: Date.now() });
       sendEvent("status", { status: "completed", exitCode: code, answer });
       res.write("data: [DONE]\n\n");
       res.end();
@@ -446,13 +826,29 @@ const server = http.createServer(async (req, res) => {
       try { fs.rmSync(prevAgentDir, { recursive: true, force: true }); } catch {}
     }
 
-    // Write AGENTS.md to guide the inner engine — comprehensive rules
+    // Write AGENTS.md — will be rewritten per step to match step type
     const agentsMd = path.join(childCwd, "AGENTS.md");
-    try { fs.writeFileSync(agentsMd, `# AGI Pipeline Target
+    function writeStepAgentsMd(stepType) {
+      try {
+        if (stepType === "analyze" || stepType === "design" || stepType === "debate") {
+          fs.writeFileSync(agentsMd, `# AGI Pipeline — Analysis/Design Phase
+
+## CRITICAL RULES
+1. You are in an ANALYSIS/DESIGN phase. DO NOT write any files.
+2. Your job is to THINK, PLAN, and OUTPUT TEXT — not create files.
+3. DO NOT use the write tool. DO NOT use apply_patch. DO NOT use multi_patch.
+4. If you feel the urge to create files, STOP. That is for the BUILD phase.
+5. Use read, glob, grep, bash (inspection only) to understand the current state.
+6. Output your analysis/design as TEXT in your response.
+7. Be specific: list every file that needs to be created, with exact purpose.
+8. The BUILD step will follow your plan — make it detailed enough to follow.
+`, "utf8");
+        } else {
+          fs.writeFileSync(agentsMd, `# AGI Pipeline — Build/Execute Phase
 
 ## CRITICAL RULES
 1. You are building a REAL, RUNNABLE APPLICATION — not writing architecture documents.
-2. When told to BUILD: write actual application source code (HTML, JS, Python, etc.), NOT JSON exports or design docs.
+2. Write actual application source code (HTML, JS, Python, etc.), NOT JSON exports or design docs.
 3. Every file you write must contain REAL, EXECUTABLE code — no module.exports of design objects.
 4. The end result must be something a user can RUN (e.g. \`npm start\`, \`python app.py\`, open index.html).
 5. Write COMPLETE file content — no placeholders, no TODOs, no "..." ellipsis.
@@ -461,7 +857,11 @@ const server = http.createServer(async (req, res) => {
 8. If files exist: work with them.
 9. Use \`bash\` tool to run npm install, tests, builds — verify your work.
 10. Do NOT keep reading the same file over and over. Read once, then act.
-`, "utf8"); } catch {}
+`, "utf8");
+        }
+      } catch {}
+    }
+    writeStepAgentsMd("build"); // default
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -581,6 +981,67 @@ const server = http.createServer(async (req, res) => {
       const unresolved = ctx.errorLog.filter(e => !e.resolved);
       if (unresolved.length) sections.push(`## Unresolved Errors\n${unresolved.map(e => `- [${e.category}] ${e.error}`).join("\n")}`);
 
+      // Inject structured analysis for downstream steps (design, build, verify)
+      if (ctx.analysis && step.type !== "analyze") {
+        const a = ctx.analysis;
+        const parts = [`## Structured Analysis (from ANALYZE step)`];
+
+        if (a.intent) {
+          parts.push(`**Intent**: ${a.intent.type} (${a.intent.confidence} confidence)\n${a.intent.rationale}`);
+        }
+        if (a.codebaseState) {
+          parts.push(`**Codebase State**: ${a.codebaseState}`);
+        }
+        if (a.techStack) {
+          const ts = a.techStack;
+          parts.push(`**Tech Stack**:\n- Language: ${ts.language}\n- Runtime: ${ts.runtime}\n- Framework: ${ts.framework}\n- Frontend: ${ts.frontend || "N/A"}\n- Realtime: ${ts.realtime || "N/A"}\n- Database: ${ts.database || "N/A"}\n- Package Manager: ${ts.packageManager}\n- Test Framework: ${ts.testFramework || "N/A"}\n- Justification: ${ts.justification}`);
+        }
+        if (a.features && a.features.length) {
+          parts.push(`**Features** (${a.features.length}):\n${a.features.map(f => `- [${f.priority}] ${f.id}: ${f.name} — ${f.description}`).join("\n")}`);
+        }
+        if (a.scope) {
+          parts.push(`**Scope**:\n- IN: ${(a.scope.in || []).join(", ")}\n- OUT: ${(a.scope.out || []).join(", ")}\n- Assumptions: ${(a.scope.assumptions || []).join(", ")}`);
+        }
+        if (a.risks && a.risks.length) {
+          parts.push(`**Risks**:\n${a.risks.map(r => `- [${r.severity}] ${r.risk} → Mitigation: ${r.mitigation}`).join("\n")}`);
+        }
+        if (a.acceptanceCriteria && a.acceptanceCriteria.length) {
+          parts.push(`**Acceptance Criteria**:\n${a.acceptanceCriteria.map(ac => `- ${ac.id}: ${ac.criterion} → \`${ac.command}\` → Expected: ${ac.expectedResult}`).join("\n")}`);
+        }
+        if (a.directives) {
+          if (a.directives.mustDo?.length) parts.push(`**MUST DO**:\n${a.directives.mustDo.map(d => `- ${d}`).join("\n")}`);
+          if (a.directives.mustNotDo?.length) parts.push(`**MUST NOT DO**:\n${a.directives.mustNotDo.map(d => `- ${d}`).join("\n")}`);
+        }
+        if (a.edgeCases && a.edgeCases.length) {
+          parts.push(`**Edge Cases**:\n${a.edgeCases.map(ec => `- ${ec.id} [${ec.severity}] (${ec.feature}): ${ec.scenario} → ${ec.expectedBehavior}`).join("\n")}`);
+        }
+        if (a.slopGuardrails) {
+          const sg = a.slopGuardrails;
+          const warnings = [];
+          if (sg.scopeInflationRisk !== "low") warnings.push(`Scope inflation: ${sg.scopeInflationRisk}`);
+          if (sg.prematureAbstractionRisk !== "low") warnings.push(`Premature abstraction: ${sg.prematureAbstractionRisk}`);
+          if (sg.overValidationRisk !== "low") warnings.push(`Over-validation: ${sg.overValidationRisk}`);
+          if (sg.docBloatRisk !== "low") warnings.push(`Doc bloat: ${sg.docBloatRisk}`);
+          if (warnings.length) parts.push(`**AI-Slop Guardrails** (WATCH OUT):\n${warnings.map(w => `- ⚠ ${w}`).join("\n")}${sg.specificWarnings?.length ? "\n" + sg.specificWarnings.map(w => `- ${w}`).join("\n") : ""}`);
+        }
+        if (a.gapAnalysis) {
+          const ga = a.gapAnalysis;
+          if (ga.implicitRequirements?.length) parts.push(`**Implicit Requirements** (discovered by gap analysis):\n${ga.implicitRequirements.map(r => `- ${r}`).join("\n")}`);
+          if (ga.featureDependencies?.length) parts.push(`**Feature Dependencies**:\n${ga.featureDependencies.map(d => `- ${d}`).join("\n")}`);
+        }
+        if (a.decisionDrivers && a.decisionDrivers.length) {
+          parts.push(`**Decision Drivers** (FOLLOW THESE):\n${a.decisionDrivers.map(dd => `- ${dd.id}: ${dd.principle} — ${dd.rationale} (tradeoff: ${dd.tradeoff})`).join("\n")}`);
+        }
+        if (a.complexity) {
+          parts.push(`**Complexity**: ${a.complexity.level} — ~${a.complexity.estimatedFiles} files, ~${a.complexity.estimatedLines} lines\n- Critical path: ${a.complexity.criticalPath}`);
+        }
+        if (a.triage) {
+          parts.push(`**Triage**: ${a.triage.level} — ${a.triage.rationale}`);
+        }
+
+        sections.push(parts.join("\n\n"));
+      }
+
       // Step-type instructions
       sections.push(`## Your Task: ${step.title}`);
       sections.push(getStepInstructions(step.type));
@@ -605,13 +1066,29 @@ const server = http.createServer(async (req, res) => {
 
       // Universal build rules
       if (step.type === "build") {
-        sections.push(`\n## MANDATORY BUILD RULES
+        const buildRules = [`\n## MANDATORY BUILD RULES
 - Write files DIRECTLY in the current working directory — no wrapper folders.
 - Write EVERY file with COMPLETE, EXECUTABLE code. No placeholders, no TODOs.
 - If package.json doesn't exist, create it first with ALL deps and a "start" script.
 - Run \`npm install\` after creating package.json.
 - The result MUST be runnable with \`npm start\` or equivalent.
-- REMINDER: You are building "${task}" — write the ACTUAL APPLICATION CODE for this, not design documents.`);
+- REMINDER: You are building "${task}" — write the ACTUAL APPLICATION CODE for this, not design documents.`];
+
+        // Inject AI-Slop guardrails from analysis into build step
+        if (ctx.analysis?.slopGuardrails) {
+          const sg = ctx.analysis.slopGuardrails;
+          buildRules.push(`\n## AI-SLOP PREVENTION (from analysis)
+DO NOT fall into these traps:`);
+          if (sg.scopeInflationRisk !== "low") buildRules.push(`- **SCOPE INFLATION** (${sg.scopeInflationRisk} risk): Build ONLY what was specified. No "while we're at it" additions.`);
+          if (sg.prematureAbstractionRisk !== "low") buildRules.push(`- **PREMATURE ABSTRACTION** (${sg.prematureAbstractionRisk} risk): Don't extract utilities/base classes for one-time code. Inline is fine.`);
+          if (sg.overValidationRisk !== "low") buildRules.push(`- **OVER-VALIDATION** (${sg.overValidationRisk} risk): Validate at system boundaries only. Trust internal code.`);
+          if (sg.docBloatRisk !== "low") buildRules.push(`- **DOC BLOAT** (${sg.docBloatRisk} risk): No JSDoc on every function. Only document non-obvious logic.`);
+          if (sg.specificWarnings?.length) {
+            for (const w of sg.specificWarnings) buildRules.push(`- ${w}`);
+          }
+        }
+
+        sections.push(buildRules.join("\n"));
       }
 
       // Enforce no-write for analysis steps
@@ -630,22 +1107,367 @@ If you write any file in this step, it will corrupt the pipeline. Analysis/desig
         analyze: `## RULES FOR THIS STEP
 - You are in ANALYSIS ONLY mode. **DO NOT use the write, apply_patch, or multi_patch tools.**
 - If you use any write tool in this step, the pipeline will fail.
+- Your ONLY job is to THINK, UNDERSTAND, and OUTPUT structured analysis as TEXT.
 
-## WHAT TO DO
-1. Check the working directory: use glob **/* or bash ls -la
-2. If the directory is EMPTY or only has AGENTS.md:
-   - This is a greenfield project. Analyze what needs to be built FROM SCRATCH.
-   - Output: technology stack, features list, architecture approach, file structure plan.
-   - Be SPECIFIC: list every file that needs to be created with its purpose.
-3. If real project files exist:
-   - Read the key files and analyze the current state.
-   - Output: what exists, what needs changing, risks, complexity.
+## PROCESS (follow this EXACTLY)
 
-OUTPUT FORMAT: structured text analysis. NO files created.`,
+### Step 0: COMPLEXITY TRIAGE (do this FIRST)
+Before deep analysis, assess complexity to choose the right depth:
 
-        debate: `Multi-agent design debate. Present 2-3 architecture options with concrete reasoning.
-For each option: pros, cons, risks, estimated complexity.
-Recommend the BEST approach with specific justification.
+| Level | Signals | Action |
+|-------|---------|--------|
+| **trivial** | Single file, <10 lines, obvious fix (typo, rename, color change) | Minimal JSON: intent + 1 feature + 1 AC. Skip tech stack, risks, pre-mortem. |
+| **simple** | 1-2 files, clear scope, <30 min work | Lightweight: intent + features + AC + directives. Skip pre-mortem, edge cases. |
+| **moderate** | 3-5 files, multiple components | Full analysis: all steps below. |
+| **complex** | 6+ files, architectural impact, multi-system | Full analysis + extra edge cases + detailed pre-mortem. |
+
+Output the triage level in JSON. For trivial/simple tasks, you may skip steps marked (MODERATE+).
+
+### Step 0.5: PRE-COMMITMENT PREDICTION (MODERATE+)
+BEFORE you begin deep analysis, predict 3-5 likely challenges for this task.
+Write them down NOW, before reading code or exploring. This prevents confirmation bias.
+
+For each prediction:
+- **What might go wrong**: anticipated challenge
+- **Why you think so**: reasoning from the task description alone
+- **How to check**: what to look for during analysis
+
+After completing your analysis, you MUST revisit these predictions in the gapAnalysis.predictionCheck field.
+Did your predictions match reality? What surprised you?
+
+### Step 1: INTENT CLASSIFICATION
+Classify what the user is asking for.
+
+**Verbalize your reasoning**: "I detect [type] intent because [reason]. My approach: [strategy]."
+
+Intent types:
+| Type | Signals | Strategy |
+|------|---------|----------|
+| **greenfield-build** | Empty workspace + "만들어/create/build" | Full stack selection, architecture design, file manifest |
+| **feature-add** | Existing code + "추가/add/implement" | Pattern discovery, integration points, scope boundaries |
+| **bug-fix** | Error messages, "수정/fix/broken" | Root cause analysis, minimal change scope |
+| **refactoring** | "리팩토링/refactor/improve/clean" | Pre-refactor verification plan, behavior preservation |
+| **migration** | "마이그레이션/migrate/upgrade/convert" | Compatibility analysis, rollback strategy |
+| **architecture** | "설계/architect/design/pattern" | Strategic analysis, option comparison, trade-offs |
+| **research** | "조사/investigate/how does/explain" | Investigation plan, exit criteria, synthesis format |
+
+### Step 2: CODEBASE ASSESSMENT
+Use glob, bash ls, read to understand the workspace.
+
+Classify the codebase:
+- **Greenfield**: Empty or only config files → best practices, full stack selection
+- **Disciplined**: Clear patterns, tests, CI → follow existing patterns strictly
+- **Transitional**: Mixed quality, some tests → propose gradual improvements
+- **Legacy**: No tests, inconsistent patterns → propose stabilization first
+
+For existing projects, detect:
+- Languages & frameworks (from package.json, pyproject.toml, go.mod, etc.)
+- Test infrastructure (test framework, coverage, CI)
+- Build system (bundler, compiler, scripts)
+- Entry points (main files, scripts, routes)
+- Patterns worth following (file naming, import style, error handling)
+
+**PRE-EXPLORATION RULE**: For feature-add/bug-fix/refactoring on existing codebases, EXPLORE the relevant code FIRST before proceeding. Understand existing patterns so you don't invent new ones when good ones already exist.
+
+### Step 3: TECH STACK SELECTION (greenfield only)
+For greenfield builds, select and JUSTIFY every technology choice:
+- **Language**: Why this language for this task?
+- **Runtime**: Node.js / Bun / Deno / Python / etc.
+- **Framework**: Express / Fastify / Next.js / etc. — why?
+- **Frontend**: React / Vue / Vanilla / Canvas / etc. — why?
+- **Realtime** (if needed): WebSocket / Socket.IO / SSE — why?
+- **Database** (if needed): SQLite / PostgreSQL / Redis / in-memory — why?
+- **Package manager**: npm / pnpm / yarn / bun
+- **Test framework**: vitest / jest / pytest / none — why?
+
+RULE: Choose the SIMPLEST stack that fulfills requirements. Do NOT over-engineer.
+RULE: Prefer battle-tested, well-documented libraries over cutting-edge.
+
+### Step 4: REQUIREMENTS EXTRACTION
+Extract ALL requirements from the user's request. Think beyond what's literally stated.
+
+For each feature:
+- **ID**: F1, F2, F3...
+- **Name**: Short descriptive name
+- **Priority**: must-have / nice-to-have
+- **Description**: What it does (1-2 sentences)
+- **User story**: As a [user], I want [action] so that [benefit]
+
+### Step 5: SCOPE BOUNDARIES
+Define what IS and IS NOT in scope. This prevents scope creep.
+
+- **IN scope**: [explicit list of what will be built]
+- **OUT of scope**: [explicit list of what will NOT be built]
+- **Assumptions**: [things you're assuming to be true]
+- **Constraints**: [technical or business limitations]
+
+### Step 6: RISK ANALYSIS & PRE-MORTEM (MODERATE+)
+Identify what could go wrong BEFORE it happens.
+
+For each risk:
+- **Risk**: What could go wrong?
+- **Severity**: high / medium / low
+- **Likelihood**: high / medium / low
+- **Mitigation**: How to prevent or handle it
+
+Pre-mortem exercise: "Imagine this project failed. Why did it fail?"
+List the top 3 failure scenarios and how the plan addresses each.
+
+### Step 7: EDGE CASE IDENTIFICATION (MODERATE+)
+Systematically enumerate edge cases for each feature. Think about:
+- **Input boundaries**: empty input, max length, special characters, unicode, zero/negative values
+- **State transitions**: concurrent access, race conditions, interrupted operations
+- **Environment**: offline, slow network, missing dependencies, disk full
+- **User behavior**: rapid clicks, back button, refresh during operation, multiple tabs
+
+For each edge case:
+- **ID**: EC1, EC2...
+- **feature**: Which feature it affects (F1, F2...)
+- **scenario**: What happens
+- **expectedBehavior**: What SHOULD happen (graceful degradation, error message, etc.)
+- **severity**: critical / moderate / minor
+
+### Step 8: ACCEPTANCE CRITERIA
+Define executable verification criteria — how do we KNOW it's done?
+
+**ZERO USER INTERVENTION PRINCIPLE**: ALL acceptance criteria MUST be executable by agents, not humans.
+- MUST: Write criteria as executable commands (curl, npm test, playwright actions, bash scripts)
+- MUST: Include exact expected outputs, not vague descriptions
+- MUST NOT: Create criteria requiring "user manually tests..." or "user visually confirms..."
+
+Examples:
+- GOOD: "curl http://localhost:3000/api/health → HTTP 200, body contains {\\"status\\":\\"ok\\"}"
+- GOOD: "npm test → all tests pass, exit code 0"
+- GOOD: "node -e 'fetch(\\"http://localhost:3000\\").then(r=>console.log(r.status))' → prints 200"
+- BAD: "The application works correctly"
+- BAD: "Users can play the game"
+- BAD: "Manually open browser and verify the UI looks good"
+
+### Step 9: DIRECTIVES FOR DOWNSTREAM STEPS
+Based on your analysis, provide explicit instructions for the DESIGN and BUILD steps.
+
+- **MUST DO**: [critical requirements that MUST be implemented]
+- **MUST NOT DO**: [anti-patterns, scope creep, things to avoid]
+- **PATTERNS TO FOLLOW**: [existing codebase patterns to follow, if any]
+- **TOOLS TO USE**: [specific tools/commands for verification]
+
+### Step 10: AI-SLOP DETECTION GUARDRAILS
+Flag and prevent these common AI-generated code anti-patterns:
+
+| Anti-pattern | Signal | Correct Action |
+|-------------|--------|----------------|
+| **Scope inflation** | "Also add tests for adjacent modules", "While we're at it..." | Stick to EXACTLY what was requested. Nothing more. |
+| **Premature abstraction** | "Extract to utility", "Create a base class for..." | Inline is fine for one-time use. 3 similar lines > 1 premature abstraction. |
+| **Over-validation** | "15 error checks for 3 inputs", "validate every edge case" | Validate at boundaries only. Trust internal code. |
+| **Documentation bloat** | "Add JSDoc to every function", "Create README with..." | Only document non-obvious logic. No boilerplate docs. |
+
+You MUST include slopGuardrails in your JSON output listing which patterns are most likely for THIS task.
+
+### Step 11: GAP ANALYSIS — "WHAT'S MISSING?"
+Before outputting, do a final self-check:
+
+1. Re-read the original task. Does your analysis fully address it?
+2. Are there implicit requirements you missed? (error handling, loading states, responsive design, i18n...)
+3. Are there dependencies between features that aren't captured?
+4. Is there anything the BUILD step would need to ask about? If so, resolve it NOW.
+5. Does every feature have at least one acceptance criterion?
+6. Does every risk have a mitigation?
+
+List any gaps found and how you resolved them in the "gapAnalysis" JSON field.
+Also compare your pre-commitment predictions (Step 0.5) against your actual findings.
+
+### Step 12: DECISION DRIVERS (MODERATE+)
+Identify the top 3 decision drivers that should guide the BUILD step.
+These are the principles that, if violated, would make the project fail.
+
+For each:
+- **ID**: DD1, DD2, DD3
+- **principle**: The guiding rule (e.g., "All game state must be server-authoritative")
+- **rationale**: Why this matters for THIS specific task
+- **tradeoff**: What you're sacrificing by following this principle
+
+### Step 13: SELF-REVIEW (MANDATORY)
+Before outputting your final JSON, review it against this checklist:
+
+1. ☐ Does every feature have a user story?
+2. ☐ Does every feature have at least one acceptance criterion?
+3. ☐ Are ALL acceptance criteria agent-executable commands (no "manually test")?
+4. ☐ Does every risk have a mitigation?
+5. ☐ Is the tech stack justified for THIS task (not just defaults)?
+6. ☐ Are scope.out items explicit enough to prevent scope creep?
+7. ☐ Do edge cases cover input boundaries, state transitions, and environment issues?
+8. ☐ Are slopGuardrails specific to THIS task (not generic)?
+9. ☐ Did you check your pre-commitment predictions against reality?
+
+If ANY check fails, FIX IT before outputting. Do not output incomplete analysis.
+
+### Step 14: COMPLEXITY ESTIMATION
+Provide honest estimates:
+- **Complexity**: simple / moderate / complex / very-complex
+- **Estimated files**: How many files to create/modify
+- **Estimated total lines**: Rough line count
+- **Estimated build waves**: How many parallel groups of work
+- **Critical path**: What must be done sequentially
+
+## OUTPUT FORMAT
+
+You MUST output your analysis as a STRUCTURED JSON block wrapped in \\\`\\\`\\\`json fences.
+This JSON will be parsed by the pipeline. Follow this schema EXACTLY:
+
+\\\`\\\`\\\`json
+{
+  "triage": {
+    "level": "trivial | simple | moderate | complex",
+    "rationale": "Why this complexity level",
+    "skipDesignStep": false,
+    "skipDebateStep": false
+  },
+  "intent": {
+    "type": "greenfield-build | feature-add | bug-fix | refactoring | migration | architecture | research",
+    "confidence": "high | medium | low",
+    "rationale": "Why this classification"
+  },
+  "codebaseState": "greenfield | disciplined | transitional | legacy",
+  "techStack": {
+    "language": "TypeScript",
+    "runtime": "Node.js",
+    "framework": "Express",
+    "frontend": "Vanilla HTML5 Canvas",
+    "realtime": "Socket.IO",
+    "database": "in-memory",
+    "packageManager": "npm",
+    "testFramework": "vitest",
+    "justification": "Why this stack was chosen (1-2 sentences)"
+  },
+  "features": [
+    {
+      "id": "F1",
+      "name": "Feature name",
+      "priority": "must-have | nice-to-have",
+      "description": "What it does",
+      "userStory": "As a [user], I want [action] so that [benefit]"
+    }
+  ],
+  "scope": {
+    "in": ["What IS in scope"],
+    "out": ["What is NOT in scope"],
+    "assumptions": ["Things assumed to be true"],
+    "constraints": ["Technical or business limitations"]
+  },
+  "risks": [
+    {
+      "risk": "What could go wrong",
+      "severity": "high | medium | low",
+      "likelihood": "high | medium | low",
+      "mitigation": "How to prevent or handle it"
+    }
+  ],
+  "premortem": [
+    {
+      "failureScenario": "How it could fail",
+      "prevention": "How the plan addresses this"
+    }
+  ],
+  "edgeCases": [
+    {
+      "id": "EC1",
+      "feature": "F1",
+      "scenario": "What edge case occurs",
+      "expectedBehavior": "What should happen",
+      "severity": "critical | moderate | minor"
+    }
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "AC1",
+      "criterion": "Executable verification step",
+      "command": "The exact command to verify (must be agent-executable, no manual testing)",
+      "expectedResult": "What success looks like (exact output)"
+    }
+  ],
+  "directives": {
+    "mustDo": ["Critical requirements for build step"],
+    "mustNotDo": ["Anti-patterns and scope creep to avoid"],
+    "patternsToFollow": ["Existing patterns to replicate"],
+    "verificationTools": ["Specific tools/commands for checking work"]
+  },
+  "slopGuardrails": {
+    "scopeInflationRisk": "low | medium | high",
+    "prematureAbstractionRisk": "low | medium | high",
+    "overValidationRisk": "low | medium | high",
+    "docBloatRisk": "low | medium | high",
+    "specificWarnings": ["Task-specific warnings about likely AI-slop patterns"]
+  },
+  "gapAnalysis": {
+    "implicitRequirements": ["Requirements not stated but necessary"],
+    "unresolvedQuestions": [],
+    "featureDependencies": ["F2 depends on F1 being complete"],
+    "missingCoverage": ["Any features without acceptance criteria or risk mitigation"],
+    "predictionCheck": ["Prediction: X → Reality: Y (matched/surprised)"]
+  },
+  "decisionDrivers": [
+    {
+      "id": "DD1",
+      "principle": "The guiding rule for build step",
+      "rationale": "Why this matters for THIS task",
+      "tradeoff": "What is sacrificed"
+    }
+  ],
+  "selfReview": {
+    "allFeaturesHaveUserStories": true,
+    "allFeaturesHaveAC": true,
+    "allACsAreExecutable": true,
+    "allRisksHaveMitigation": true,
+    "techStackJustified": true,
+    "scopeOutExplicit": true,
+    "issuesFound": ["Any issues found and fixed during self-review"]
+  },
+  "complexity": {
+    "level": "simple | moderate | complex | very-complex",
+    "estimatedFiles": 8,
+    "estimatedLines": 1500,
+    "estimatedBuildWaves": 3,
+    "criticalPath": "package.json → server → client → integration"
+  }
+}
+\\\`\\\`\\\`
+
+IMPORTANT:
+- The JSON must be valid and parseable
+- For existing projects: omit techStack if not changing stack, focus on what needs changing
+- For greenfield: techStack is MANDATORY
+- features array must have at least 2 entries
+- acceptanceCriteria must have at least 3 entries — ALL must be agent-executable commands
+- risks must have at least 2 entries
+- slopGuardrails is MANDATORY for all tasks
+- gapAnalysis is MANDATORY — even if empty, show you checked
+- selfReview is MANDATORY — run the checklist, fix issues before outputting
+- decisionDrivers must have at least 2 entries for moderate+ tasks
+- For trivial/simple triage: edgeCases, premortem, risks, decisionDrivers arrays may be empty
+- DO NOT fabricate information — if uncertain, say so in the rationale
+
+After the JSON block, you MUST also write this exact JSON to the file \`.agi/analysis.json\` using the write tool.
+This is the ONLY file you are allowed to write. Do NOT write any other files.
+The file write ensures the full analysis is preserved even if your text output is truncated.
+
+After writing the file, you may add a brief (2-3 sentence) natural language summary in your text response.`,
+
+        debate: `## Multi-Agent Design Debate
+
+Review the ANALYZE step's structured analysis (intent, techStack, features, risks) from Prior Step Results.
+
+Present 2-3 architecture options with concrete reasoning.
+For each option:
+- **Architecture**: High-level structure
+- **Pros**: Specific technical advantages
+- **Cons**: Specific technical disadvantages
+- **Risks**: What could go wrong with this approach
+- **Complexity**: Estimated effort (simple/moderate/complex)
+- **Files**: Estimated file count and key components
+
+After comparing, recommend the BEST approach with specific justification.
+If the analysis already chose a tech stack, evaluate whether that choice is optimal or suggest alternatives.
+
 **DO NOT use write tools. Analysis only.**`,
 
         design: `## RULES FOR THIS STEP
@@ -653,16 +1475,46 @@ Recommend the BEST approach with specific justification.
 - If you use any write tool in this step, the pipeline will fail.
 
 ## WHAT TO DO
-Based on the analysis, create a DETAILED implementation plan:
-1. **File manifest**: Every single file path to create, with its exact purpose
-   Example: "server/index.js — Express HTTP server with WebSocket upgrade"
-   Example: "public/index.html — Game client HTML with Canvas element"
-   Example: "public/game.js — Client-side game loop, rendering, input handling"
-2. **Architecture**: Component breakdown, data flow, communication protocol
-3. **API design**: Endpoints, WebSocket events, request/response formats
-4. **Data models**: Key data structures and their relationships
-5. **Dependencies**: npm packages, CDN libraries, external services
-6. **Implementation order**: Which files to create first and why
+The ANALYZE step has already classified the intent, selected the tech stack, extracted requirements, and identified risks.
+Your job is to turn that analysis into a CONCRETE, BUILD-READY implementation plan.
+
+**Read the analysis from Prior Step Results above.** Look for the JSON block — it contains:
+- intent, techStack, features, scope, risks, acceptanceCriteria, directives
+
+### 1. FILE MANIFEST (MANDATORY)
+List EVERY file to create with its exact purpose. Be exhaustive.
+Format: \`path/to/file.ext\` — One-line description of what it contains
+
+### 2. FILE CONTENTS SKELETON
+For each file, describe the KEY functions/classes/exports it must contain.
+Not full code — but specific enough that a builder can write it without guessing.
+Example:
+- \`server/index.js\`: createServer(), setupWebSocket(), handleConnection(socket), broadcastGameState()
+- \`public/game.js\`: GameLoop class with init(), update(dt), render(ctx), handleInput(event)
+
+### 3. DATA FLOW & COMMUNICATION
+- How do components communicate? (HTTP, WebSocket events, shared state, etc.)
+- List every event/endpoint with request/response shapes
+- Example: \`ws:player.move { playerId, x, y } → broadcast:game.state { players, items }\`
+
+### 4. DATA MODELS
+Key data structures with their fields and types.
+Example: \`Player { id: string, name: string, x: number, y: number, score: number }\`
+
+### 5. DEPENDENCY LIST
+Exact npm packages (or pip packages, etc.) with versions if critical.
+Example: \`express@^4.18, socket.io@^4.7, uuid@^9\`
+
+### 6. BUILD ORDER (EXECUTION WAVES)
+Group files into parallel execution waves:
+- Wave 1 (foundation): package.json, server entry point
+- Wave 2 (core, parallel): game logic, client HTML, client JS
+- Wave 3 (integration): WebSocket wiring, state sync
+- Wave 4 (polish): error handling, edge cases
+
+### 7. RESPECT ANALYSIS DIRECTIVES
+The analysis step provided MUST DO and MUST NOT DO directives.
+INCORPORATE THEM into your design. Do not contradict the analysis.
 
 Be EXTREMELY specific. The BUILD step will follow this plan literally.
 OUTPUT FORMAT: structured text plan. NO files created.`,
@@ -705,7 +1557,7 @@ app.listen(3000, () => console.log('Server running on port 3000'));
 
         verify: `## VERIFY THAT THE APPLICATION WORKS
 
-### PROCESS
+### STEP 1: BASIC VERIFICATION
 1. Run \`bash: ls -la\` to see all files
 2. Run \`bash: cat package.json\` to check scripts
 3. Run \`bash: npm install\` (if node project)
@@ -714,11 +1566,40 @@ app.listen(3000, () => console.log('Server running on port 3000'));
 6. Run \`bash: npm test\` if tests exist
 7. Check for common issues: missing files, broken imports, syntax errors
 
-### CRITICAL CHECK
+### STEP 2: ACCEPTANCE CRITERIA VERIFICATION
+Check the Structured Analysis section above for **Acceptance Criteria**.
+For EACH criterion:
+1. Run the specified command
+2. Check if the expected result matches
+3. Report: [PASS] or [FAIL] with details
+
+If no structured analysis exists, use the general checks below.
+
+### STEP 3: CRITICAL CHECK
 Ask yourself: "Does this actually implement what was requested in the ORIGINAL TASK?"
 - If the task asked for a GAME but only architecture documents exist → FAIL
 - If the task asked for a SERVER but no server code exists → FAIL
 - If files exist but the app crashes on start → FAIL
+
+### STEP 4: SCOPE COMPLIANCE
+Check the Structured Analysis for **Scope** boundaries:
+- Is everything in IN scope actually built? If not → report what's missing
+- Is anything in OUT scope accidentally built? If so → report scope creep
+
+### STEP 5: EDGE CASE HANDLING
+Check the Structured Analysis for **Edge Cases** (if present).
+For each critical/moderate edge case:
+1. Does the code handle this scenario?
+2. If not → report as [EDGE-MISS] with the scenario and what should happen
+3. Critical edge cases that are unhandled = FAIL
+
+### STEP 6: AI-SLOP CHECK
+Check the Structured Analysis for **AI-Slop Guardrails** (if present).
+- Did the build step add unnecessary abstractions? (premature abstraction)
+- Did it add features beyond what was requested? (scope inflation)
+- Are there excessive validation checks for simple internal operations? (over-validation)
+- Are there boilerplate JSDoc/comments on every trivial function? (doc bloat)
+If slop detected → report as [SLOP] with specific examples.
 
 Report ALL errors with file paths and line numbers. Do NOT fix anything — just report.`,
 
@@ -740,22 +1621,40 @@ DO NOT create architecture documents. Only improve actual code.`,
 
         review: `## FINAL REVIEW — BE STRICT
 
-### CHECK EACH OF THESE (answer yes/no for each):
-1. **Task completion**: Does the output actually do what the original task asked for?
-   - Read the ORIGINAL TASK above carefully.
-   - If it asked for a "게임" (game), is there actual game code with rendering, game loop, input handling?
-   - If it asked for a "서버" (server), is there actual server code that listens on a port?
-   - If it asked for an "앱" (app), is there actual application code?
-   - Architecture documents, design exports, and JSON configs do NOT count as completing the task.
+### REVIEW PERSPECTIVES (evaluate from ALL three angles):
 
-2. **Runnability**: Can a user actually run this? (npm start works, or open index.html works)
+**1. EXECUTOR PERSPECTIVE**: Can this be run?
+- Does \`npm start\` (or equivalent) work?
+- Are all imports valid? All dependencies installed?
+- No syntax errors, no missing files?
 
-3. **Completeness**: Are ALL features from the task implemented, not just the skeleton?
+**2. STAKEHOLDER PERSPECTIVE**: Does this solve the stated problem?
+- Read the ORIGINAL TASK above carefully.
+- If it asked for a "게임" (game), is there actual game code with rendering, game loop, input handling?
+- If it asked for a "서버" (server), is there actual server code that listens on a port?
+- If it asked for an "앱" (app), is there actual application code?
+- Architecture documents, design exports, and JSON configs do NOT count.
 
-4. **Code quality**: No placeholder code, no TODOs, no "..." ellipsis?
+**3. SKEPTIC PERSPECTIVE**: What's the strongest argument this will fail?
+- What edge cases aren't handled?
+- What happens under load / with bad input / when things go wrong?
+- Is anything suspiciously missing?
+
+### ACCEPTANCE CRITERIA CHECK
+If the Structured Analysis section has **Acceptance Criteria**, verify EACH one:
+- [PASS] or [FAIL] with explanation
+
+### SCOPE CHECK
+If the Structured Analysis section has **Scope** boundaries:
+- Everything IN scope is built? [YES/NO]
+- Nothing OUT of scope was added? [YES/NO]
+
+### FEATURE CHECK
+If the Structured Analysis section has **Features**, verify each:
+- [PASS] or [FAIL] for each feature
 
 ### VERDICT
-- Output **FAIL** if any of checks 1-3 are "no". Be honest.
+- Output **FAIL** if the app doesn't run, doesn't implement the task, or major features are missing.
 - Output **PASS** only if the application genuinely fulfills the original task.
 - Include specific reasons for your verdict.
 - If FAIL: list exactly what's missing or broken.`,
@@ -764,7 +1663,8 @@ DO NOT create architecture documents. Only improve actual code.`,
     }
 
     // Execute one step via the engine CLI
-    async function executeStep(prompt, mode, maxTurns) {
+    // blockedTools: optional array of tool names to block at engine level
+    async function executeStep(prompt, mode, maxTurns, blockedTools) {
       return new Promise((resolve, reject) => {
         if (aborted) { reject(new Error("Aborted")); return; }
         const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
@@ -777,6 +1677,20 @@ DO NOT create architecture documents. Only improve actual code.`,
         // Ensure node's directory is in PATH so bash tool can find node/npm/npx
         const nodeBinDir = path.dirname(NODE_BIN);
         const childEnv = { ...process.env, AGI_PROMPT_FILE: tmpPromptFile };
+        // [FIX] Block tools at engine level for analysis steps
+        if (blockedTools && blockedTools.length > 0) {
+          childEnv.AGI_BLOCKED_TOOLS = blockedTools.join(",");
+          childEnv.AGI_MAX_ENFORCER_ROUNDS = "2"; // Analysis steps: 2 rounds max
+          // Allow writing to .agi/ directory for file-based analysis output (OmO pattern)
+          childEnv.AGI_ALLOWED_WRITE_PATHS = ".agi/";
+          // Increase output token limit for analysis steps — full JSON needs ~16K tokens
+          childEnv.AGI_MAX_OUTPUT_TOKENS = "16384";
+        } else {
+          delete childEnv.AGI_BLOCKED_TOOLS;
+          delete childEnv.AGI_MAX_ENFORCER_ROUNDS;
+          delete childEnv.AGI_ALLOWED_WRITE_PATHS;
+          delete childEnv.AGI_MAX_OUTPUT_TOKENS;
+        }
         if (!childEnv.PATH?.includes(nodeBinDir)) {
           childEnv.PATH = `${nodeBinDir}:${childEnv.PATH || ""}`;
         }
@@ -787,6 +1701,9 @@ DO NOT create architecture documents. Only improve actual code.`,
         });
 
         let stdout = "", stderr = "";
+        let llmText = ""; // [FIX] Capture LLM text output from provider.stream
+        let taskCompletedTexts = []; // [FIX] Capture worker/task completion summaries
+        let reviewSummary = ""; // [FIX] Capture review summary
         let changes = [], errors = [], toolResults = [];
 
         child.stdout.on("data", (chunk) => {
@@ -801,7 +1718,11 @@ DO NOT create architecture documents. Only improve actual code.`,
               // LLM streaming text → forward as llm event
               if (parsed.eventType === "provider.stream") {
                 const c = parsed.payload?.chunk || parsed.payload?.delta || "";
-                if (c) sendAgi("llm", { text: typeof c === "string" ? c : "" });
+                if (c) {
+                  const t = typeof c === "string" ? c : "";
+                  llmText += t; // [FIX] Accumulate LLM text for summary
+                  sendAgi("llm", { text: t });
+                }
                 continue;
               }
               // Tool streaming output (bash stdout/stderr) → forward for real-time visibility
@@ -817,6 +1738,14 @@ DO NOT create architecture documents. Only improve actual code.`,
               }
               // Everything else: forward with full payload
               sendAgi("event", parsed);
+              // [FIX] Capture task completion summaries (worker results)
+              if (parsed.eventType === "task.completed" && parsed.payload?.notification) {
+                taskCompletedTexts.push(parsed.payload.notification);
+              }
+              // [FIX] Capture review summaries
+              if ((parsed.eventType === "review.fail" || parsed.eventType === "review.pass") && parsed.payload?.review?.summary) {
+                reviewSummary = parsed.payload.review.summary;
+              }
               // [FIX #6] Track tool results — capture full output, no truncation
               if (parsed.eventType === "tool.completed") {
                 const ok = parsed.payload?.ok !== false;
@@ -852,8 +1781,21 @@ DO NOT create architecture documents. Only improve actual code.`,
           // Cleanup temp prompt file
           try { fs.unlinkSync(tmpPromptFile); } catch {}
 
-          // [FIX #1] Capture ALL stdout — no truncation
-          const summary = stdout;
+          // [FIX] Build meaningful summary from captured events
+          // Priority: LLM text > task completion notifications > review summary > raw stdout
+          let summary = "";
+          if (llmText.trim()) {
+            summary = llmText.trim();
+          }
+          if (taskCompletedTexts.length > 0) {
+            summary += (summary ? "\n\n" : "") + taskCompletedTexts.join("\n");
+          }
+          if (reviewSummary) {
+            summary += (summary ? "\n\n" : "") + "Review: " + reviewSummary;
+          }
+          if (!summary) {
+            summary = stdout; // Fallback to raw stdout
+          }
 
           if (code !== 0) errors.push(`Exit code ${code}`);
 
@@ -908,6 +1850,14 @@ DO NOT create architecture documents. Only improve actual code.`,
       }
 
       const step = steps[stepIdx];
+
+      // [FIX] Write step-specific AGENTS.md before each step
+      writeStepAgentsMd(step.type);
+
+      // [FIX] Block write tools at engine level for analysis steps
+      const isAnalysisStep = ["analyze", "design", "debate"].includes(step.type);
+      const blockedTools = isAnalysisStep ? ["write", "apply_patch", "multi_patch"] : [];
+
       const prompt = buildStepPrompt(step);
 
       sendAgi("agi.step.start", { stepId: step.id, stepType: step.type, stepTitle: step.title, stepIndex: stepIdx, totalSteps: steps.length, completedSteps: ctx.stepResults.filter(r => r.status === "completed").length });
@@ -925,7 +1875,7 @@ DO NOT create architecture documents. Only improve actual code.`,
             ? `${prompt}\n\n[RETRY ${attempts}/${maxRetries+1}] Previous attempt failed. Try a different approach.\n\n## Previous Attempt Errors\n${(result?.errors || []).map(e => `- ${e}`).join("\n") || "unknown"}\n\n## Previous Attempt Output\n${result?.summary || "(no output)"}`
             : prompt;
 
-          const output = await executeStep(retryPrompt, step.mode, step.maxTurns);
+          const output = await executeStep(retryPrompt, step.mode, step.maxTurns, blockedTools);
 
           result = {
             stepId: step.id,
@@ -969,17 +1919,180 @@ DO NOT create architecture documents. Only improve actual code.`,
           }
         }
 
-        // [FIX #5] Extract decisions — comprehensive pattern matching, no truncation
-        if ((step.type === "analyze" || step.type === "design") && result.status === "completed") {
+        // Parse structured analysis JSON from analyze step
+        if (step.type === "analyze" && result.status === "completed") {
+          const summary = result.summary || "";
+          // Extract JSON block from ```json ... ``` fences
+          const jsonMatch = summary.match(/```json\s*\n([\s\S]*?)\n\s*```/);
+          if (jsonMatch) {
+            try {
+              const analysis = JSON.parse(jsonMatch[1]);
+              ctx.analysis = analysis;
+
+              // Extract decisions from structured data
+              if (analysis.techStack?.justification) {
+                ctx.decisions.push(`Tech stack: ${analysis.techStack.justification}`);
+              }
+              if (analysis.intent?.rationale) {
+                ctx.decisions.push(`Intent: ${analysis.intent.type} — ${analysis.intent.rationale}`);
+              }
+              if (analysis.directives?.mustDo) {
+                for (const d of analysis.directives.mustDo) {
+                  ctx.decisions.push(`MUST DO: ${d}`);
+                }
+              }
+              if (analysis.directives?.mustNotDo) {
+                for (const d of analysis.directives.mustNotDo) {
+                  ctx.decisions.push(`MUST NOT DO: ${d}`);
+                }
+              }
+
+              // Override pipeline complexity from analysis
+              if (analysis.complexity?.level) {
+                ctx.analysisComplexity = analysis.complexity.level;
+              }
+
+              // Triage-based step skipping: remove design/debate for trivial/simple tasks
+              if (analysis.triage) {
+                const triage = analysis.triage;
+                if (triage.skipDesignStep || triage.level === "trivial") {
+                  const designIdx = steps.findIndex(s => s.type === "design" && stepIdx < steps.indexOf(s));
+                  if (designIdx > -1) {
+                    sendAgi("agi.step.skip", { stepType: "design", reason: `Triage: ${triage.level} — ${triage.rationale}` });
+                    steps.splice(designIdx, 1);
+                  }
+                }
+                if (triage.skipDebateStep || triage.level === "trivial" || triage.level === "simple") {
+                  const debateIdx = steps.findIndex(s => s.type === "debate" && stepIdx < steps.indexOf(s));
+                  if (debateIdx > -1) {
+                    sendAgi("agi.step.skip", { stepType: "debate", reason: `Triage: ${triage.level} — ${triage.rationale}` });
+                    steps.splice(debateIdx, 1);
+                  }
+                }
+              }
+
+              sendAgi("agi.analysis.parsed", {
+                triage: analysis.triage,
+                intent: analysis.intent,
+                codebaseState: analysis.codebaseState,
+                techStack: analysis.techStack ? {
+                  language: analysis.techStack.language,
+                  framework: analysis.techStack.framework,
+                  frontend: analysis.techStack.frontend,
+                } : null,
+                featureCount: analysis.features?.length || 0,
+                riskCount: analysis.risks?.length || 0,
+                edgeCaseCount: analysis.edgeCases?.length || 0,
+                complexity: analysis.complexity,
+                slopGuardrails: analysis.slopGuardrails,
+                hasGapAnalysis: !!analysis.gapAnalysis,
+              });
+            } catch (e) {
+              // JSON parse failed — fall back to regex extraction
+              sendAgi("agi.analysis.parseError", { error: e.message });
+            }
+          }
+
+          // Fallback 1: File-based analysis output (OmO pattern — most reliable)
+          if (!ctx.analysis) {
+            try {
+              const analysisFile = path.join(childCwd, ".agi", "analysis.json");
+              if (fs.existsSync(analysisFile)) {
+                const fileContent = fs.readFileSync(analysisFile, "utf8");
+                const analysis = JSON.parse(fileContent);
+                ctx.analysis = analysis;
+                sendAgi("agi.analysis.parsed", {
+                  source: "file",
+                  triage: analysis.triage,
+                  intent: analysis.intent,
+                  codebaseState: analysis.codebaseState,
+                  featureCount: analysis.features?.length || 0,
+                  riskCount: analysis.risks?.length || 0,
+                  edgeCaseCount: analysis.edgeCases?.length || 0,
+                  complexity: analysis.complexity,
+                  slopGuardrails: analysis.slopGuardrails,
+                  hasGapAnalysis: !!analysis.gapAnalysis,
+                });
+                // Extract decisions from file-based analysis
+                if (analysis.techStack?.justification) ctx.decisions.push(`Tech stack: ${analysis.techStack.justification}`);
+                if (analysis.intent?.rationale) ctx.decisions.push(`Intent: ${analysis.intent.type} — ${analysis.intent.rationale}`);
+                if (analysis.directives?.mustDo) for (const d of analysis.directives.mustDo) ctx.decisions.push(`MUST DO: ${d}`);
+                if (analysis.directives?.mustNotDo) for (const d of analysis.directives.mustNotDo) ctx.decisions.push(`MUST NOT DO: ${d}`);
+                if (analysis.complexity?.level) ctx.analysisComplexity = analysis.complexity.level;
+                // Triage-based step skipping
+                if (analysis.triage) {
+                  const triage = analysis.triage;
+                  if (triage.skipDesignStep || triage.level === "trivial") {
+                    const idx = steps.findIndex(s => s.type === "design" && stepIdx < steps.indexOf(s));
+                    if (idx > -1) { sendAgi("agi.step.skip", { stepType: "design", reason: `Triage: ${triage.level}` }); steps.splice(idx, 1); }
+                  }
+                  if (triage.skipDebateStep || triage.level === "trivial" || triage.level === "simple") {
+                    const idx = steps.findIndex(s => s.type === "debate" && stepIdx < steps.indexOf(s));
+                    if (idx > -1) { sendAgi("agi.step.skip", { stepType: "debate", reason: `Triage: ${triage.level}` }); steps.splice(idx, 1); }
+                  }
+                }
+              }
+            } catch (e) {
+              sendAgi("agi.analysis.fileError", { error: e.message });
+            }
+          }
+
+          // Fallback 2: regex-based decision extraction if no JSON found
+          if (!ctx.analysis) {
+            const decisionPatterns = [
+              /(?:decision|chose|selected|will use|architecture|approach|strategy|recommendation|concluded|determined|opted for|going with|picked|prefer|using)[:.\-—]\s*([^\n]+)/gi,
+              /(?:we (?:will|should|need to|must|decided to|chose to))\s+([^\n]+)/gi,
+              /(?:the (?:best|recommended|chosen|selected|optimal) (?:approach|solution|strategy|architecture|pattern|framework|tool|library) (?:is|was|will be))\s+([^\n]+)/gi,
+            ];
+            for (const pattern of decisionPatterns) {
+              const matches = (summary).matchAll(pattern);
+              for (const m of matches) {
+                const decision = m[0];
+                if (!ctx.decisions.includes(decision)) ctx.decisions.push(decision);
+              }
+            }
+          }
+
+          // Schema validation (MetaGPT pattern): check required fields, log warnings
+          if (ctx.analysis) {
+            const a = ctx.analysis;
+            const missing = [];
+            if (!a.intent?.type) missing.push("intent.type");
+            if (!a.features?.length) missing.push("features (empty)");
+            if (!a.acceptanceCriteria?.length) missing.push("acceptanceCriteria (empty)");
+            if (!a.directives) missing.push("directives");
+            if (!a.complexity?.level) missing.push("complexity.level");
+            // Moderate+ tasks require more fields
+            const triageLevel = a.triage?.level || "moderate";
+            if (triageLevel !== "trivial" && triageLevel !== "simple") {
+              if (!a.scope) missing.push("scope");
+              if (!a.risks?.length) missing.push("risks (empty)");
+              if (!a.slopGuardrails) missing.push("slopGuardrails");
+              if (!a.gapAnalysis) missing.push("gapAnalysis");
+              if (!a.selfReview) missing.push("selfReview");
+              if (!a.decisionDrivers?.length) missing.push("decisionDrivers (empty)");
+              if (!a.edgeCases?.length) missing.push("edgeCases (empty)");
+            }
+            if (missing.length > 0) {
+              sendAgi("agi.analysis.validation", { status: "incomplete", missing, triageLevel });
+              // Store validation result for potential retry
+              ctx.analysisValidation = { missing, triageLevel };
+            } else {
+              sendAgi("agi.analysis.validation", { status: "complete", triageLevel });
+            }
+          }
+        }
+
+        // Extract decisions from design step too
+        if (step.type === "design" && result.status === "completed") {
           const decisionPatterns = [
             /(?:decision|chose|selected|will use|architecture|approach|strategy|recommendation|concluded|determined|opted for|going with|picked|prefer|using)[:.\-—]\s*([^\n]+)/gi,
             /(?:we (?:will|should|need to|must|decided to|chose to))\s+([^\n]+)/gi,
-            /(?:the (?:best|recommended|chosen|selected|optimal) (?:approach|solution|strategy|architecture|pattern|framework|tool|library) (?:is|was|will be))\s+([^\n]+)/gi,
           ];
           for (const pattern of decisionPatterns) {
             const matches = (result.summary || "").matchAll(pattern);
             for (const m of matches) {
-              const decision = m[0]; // Full match — no truncation
+              const decision = m[0];
               if (!ctx.decisions.includes(decision)) ctx.decisions.push(decision);
             }
           }
@@ -1501,12 +2614,13 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
       const status = {};
       for (const line of raw.split("\n").filter(Boolean)) {
         const code = line.slice(0, 2);
-        const file = line.slice(3);
+        let file = line.slice(3);
         let s = "untracked";
-        if (code.includes("M")) s = "modified";
+        if (code === "UU" || code === "AA" || code === "DD" || code === "AU" || code === "UA") s = "conflict";
+        else if (code.includes("M")) s = "modified";
         else if (code.includes("A")) s = "added";
         else if (code.includes("D")) s = "deleted";
-        else if (code.includes("R")) s = "renamed";
+        else if (code.includes("R")) { s = "renamed"; const parts = file.split(" -> "); if (parts.length === 2) file = parts[1]; }
         else if (code.includes("?")) s = "untracked";
         status[file] = s;
       }
@@ -1560,8 +2674,10 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
           if ([".git", "node_modules", "dist", ".agent", "coverage"].includes(e.name)) continue;
           const full = require("node:path").join(dir, e.name);
           const rel = require("node:path").relative(CWD, full);
-          if (e.isDirectory()) { files.push({ path: rel, type: "dir" }); walk(full, depth + 1); }
-          else files.push({ path: rel, type: "file" });
+          const stat = require("node:fs").statSync(full, { throwIfNoEntry: false });
+          const mtime = stat ? stat.mtimeMs : 0;
+          if (e.isDirectory()) { files.push({ path: rel, type: "dir", mtime }); walk(full, depth + 1); }
+          else files.push({ path: rel, type: "file", mtime });
         }
       };
       walk(CWD);
@@ -1779,12 +2895,47 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
   if (url.pathname === "/api/sessions" && req.method === "GET") {
     try {
       const sessDir = path.join(CWD, ".agent", "sessions");
-      const files = fs.existsSync(sessDir) ? fs.readdirSync(sessDir).filter(f => f.endsWith(".json")).sort().reverse().slice(0, 50) : [];
+      const files = fs.existsSync(sessDir) ? fs.readdirSync(sessDir).filter(f => f.endsWith(".json") && !f.includes(".tmp")).sort().reverse().slice(0, 50) : [];
       const sessions = [];
       for (const f of files) {
         try {
           const data = JSON.parse(fs.readFileSync(path.join(sessDir, f), "utf8"));
-          sessions.push({ id: data.id || f.replace(".json", ""), task: data.task || "", status: data.status || "unknown", createdAt: data.createdAt || "", phase: data.phase || "" });
+          let status = data.status || "unknown";
+          let phase = data.phase || "";
+
+          // ── Liveness check: validate "running" sessions ──
+          if (status === "running") {
+            let processAlive = false;
+            if (data.pid) {
+              try { process.kill(data.pid, 0); processAlive = true; } catch { processAlive = false; }
+            }
+            if (!processAlive) {
+              // Process is dead — check if it's stale via updatedAt
+              const updatedAt = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
+              const staleSec = (Date.now() - updatedAt) / 1000;
+              if (staleSec > 30 || !data.pid) {
+                // Dead process or no PID recorded → mark stale and persist fix
+                status = "stale";
+                phase = "";
+                try {
+                  data.status = "stale";
+                  data.phase = "";
+                  data.updatedAt = new Date().toISOString();
+                  fs.writeFileSync(path.join(sessDir, f), JSON.stringify(data, null, 2), "utf8");
+                } catch { /* best-effort persist */ }
+              }
+            }
+          }
+
+          sessions.push({
+            id: data.id || f.replace(".json", ""),
+            task: data.task || "",
+            status,
+            createdAt: data.createdAt || "",
+            updatedAt: data.updatedAt || "",
+            phase,
+            pid: data.pid || null
+          });
         } catch { /* skip corrupt */ }
       }
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -1793,6 +2944,20 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify([]));
     }
+    return;
+  }
+
+  // ── Session status SSE stream (real-time push) ──
+  if (url.pathname === "/api/sessions/stream" && req.method === "GET") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive"
+    });
+    _sessionSSEClients.add(res);
+    // Send initial active children count
+    res.write(`data: ${JSON.stringify({ type: "session.connected", activeChildren: _activeChildren.size })}\n\n`);
+    req.on("close", () => { _sessionSSEClients.delete(res); });
     return;
   }
 

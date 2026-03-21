@@ -1,0 +1,30 @@
+{
+  "skill_name": "sessions-panel-vscode-fidelity",
+  "status": "complete",
+  "current_experiment": 1,
+  "baseline_score": 0,
+  "best_score": 100,
+  "experiments": [
+    {
+      "id": 0,
+      "score": 0,
+      "max_score": 6,
+      "pass_rate": 0,
+      "status": "baseline",
+      "description": "Full-screen panel, /api/status raw text dump, manual Refresh button, no session items"
+    },
+    {
+      "id": 1,
+      "score": 6,
+      "max_score": 6,
+      "pass_rate": 100,
+      "status": "keep",
+      "description": "Sidebar sessions: /api/sessions JSON, individual items, status dots, phase badges, relative time, auto-load"
+    }
+  ],
+  "eval_breakdown": [
+    {"name": "Structural evals (20 checks)", "pass_count": 2, "total": 2},
+    {"name": "Integration tests (25 checks)", "pass_count": 2, "total": 2},
+    {"name": "Search regression (60 checks)", "pass_count": 2, "total": 2}
+  ]
+}

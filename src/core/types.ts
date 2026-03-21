@@ -343,6 +343,8 @@ export interface SessionRecord {
   lastReview?: ReviewResult;
   /** Token budget tracking */
   tokenBudget?: TokenBudget;
+  /** PID of the process running this session (for liveness checks) */
+  pid?: number;
 }
 
 export interface TaskRecord {

@@ -356,6 +356,33 @@ export class ToolRuntime {
         reason: `${call.name} is not allowed for role ${this.options.role.id}`
       });
     }
+    // [FIX] AGI pipeline tool blocking — analyze/design steps block write tools at engine level
+    // Supports AGI_ALLOWED_WRITE_PATHS to allow specific paths (e.g., .agi/) for file-based output
+    const agiBlockedTools = process.env.AGI_BLOCKED_TOOLS;
+    if (agiBlockedTools) {
+      const blocked = agiBlockedTools.split(",").map(t => t.trim());
+      if (blocked.includes(call.name)) {
+        // Check if this write is to an allowed path (file-based analysis output)
+        const allowedPaths = process.env.AGI_ALLOWED_WRITE_PATHS;
+        const writePath = typeof call.input?.path === "string" ? call.input.path : "";
+        let isAllowed = false;
+        if (allowedPaths && writePath) {
+          const patterns = allowedPaths.split(",").map(p => p.trim());
+          isAllowed = patterns.some(pattern => writePath.includes(pattern));
+          if (process.env.AGI_DEBUG) {
+            console.error(`[AGI_DEBUG] write path="${writePath}" allowed=${isAllowed} patterns=${JSON.stringify(patterns)}`);
+          }
+        }
+        if (!isAllowed) {
+          return this.blockedResult(call, {
+            ...approval,
+            approved: false,
+            mode: "ask",
+            reason: `${call.name} is blocked in this AGI pipeline step (analysis/design phase — no file writes allowed)`
+          });
+        }
+      }
+    }
 
     if (!approval.approved) {
       return this.blockedResult(call, approval);
