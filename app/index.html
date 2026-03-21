@@ -4060,37 +4060,45 @@ document.addEventListener('dragover',e=>{
 });
 document.addEventListener('drop',async e=>{
   const zone=document.getElementById('docDropZone');
-  if(!zone||!zone.offsetParent)return; // panel not visible
+  if(!zone||!zone.offsetParent)return;
   e.preventDefault();
   const input=document.getElementById('docScanFolder');
   const hint=document.getElementById('docDropHint');
   if(hint)hint.style.display='none';
   zone.style.borderColor='var(--border)';zone.style.background='none';
 
-  let name='',isDir=false;
-  // Method 1: webkitGetAsEntry
-  const items=e.dataTransfer&&e.dataTransfer.items;
-  if(items&&items.length>0){
-    const getEntry=items[0].webkitGetAsEntry||items[0].getAsEntry;
-    if(getEntry){
-      const entry=getEntry.call(items[0]);
-      if(entry){name=entry.name;isDir=entry.isDirectory}
+  let fullPath='',name='',isDir=false;
+
+  // Method 1: file:// URL from Finder drag (macOS Safari/Chrome)
+  const uriList=(e.dataTransfer.getData('text/uri-list')||'').trim();
+  if(uriList&&uriList.startsWith('file://')){
+    fullPath=decodeURIComponent(uriList.replace('file://','').split('\n')[0].trim());
+  }
+  // Method 2: text/plain might contain full path
+  if(!fullPath){
+    const text=(e.dataTransfer.getData('text/plain')||'').trim();
+    if(text&&text.startsWith('/'))fullPath=text;
+  }
+  // Method 3: webkitGetAsEntry for name
+  if(!fullPath){
+    const items=e.dataTransfer&&e.dataTransfer.items;
+    if(items&&items.length>0){
+      const getEntry=items[0].webkitGetAsEntry||items[0].getAsEntry;
+      if(getEntry){
+        const entry=getEntry.call(items[0]);
+        if(entry){name=entry.name;isDir=entry.isDirectory}
+      }
     }
   }
-  // Method 2: files fallback
-  if(!name&&e.dataTransfer.files&&e.dataTransfer.files.length>0){
+  // Method 4: File name fallback
+  if(!fullPath&&!name&&e.dataTransfer.files&&e.dataTransfer.files.length>0){
     name=e.dataTransfer.files[0].name;
   }
-  // Method 3: text/plain (dragged from file manager address bar or terminal)
-  if(!name){
-    const text=(e.dataTransfer.getData('text/plain')||'').trim();
-    if(text)name=text.split('/').pop()||text;
-  }
-  if(!name)return;
+  if(!fullPath&&!name)return;
 
   input.value='...resolving';
   try{
-    const r=await(await fetch('/api/resolve-drop-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,isDirectory:isDir})})).json();
+    const r=await(await fetch('/api/resolve-drop-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fullPath,name,isDirectory:isDir})})).json();
     if(r.path!==undefined&&r.path!==null){
       input.value=r.path;
       zone.style.borderColor='var(--green)';zone.style.background='rgba(16,163,127,.06)';
