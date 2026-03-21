@@ -560,7 +560,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             </div>
             <div class="doc-actions">
               <button class="save-btn" onclick="runDoctorFull()" id="docRunBtn" style="font-size:11px;padding:6px 16px;margin:0">Run Full Diagnostic</button>
-              <button class="save-btn" onclick="runCommentsScan()" style="font-size:11px;padding:6px 14px;margin:0;background:var(--bg5);color:var(--fg2)">Scan Comments</button>
+              <button class="save-btn" onclick="runCodeHealthScan()" id="docScanBtn" style="font-size:11px;padding:6px 14px;margin:0;background:var(--bg5);color:var(--fg2)">Scan Code Health</button>
               <button class="save-btn" onclick="exportDoctorReport()" style="font-size:11px;padding:6px 14px;margin:0;background:var(--bg5);color:var(--fg2)" title="Export diagnostic report">Export</button>
             </div>
           </div>
@@ -4044,16 +4044,46 @@ function exportDoctorReport(){
   const blob=new Blob([lines.join('\n')],{type:'text/markdown'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='diagnostic-report.md';a.click();
 }
-async function runCommentsScan(){
+async function runCodeHealthScan(){
+  const btn=document.getElementById('docScanBtn');
   const log=document.getElementById('docLog');
+  btn.disabled=true;btn.textContent='Scanning...';
   log.style.display='block';
-  log.innerHTML+='<div style="color:var(--fg3);margin-top:6px">Scanning comments...</div>';
+  log.innerHTML='<div style="color:var(--fg3);padding:8px 0">🔍 Scanning workspace code health...</div>';
   try{
-    const d=await(await fetch('/api/check-comments',{method:'POST'})).json();
-    const out=d.stdout||d.stderr||'No comments found';
-    log.innerHTML+='<pre style="margin:4px 0;background:none;border:none;padding:0;font-size:11px">'+esc(out)+'</pre>';
+    const d=await(await fetch('/api/scan-code-health',{method:'POST'})).json();
+    if(d.error){log.innerHTML+='<div style="color:var(--red)">Error: '+esc(d.error)+'</div>';return}
+    let h='';
+    // Summary bar
+    const tc=d.todos.length,fc=d.fixmes.length,hc=d.hacks.length,lc=d.largeFiles.length;
+    h+='<div style="display:flex;gap:12px;margin:8px 0 12px;flex-wrap:wrap">';
+    h+='<span style="background:rgba(59,130,246,.15);color:#60a5fa;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">TODO: '+tc+'</span>';
+    h+='<span style="background:rgba(245,158,11,.15);color:#f59e0b;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">FIXME: '+fc+'</span>';
+    h+='<span style="background:rgba(239,68,68,.15);color:#ef4444;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">HACK: '+hc+'</span>';
+    h+='<span style="background:rgba(139,92,246,.15);color:#8b5cf6;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600">Large Files: '+lc+'</span>';
+    h+='</div>';
+    // TODOs
+    if(tc){h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">📝 TODOs ('+tc+')</div>';d.todos.slice(0,30).forEach(t=>{h+='<div style="font-size:11px;padding:2px 0;color:var(--fg2)"><span style="color:var(--fg3)">'+esc(t.file)+':'+t.line+'</span> '+esc(t.text)+'</div>'}); if(tc>30)h+='<div style="color:var(--fg3);font-size:10px;margin-top:2px">...and '+(tc-30)+' more</div>'}
+    // FIXMEs
+    if(fc){h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">⚠️ FIXMEs ('+fc+')</div>';d.fixmes.slice(0,20).forEach(t=>{h+='<div style="font-size:11px;padding:2px 0;color:var(--fg2)"><span style="color:var(--fg3)">'+esc(t.file)+':'+t.line+'</span> '+esc(t.text)+'</div>'})}
+    // HACKs
+    if(hc){h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">🔴 HACKs ('+hc+')</div>';d.hacks.slice(0,20).forEach(t=>{h+='<div style="font-size:11px;padding:2px 0;color:var(--fg2)"><span style="color:var(--fg3)">'+esc(t.file)+':'+t.line+'</span> '+esc(t.text)+'</div>'})}
+    // Large files
+    if(lc){h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">📦 Large Files >500KB ('+lc+')</div>';d.largeFiles.forEach(f=>{h+='<div style="font-size:11px;padding:2px 0;color:var(--fg2)">'+esc(f.file)+' <span style="color:var(--fg3)">('+f.sizeKB+'KB)</span></div>'})}
+    // npm audit
+    if(d.audit){
+      const v=d.audit.vulnerabilities||{};
+      const crit=(v.critical||0),hi=(v.high||0),med=(v.moderate||0),lo=(v.low||0);
+      const total=crit+hi+med+lo;
+      h+='<div style="font-weight:600;color:var(--fg);margin:8px 0 4px;font-size:12px">🛡️ npm Audit</div>';
+      if(total===0)h+='<div style="font-size:11px;color:var(--green)">No known vulnerabilities found ('+d.audit.total+' packages scanned)</div>';
+      else h+='<div style="font-size:11px;color:var(--fg2)">'+total+' vulnerabilities: <span style="color:var(--red)">'+crit+' critical</span>, <span style="color:#f59e0b">'+hi+' high</span>, '+med+' moderate, '+lo+' low</div>';
+    }
+    if(!tc&&!fc&&!hc&&!lc)h+='<div style="color:var(--green);font-size:12px;padding:8px 0">✅ Code is clean — no TODOs, FIXMEs, HACKs, or oversized files found.</div>';
+    log.innerHTML+=h;
     log.scrollTop=log.scrollHeight;
   }catch(e){log.innerHTML+='<div style="color:var(--red)">'+esc(e.message)+'</div>'}
+  finally{btn.disabled=false;btn.textContent='Scan Code Health'}
 }
 
 async function checkAuth(){
