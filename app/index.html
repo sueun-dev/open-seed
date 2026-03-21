@@ -253,6 +253,35 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .full-panel h2{font-family:var(--font);font-size:13px;color:var(--fg);margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
 .full-panel h2:first-child{margin-top:0}
 .full-panel pre{font-family:var(--font);font-size:12px;line-height:1.7;color:var(--fg2);white-space:pre-wrap;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin:8px 0}
+/* ═══ Doctor Panel ═══ */
+.doc-header{display:flex;align-items:center;gap:16px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.doc-header h2{margin:0;border:0;padding:0;font-size:16px}
+.doc-header-sub{font-size:11px;color:var(--fg3)}
+.doc-actions{display:flex;gap:6px;margin-left:auto}
+.doc-summary{display:flex;gap:12px;margin-bottom:20px}
+.doc-stat{flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px;text-align:center}
+.doc-stat-num{font-size:24px;font-weight:700;font-family:var(--font)}
+.doc-stat-lbl{font-size:10px;color:var(--fg3);margin-top:2px}
+.doc-stat.ok .doc-stat-num{color:var(--green)}
+.doc-stat.warn .doc-stat-num{color:var(--orange)}
+.doc-stat.err .doc-stat-num{color:var(--red)}
+.doc-section{margin-bottom:16px}
+.doc-section-title{font-family:var(--font);font-size:11px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.doc-section-title .doc-chev{font-size:9px;transition:transform .15s}
+.doc-section-title .doc-chev.collapsed{transform:rotate(-90deg)}
+.doc-check{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:var(--r);margin-bottom:4px;font-family:var(--font);font-size:12px;transition:background .1s}
+.doc-check:hover{background:rgba(255,255,255,.03)}
+.doc-check-icon{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;font-weight:700}
+.doc-check-icon.ok{background:rgba(16,163,127,.15);color:var(--green)}
+.doc-check-icon.warn{background:rgba(217,119,6,.15);color:var(--orange)}
+.doc-check-icon.error{background:rgba(239,68,68,.15);color:var(--red)}
+.doc-check-icon.skip{background:var(--bg3);color:var(--fg3)}
+.doc-check-name{font-weight:600;color:var(--fg);min-width:140px}
+.doc-check-msg{color:var(--fg2);flex:1}
+.doc-check-time{font-size:10px;color:var(--fg3);min-width:50px;text-align:right}
+.doc-log{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px;margin-top:12px;max-height:200px;overflow-y:auto;font-family:var(--font);font-size:11px;color:var(--fg3);line-height:1.6}
+.doc-progress{height:3px;background:var(--bg3);border-radius:2px;margin-bottom:16px;overflow:hidden}
+.doc-progress-bar{height:100%;background:var(--accent);transition:width .3s;width:0}
 
 /* ═══ VS Code Search Panel ═══ */
 /* Search lives in sidebar now — no full-panel needed */
@@ -383,6 +412,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 .set-scope-tabs button{font-family:var(--font);font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:var(--r);background:none;color:var(--fg3);cursor:pointer;transition:all .15s}
 .set-scope-tabs button.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
 .set-scope-tabs button:hover:not(.on){background:rgba(255,255,255,.04)}
+.set-scope-hint{display:none;position:absolute;top:100%;right:0;margin-top:6px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;font-size:10px;color:var(--fg2);line-height:1.6;white-space:nowrap;z-index:20;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.set-scope-tabs:hover .set-scope-hint{display:block}
 .set-validation{font-size:10px;padding:6px 10px;border-radius:var(--r);margin:4px 0;display:flex;align-items:center;gap:6px}
 .set-validation.warn{background:rgba(217,119,6,.1);color:var(--orange);border:1px solid rgba(217,119,6,.2)}
 .set-validation.ok{background:rgba(76,175,80,.1);color:var(--green);border:1px solid rgba(76,175,80,.2)}
@@ -521,13 +552,27 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
 
       <!-- Doctor Panel -->
       <div class="full-panel" id="doctorPanel">
-        <div class="inner">
-          <h2>System Diagnostics</h2>
-          <div style="display:flex;gap:8px;margin-bottom:16px">
-            <button class="save-btn" onclick="runDoctorFull()" style="font-size:11px;padding:5px 14px;margin:0">Run Full Diagnostic</button>
-            <button class="save-btn" onclick="runCommentsScan()" style="font-size:11px;padding:5px 14px;margin:0;background:var(--bg5);color:var(--fg2)">Scan Comments</button>
+        <div class="inner" style="max-width:900px">
+          <div class="doc-header">
+            <div>
+              <h2>System Diagnostics</h2>
+              <div class="doc-header-sub" id="docLastRun">Not yet run</div>
+            </div>
+            <div class="doc-actions">
+              <button class="save-btn" onclick="runDoctorFull()" id="docRunBtn" style="font-size:11px;padding:6px 16px;margin:0">Run Full Diagnostic</button>
+              <button class="save-btn" onclick="runCommentsScan()" style="font-size:11px;padding:6px 14px;margin:0;background:var(--bg5);color:var(--fg2)">Scan Comments</button>
+              <button class="save-btn" onclick="exportDoctorReport()" style="font-size:11px;padding:6px 14px;margin:0;background:var(--bg5);color:var(--fg2)" title="Export diagnostic report">Export</button>
+            </div>
           </div>
-          <div id="doctorOut" style="color:var(--fg3);font-size:12px">Press "Run Full Diagnostic" to check providers, tools, config, and system health.</div>
+          <div class="doc-progress" id="docProgress"><div class="doc-progress-bar" id="docProgressBar"></div></div>
+          <div class="doc-summary" id="docSummary">
+            <div class="doc-stat ok"><div class="doc-stat-num" id="docOkN">—</div><div class="doc-stat-lbl">Passed</div></div>
+            <div class="doc-stat warn"><div class="doc-stat-num" id="docWarnN">—</div><div class="doc-stat-lbl">Warnings</div></div>
+            <div class="doc-stat err"><div class="doc-stat-num" id="docErrN">—</div><div class="doc-stat-lbl">Errors</div></div>
+            <div class="doc-stat"><div class="doc-stat-num" id="docTotalN" style="color:var(--fg)">—</div><div class="doc-stat-lbl">Total Checks</div></div>
+          </div>
+          <div id="docChecks" style="color:var(--fg3);font-size:12px">Press "Run Full Diagnostic" to check providers, tools, config, and system health.</div>
+          <div class="doc-log" id="docLog" style="display:none"></div>
         </div>
       </div>
 
@@ -678,9 +723,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             <input id="setSearchIn" placeholder="Search settings..." oninput="filterSettings()" spellcheck="false">
             <span class="set-search-count" id="setSearchCount"></span>
           </div>
-          <div class="set-scope-tabs" id="setScopeTabs" style="margin:0">
-            <button class="on" data-scope="user" onclick="setScope(this)" title="User settings (global)">User</button>
-            <button data-scope="workspace" onclick="setScope(this)" title="Workspace settings (this project)">Workspace</button>
+          <div class="set-scope-tabs" id="setScopeTabs" style="margin:0;position:relative">
+            <button class="on" data-scope="user" onclick="setScope(this)" title="User settings — applies to all projects globally">User</button>
+            <button data-scope="workspace" onclick="setScope(this)" title="Workspace settings — applies only to this project">Workspace</button>
+            <div class="set-scope-hint" id="setScopeHint">
+              <b>User</b> — 모든 프로젝트에 적용 (전역)<br>
+              <b>Workspace</b> — 현재 프로젝트에만 적용 (프로젝트별 오버라이드)
+            </div>
           </div>
           <div class="set-header-actions">
             <button class="save-btn" onclick="saveSet()" style="margin:0;font-size:10px;padding:5px 14px">Save</button>
@@ -716,18 +765,18 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
           <div class="set-info-banner">&#x1F4A1; Most frequently changed settings. Edit here or navigate to the full section via the sidebar.</div>
           <div class="set-commonly">
             <div class="set-commonly-title">Provider</div>
-            <div class="sr"><div class="lbl">Default Model<small>Primary model for all tasks</small></div><select class="ss" id="s-cu-model"><option value="claude-opus-4-6">Opus 4.6</option><option value="gpt-5.4">GPT-5.4</option><option value="gemini-2.5-pro">Gemini 2.5 Pro</option></select></div>
-            <div class="sr"><div class="lbl">Approval Mode<small>auto = no prompts, ask = confirm each action</small></div><select class="ss" id="s-cu-approve"><option value="auto">Auto</option><option value="ask">Ask</option></select></div>
+            <div class="sr"><div class="lbl">Default Model<small>Primary model for all tasks</small></div><select class="ss" id="s-cu-model" onchange="cuSync('s-cu-model','s-oi-m')"><option value="gpt-5.4">GPT-5.4</option><option value="claude-opus-4-6">Claude Opus 4.6</option><option value="gemini-2.5-pro">Gemini 2.5 Pro</option><option value="o3">o3</option><option value="gpt-5.4-mini">GPT-5.4 Mini</option><option value="claude-sonnet-4-6">Claude Sonnet 4.6</option></select></div>
+            <div class="sr"><div class="lbl">Approval Mode<small>auto = no prompts, ask = confirm each action</small></div><select class="ss" id="s-cu-approve" onchange="cuSync('s-cu-approve','s-sa-mode')"><option value="auto">Auto</option><option value="ask">Ask</option></select></div>
           </div>
           <div class="set-commonly">
             <div class="set-commonly-title">Safety</div>
-            <div class="sr"><div class="lbl">Auto-approve Writes<small>Allow file creation/edit without prompting</small></div><button class="sw on" id="s-cu-write" onclick="this.classList.toggle('on')"></button></div>
-            <div class="sr"><div class="lbl">Git Push<small style="color:var(--red)">&#x26A0; Push to remote repositories</small></div><button class="sw" id="s-cu-push" onclick="this.classList.toggle('on')"></button></div>
+            <div class="sr"><div class="lbl">Auto-approve Writes<small>Allow file creation/edit without prompting</small></div><button class="sw on" id="s-cu-write" onclick="this.classList.toggle('on');cuSyncSw('s-cu-write','s-sa-w')"></button></div>
+            <div class="sr"><div class="lbl">Git Push<small style="color:var(--red)">&#x26A0; Push to remote repositories</small></div><button class="sw" id="s-cu-push" onclick="this.classList.toggle('on');cuSyncSw('s-cu-push','s-sa-g')"></button></div>
           </div>
           <div class="set-commonly">
             <div class="set-commonly-title">Engine</div>
-            <div class="sr"><div class="lbl">Max Workers<small>Concurrent agent count (1-20)</small></div><input class="si" id="s-cu-workers" type="number" value="5" min="1" max="20"></div>
-            <div class="sr"><div class="lbl">Self-Healing<small>Auto-recover from tool errors</small></div><button class="sw on" id="s-cu-heal" onclick="this.classList.toggle('on')"></button></div>
+            <div class="sr"><div class="lbl">Max Workers<small>Concurrent agent count (1-20)</small></div><input class="si" id="s-cu-workers" type="number" value="5" min="1" max="20" onchange="cuSync('s-cu-workers','s-mw')"></div>
+            <div class="sr"><div class="lbl">Self-Healing<small>Auto-recover from tool errors</small></div><button class="sw on" id="s-cu-heal" onclick="this.classList.toggle('on');cuSyncSw('s-cu-heal','s-sh')"></button></div>
           </div>
         </div>
         <div id="st-providers">
@@ -748,10 +797,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             <h2 style="margin:0;border:0;padding:0;flex:1">OpenAI</h2>
             <span id="s-oi-status" style="font-size:10px;padding:2px 8px;border-radius:9px;background:var(--bg5);color:var(--fg3)">unknown</span>
           </div>
-          <div class="sr"><div class="lbl">Enabled</div><button class="sw on" id="s-oi-e" onclick="this.classList.toggle('on')"></button></div>
-          <div class="sr"><div class="lbl">Model</div><select class="ss" id="s-oi-m"><option value="gpt-5.4">GPT-5.4</option><option value="gpt-4.1">GPT-4.1</option><option value="gpt-4o">GPT-4o</option><option value="gpt-4o-mini">GPT-4o Mini</option></select></div>
+          <div class="sr"><div class="lbl">Enabled<small>이 프로바이더 사용 여부</small></div><button class="sw on" id="s-oi-e" onclick="this.classList.toggle('on')"></button></div>
+          <div class="sr"><div class="lbl">Model<small>기본 사용 모델 선택</small></div><select class="ss" id="s-oi-m"><option value="gpt-5.4">GPT-5.4</option><option value="gpt-5.4-pro">GPT-5.4 Pro</option><option value="gpt-5.4-mini">GPT-5.4 Mini</option><option value="gpt-5.4-nano">GPT-5.4 Nano</option><option value="gpt-5">GPT-5</option><option value="gpt-5-mini">GPT-5 Mini</option><option value="o3">o3</option><option value="o3-pro">o3-pro</option><option value="o4-mini">o4-mini</option><option value="o3-mini">o3-mini</option><option value="gpt-4.1">GPT-4.1</option><option value="gpt-4.1-mini">GPT-4.1 Mini</option><option value="gpt-4o">GPT-4o</option><option value="gpt-4o-mini">GPT-4o Mini</option></select></div>
           <div class="sr">
-            <div class="lbl">Auth Method</div>
+            <div class="lbl">Auth Method<small>OAuth = 무료, API Key = 유료</small></div>
             <select class="ss" id="s-oi-a" onchange="toggleAuthUI('oi')">
               <option value="oauth">OAuth (Free via Codex CLI)</option>
               <option value="api_key">API Key</option>
@@ -776,7 +825,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             </div>
             <div style="font-size:9px;color:var(--fg3);margin-top:3px">Stored securely in .agent/.env — never sent to our servers</div>
           </div>
-          <div class="sr"><div class="lbl">Timeout (ms)</div><input class="si" id="s-oi-t" type="number" value="120000"></div>
+          <div class="sr"><div class="lbl">Timeout (ms)<small>API 응답 대기 시간 (기본: 120초)</small></div><input class="si" id="s-oi-t" type="number" value="120000"></div>
           <div class="set-validation warn" id="s-oi-warn" style="display:none">&#x26A0; No OpenAI connection — configure OAuth or API key above</div>
 
           <!-- ── Anthropic ── -->
@@ -784,10 +833,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             <h2 style="margin:0;border:0;padding:0;flex:1">Anthropic</h2>
             <span id="s-an-status" style="font-size:10px;padding:2px 8px;border-radius:9px;background:var(--bg5);color:var(--fg3)">unknown</span>
           </div>
-          <div class="sr"><div class="lbl">Enabled</div><button class="sw on" id="s-an-e" onclick="this.classList.toggle('on')"></button></div>
-          <div class="sr"><div class="lbl">Model</div><select class="ss" id="s-an-m"><option value="claude-opus-4-6" selected>Opus 4.6</option><option value="claude-sonnet-4-6">Sonnet 4.6</option><option value="claude-sonnet-4-5">Sonnet 4.5</option><option value="claude-haiku-4-5">Haiku 4.5</option></select></div>
+          <div class="sr"><div class="lbl">Enabled<small>이 프로바이더 사용 여부</small></div><button class="sw on" id="s-an-e" onclick="this.classList.toggle('on')"></button></div>
+          <div class="sr"><div class="lbl">Model<small>기본 사용 모델 선택</small></div><select class="ss" id="s-an-m"><option value="claude-opus-4-6" selected>Opus 4.6</option><option value="claude-sonnet-4-6">Sonnet 4.6</option><option value="claude-opus-4-5">Opus 4.5</option><option value="claude-sonnet-4-5">Sonnet 4.5</option><option value="claude-haiku-4-5">Haiku 4.5</option><option value="claude-opus-4-1">Opus 4.1</option><option value="claude-sonnet-4-0">Sonnet 4</option><option value="claude-opus-4-0">Opus 4</option></select></div>
           <div class="sr">
-            <div class="lbl">Auth Method</div>
+            <div class="lbl">Auth Method<small>OAuth = 무료, API Key = 유료</small></div>
             <select class="ss" id="s-an-a" onchange="toggleAuthUI('an')">
               <option value="oauth">OAuth (Free via Claude CLI)</option>
               <option value="api_key">API Key</option>
@@ -812,7 +861,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             </div>
             <div style="font-size:9px;color:var(--fg3);margin-top:3px">Stored securely in .agent/.env — never sent to our servers</div>
           </div>
-          <div class="sr"><div class="lbl">Timeout (ms)</div><input class="si" id="s-an-t" type="number" value="120000"></div>
+          <div class="sr"><div class="lbl">Timeout (ms)<small>API 응답 대기 시간 (기본: 120초)</small></div><input class="si" id="s-an-t" type="number" value="120000"></div>
           <div class="set-validation warn" id="s-an-warn" style="display:none">&#x26A0; No Anthropic connection — configure OAuth or API key above</div>
 
           <!-- ── Gemini ── -->
@@ -820,10 +869,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             <h2 style="margin:0;border:0;padding:0;flex:1">Gemini</h2>
             <span id="s-gm-status" style="font-size:10px;padding:2px 8px;border-radius:9px;background:var(--bg5);color:var(--fg3)">unknown</span>
           </div>
-          <div class="sr"><div class="lbl">Enabled</div><button class="sw on" id="s-gm-e" onclick="this.classList.toggle('on')"></button></div>
-          <div class="sr"><div class="lbl">Model</div><select class="ss" id="s-gm-m"><option value="gemini-2.5-pro">Gemini 2.5 Pro</option><option value="gemini-2.5-flash">Gemini 2.5 Flash</option><option value="gemini-2.0-flash">Gemini 2.0 Flash</option></select></div>
+          <div class="sr"><div class="lbl">Enabled<small>이 프로바이더 사용 여부</small></div><button class="sw on" id="s-gm-e" onclick="this.classList.toggle('on')"></button></div>
+          <div class="sr"><div class="lbl">Model<small>기본 사용 모델 선택</small></div><select class="ss" id="s-gm-m"><option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option><option value="gemini-3-flash-preview">Gemini 3 Flash</option><option value="gemini-2.5-pro">Gemini 2.5 Pro</option><option value="gemini-2.5-flash">Gemini 2.5 Flash</option><option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option></select></div>
           <div class="sr">
-            <div class="lbl">Auth Method</div>
+            <div class="lbl">Auth Method<small>API Key = 직접 입력, OAuth = gcloud CLI</small></div>
             <select class="ss" id="s-gm-a" onchange="toggleAuthUI('gm')">
               <option value="api_key">API Key</option>
               <option value="oauth">OAuth (gcloud CLI)</option>
@@ -848,7 +897,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
             </div>
             <div id="s-gm-oauth-log" style="font-size:10px;color:var(--fg3);margin-top:6px;max-height:80px;overflow-y:auto"></div>
           </div>
-          <div class="sr"><div class="lbl">Timeout (ms)</div><input class="si" id="s-gm-t" type="number" value="120000"></div>
+          <div class="sr"><div class="lbl">Timeout (ms)<small>API 응답 대기 시간 (기본: 120초)</small></div><input class="si" id="s-gm-t" type="number" value="120000"></div>
           <div class="set-validation warn" id="s-gm-warn" style="display:none">&#x26A0; No Gemini connection — configure API key or OAuth above</div>
 
           <!-- ── Routing ── -->
@@ -925,18 +974,18 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
           <div class="sr"><div class="lbl">Parallel Reads<small>동시 파일 읽기 수</small></div><input class="si" id="s-tp" type="number" value="4" min="1" max="16"></div>
 
           <h2 onclick="toggleSection(this)"><span class="set-chevron">▸</span>Browser Config</h2>
-          <div class="sr"><div class="lbl">Browser Enabled</div><button class="sw on" id="s-br-en" onclick="this.classList.toggle('on')"></button></div>
-          <div class="sr"><div class="lbl">Headless Mode<small>브라우저 UI 숨김</small></div><button class="sw on" id="s-br-hl" onclick="this.classList.toggle('on')"></button></div>
-          <div class="sr"><div class="lbl">Doctor Smoke Test<small>진단 시 브라우저 테스트</small></div><button class="sw" id="s-br-dt" onclick="this.classList.toggle('on')"></button></div>
+          <div class="sr"><div class="lbl">Browser Enabled<small>Playwright 브라우저 자동화 활성화</small></div><button class="sw on" id="s-br-en" onclick="this.classList.toggle('on')"></button></div>
+          <div class="sr"><div class="lbl">Headless Mode<small>브라우저 UI 숨김 (백그라운드 실행)</small></div><button class="sw on" id="s-br-hl" onclick="this.classList.toggle('on')"></button></div>
+          <div class="sr"><div class="lbl">Doctor Smoke Test<small>진단 시 브라우저 동작 확인 테스트</small></div><button class="sw" id="s-br-dt" onclick="this.classList.toggle('on')"></button></div>
 
           <h2 onclick="toggleSection(this)"><span class="set-chevron">▸</span>LSP Config</h2>
-          <div class="sr"><div class="lbl">LSP Enabled</div><button class="sw on" id="s-lsp-en" onclick="this.classList.toggle('on')"></button></div>
+          <div class="sr"><div class="lbl">LSP Enabled<small>Language Server 연결 (자동완성, 진단)</small></div><button class="sw on" id="s-lsp-en" onclick="this.classList.toggle('on')"></button></div>
         </div>
 
         <div id="st-expert" style="display:none">
           <h2 style="color:var(--orange)">⚠ Expert — Raw Config</h2>
           <div style="font-size:10px;color:var(--fg3);margin-bottom:8px">전체 설정 JSON을 직접 편집합니다. 저장 시 모든 탭에 반영됩니다.</div>
-          <div class="sr"><div class="lbl">Raw Config (JSON)</div></div>
+          <div class="sr"><div class="lbl">Raw Config (JSON)<small>전체 설정을 JSON으로 직접 편집 — 저장 시 모든 탭에 반영</small></div></div>
           <textarea class="si" id="s-raw" style="width:100%;height:260px;resize:vertical;font-size:11px;line-height:1.6"></textarea>
           <div style="margin-top:8px;display:flex;gap:6px">
             <button class="save-btn" onclick="applyRawConfig()" style="font-size:10px;padding:5px 12px;margin:0;background:var(--orange)">Apply Raw Config</button>
@@ -1210,6 +1259,7 @@ function setScope(btn){
   document.querySelectorAll('.set-scope-tabs button').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
   _setScope=btn.dataset.scope;
+  loadSet();
 }
 function filterSettings(){
   const q=(document.getElementById('setSearchIn')?.value||'').toLowerCase().trim();
@@ -3454,7 +3504,7 @@ const ALL_ROLES=['orchestrator','planner','executor','reviewer','researcher','re
   'frontend-engineer','ux-designer','accessibility-auditor','browser-operator','compliance-reviewer'];
 
 async function loadSet(){
-  try{CFG=await(await fetch('/api/settings')).json()}catch{CFG={}}
+  try{CFG=await(await fetch('/api/settings?scope='+_setScope)).json()}catch{CFG={}}
   const p=CFG.providers||{};
   // Providers
   if(p.openai){
@@ -3508,6 +3558,8 @@ async function loadSet(){
   document.getElementById('s-mw').value=tm.maxWorkers||5;
   setSwitch('s-tmux',tm.preferTmux!==false);
   const sb=CFG.sandbox||{};
+  setSwitch('s-sh',tm.selfHealing!==false);
+  setSwitch('s-or',tm.oracleEscalation!==false);
   setSwitch('s-sb',sb.enabled===true);
   setSwitch('s-sb-auto',sb.autoApplyOnPass!==false);
   const re=CFG.retry||{};
@@ -3548,9 +3600,26 @@ async function loadSet(){
   setSwitch('s-lsp-en',(CFG.lsp||{}).enabled!==false);
   // Toggle auth UIs
   toggleAuthUI('oi');toggleAuthUI('an');toggleAuthUI('gm');
+  // Sync Commonly Used from main tabs
+  syncCommonlyUsed();
   // Auto-check connections
   checkAuth();
 }
+function syncCommonlyUsed(){
+  // Copy main → commonly used
+  const cu={model:'s-oi-m',approve:'s-sa-mode',workers:'s-mw'};
+  for(const[k,src] of Object.entries(cu)){
+    const s=document.getElementById(src),t=document.getElementById('s-cu-'+k);
+    if(s&&t)t.value=s.value;
+  }
+  const cuSw={write:'s-sa-w',push:'s-sa-g',heal:'s-sh'};
+  for(const[k,src] of Object.entries(cuSw)){
+    const s=document.getElementById(src),t=document.getElementById('s-cu-'+k);
+    if(s&&t)t.classList.toggle('on',s.classList.contains('on'));
+  }
+}
+function cuSync(fromId,toId){const f=document.getElementById(fromId),t=document.getElementById(toId);if(f&&t)t.value=f.value}
+function cuSyncSw(fromId,toId){const f=document.getElementById(fromId),t=document.getElementById(toId);if(f&&t)t.classList.toggle('on',f.classList.contains('on'))}
 function setSelect(id,val){const el=document.getElementById(id);if(el){for(const o of el.options){if(o.value===val){el.value=val;return}}}}
 function setSwitch(id,on){const el=document.getElementById(id);if(el)el.classList.toggle('on',on)}
 function getSwitch(id){const el=document.getElementById(id);return el?el.classList.contains('on'):false}
@@ -3593,6 +3662,8 @@ async function saveSet(){
   if(!CFG.team)CFG.team={};
   CFG.team.maxWorkers=parseInt(document.getElementById('s-mw').value)||5;
   CFG.team.preferTmux=getSwitch('s-tmux');
+  CFG.team.selfHealing=getSwitch('s-sh');
+  CFG.team.oracleEscalation=getSwitch('s-or');
   if(!CFG.sandbox)CFG.sandbox={};
   CFG.sandbox.enabled=getSwitch('s-sb');
   CFG.sandbox.autoApplyOnPass=getSwitch('s-sb-auto');
@@ -3629,7 +3700,7 @@ async function saveSet(){
   CFG.lsp.enabled=getSwitch('s-lsp-en');
 
   try{
-    const r=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(CFG)});
+    const r=await fetch('/api/settings?scope='+_setScope,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(CFG)});
     if((await r.json()).ok){document.getElementById('sSt').textContent='Saved ✓';setTimeout(()=>document.getElementById('sSt').textContent='',2000)}
   }catch(e){document.getElementById('sSt').textContent='Error: '+e.message}
 }
@@ -3896,21 +3967,93 @@ function deleteSession(btn){
 function filterSessions(){renderSessions(_allSessions)}
 
 /* ═══ DOCTOR ═══ */
+let _doctorResults=null;
 async function runDoctorFull(){
-  const el=document.getElementById('doctorOut');
-  el.innerHTML='<div style="color:var(--fg3)">Running diagnostics...</div>';
+  const el=document.getElementById('docChecks');
+  const btn=document.getElementById('docRunBtn');
+  const bar=document.getElementById('docProgressBar');
+  const log=document.getElementById('docLog');
+  btn.disabled=true;btn.textContent='Running...';
+  bar.style.width='10%';log.style.display='block';log.innerHTML='';
+  el.innerHTML='';
+  const logMsg=m=>{log.innerHTML+='<div>'+esc(m)+'</div>';log.scrollTop=log.scrollHeight};
+  logMsg('Starting diagnostic checks...');
   try{
+    bar.style.width='30%';
+    logMsg('Checking system environment...');
     const d=await(await fetch('/api/doctor',{method:'POST'})).json();
-    el.innerHTML='<pre>'+esc(d.stdout||d.stderr||'No output')+'</pre>';
-  }catch(e){el.innerHTML='<div style="color:var(--red)">'+esc(e.message)+'</div>'}
+    bar.style.width='70%';
+    _doctorResults=d;
+    const checks=d.checks||[];
+    const ok=checks.filter(c=>c.status==='ok').length;
+    const warn=checks.filter(c=>c.status==='warn').length;
+    const err=checks.filter(c=>c.status==='error').length;
+    document.getElementById('docOkN').textContent=ok;
+    document.getElementById('docWarnN').textContent=warn;
+    document.getElementById('docErrN').textContent=err;
+    document.getElementById('docTotalN').textContent=checks.length;
+    // Group checks by category
+    const groups={};
+    for(const c of checks){
+      const cat=c.category||'General';
+      if(!groups[cat])groups[cat]=[];
+      groups[cat].push(c);
+    }
+    let html='';
+    for(const[cat,items]of Object.entries(groups)){
+      const catOk=items.filter(c=>c.status==='ok').length;
+      const catTotal=items.length;
+      html+='<div class="doc-section"><div class="doc-section-title" onclick="toggleDocSection(this)"><span class="doc-chev">&#x25B8;</span>'+esc(cat)+' <span style="font-weight:400;color:var(--fg3)">('+catOk+'/'+catTotal+')</span></div>';
+      for(const c of items){
+        const icon=c.status==='ok'?'&#x2713;':c.status==='warn'?'&#x26A0;':'&#x2717;';
+        const dur=c.durationMs?c.durationMs+'ms':'';
+        html+='<div class="doc-check"><div class="doc-check-icon '+c.status+'">'+icon+'</div><div class="doc-check-name">'+esc(c.name)+'</div><div class="doc-check-msg">'+esc(c.message)+'</div><div class="doc-check-time">'+dur+'</div></div>';
+      }
+      html+='</div>';
+      logMsg(cat+': '+catOk+'/'+catTotal+' passed');
+    }
+    el.innerHTML=html;
+    bar.style.width='100%';
+    const now=new Date();
+    document.getElementById('docLastRun').textContent='Last run: '+now.toLocaleTimeString();
+    logMsg('Diagnostic complete: '+ok+' ok, '+warn+' warn, '+err+' error');
+    if(err>0)logMsg('ACTION REQUIRED: '+err+' critical error(s) found');
+  }catch(e){
+    el.innerHTML='<div style="color:var(--red)">'+esc(e.message)+'</div>';
+    logMsg('ERROR: '+e.message);
+  }
+  btn.disabled=false;btn.textContent='Run Full Diagnostic';
+  setTimeout(()=>{bar.style.width='0'},2000);
+}
+function toggleDocSection(titleEl){
+  const chev=titleEl.querySelector('.doc-chev');
+  if(chev)chev.classList.toggle('collapsed');
+  let next=titleEl.nextElementSibling;
+  while(next&&!next.classList.contains('doc-section-title')){
+    next.style.display=next.style.display==='none'?'':'none';
+    next=next.nextElementSibling;
+  }
+}
+function exportDoctorReport(){
+  if(!_doctorResults){alert('Run diagnostics first');return}
+  const lines=['# Open Seed Diagnostic Report','Date: '+new Date().toISOString(),'','## Summary',_doctorResults.summary||'',''];
+  for(const c of (_doctorResults.checks||[])){
+    const icon=c.status==='ok'?'[OK]':c.status==='warn'?'[WARN]':'[ERR]';
+    lines.push(icon+' '+c.name+': '+c.message+(c.durationMs?' ('+c.durationMs+'ms)':''));
+  }
+  const blob=new Blob([lines.join('\n')],{type:'text/markdown'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='diagnostic-report.md';a.click();
 }
 async function runCommentsScan(){
-  const el=document.getElementById('doctorOut');
-  el.innerHTML+='<div style="color:var(--fg3);margin-top:12px">Scanning comments...</div>';
+  const log=document.getElementById('docLog');
+  log.style.display='block';
+  log.innerHTML+='<div style="color:var(--fg3);margin-top:6px">Scanning comments...</div>';
   try{
     const d=await(await fetch('/api/check-comments',{method:'POST'})).json();
-    el.innerHTML+='<pre>'+esc(d.stdout||d.stderr||'No comments found')+'</pre>';
-  }catch(e){el.innerHTML+='<div style="color:var(--red)">'+esc(e.message)+'</div>'}
+    const out=d.stdout||d.stderr||'No comments found';
+    log.innerHTML+='<pre style="margin:4px 0;background:none;border:none;padding:0;font-size:11px">'+esc(out)+'</pre>';
+    log.scrollTop=log.scrollHeight;
+  }catch(e){log.innerHTML+='<div style="color:var(--red)">'+esc(e.message)+'</div>'}
 }
 
 async function checkAuth(){
