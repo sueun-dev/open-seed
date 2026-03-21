@@ -1043,7 +1043,434 @@ DO NOT create architecture documents. Only improve actual code.`,
       stepIdx++;
     }
 
-    // Pipeline complete
+    // ═══════════════════════════════════════════════════════════════
+    // AUTORESEARCH: Self-optimizing loop after pipeline completes
+    // Based on Karpathy's autoresearch methodology:
+    //   1. Generate binary evals from the task
+    //   2. Score current output
+    //   3. If score < 100%, identify weakest step
+    //   4. Mutate that step's prompt
+    //   5. Re-run from that step
+    //   6. Score again — keep mutation if improved, discard if not
+    //   7. Repeat until score ceiling or max iterations
+    // ═══════════════════════════════════════════════════════════════
+
+    const AUTORESEARCH_MAX_ITERATIONS = 5;
+    const AUTORESEARCH_DIR = path.join(childCwd, ".agent", "autoresearch");
+
+    // Generate binary evals from the task automatically
+    function generateBinaryEvals(taskText, projectDir) {
+      const evals = [];
+      const files = (() => { try { return fs.readdirSync(projectDir).filter(f => !f.startsWith(".") && f !== "node_modules"); } catch { return []; } })();
+      const allFilesDeep = (() => {
+        try {
+          const result = [];
+          const walk = (dir, prefix) => {
+            for (const f of fs.readdirSync(dir)) {
+              if (f.startsWith(".") || f === "node_modules") continue;
+              const full = path.join(dir, f);
+              const rel = prefix ? `${prefix}/${f}` : f;
+              const stat = fs.statSync(full);
+              if (stat.isFile()) result.push(rel);
+              else if (stat.isDirectory() && result.length < 200) walk(full, rel);
+            }
+          };
+          walk(projectDir, "");
+          return result;
+        } catch { return []; }
+      })();
+
+      // EVAL 1: Were actual files created (not just AGENTS.md)?
+      const realFiles = files.filter(f => f !== "AGENTS.md" && f !== "package-lock.json");
+      evals.push({
+        name: "files_created",
+        question: "Were real project files created?",
+        pass: realFiles.length >= 2,
+        details: `${realFiles.length} real files: ${realFiles.join(", ")}`
+      });
+
+      // EVAL 2: Does package.json exist with start script?
+      const pkgPath = path.join(projectDir, "package.json");
+      let hasStartScript = false;
+      if (fs.existsSync(pkgPath)) {
+        try {
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+          hasStartScript = !!(pkg.scripts && pkg.scripts.start);
+        } catch {}
+      }
+      evals.push({
+        name: "package_json_start",
+        question: "Does package.json exist with a start script?",
+        pass: hasStartScript,
+        details: hasStartScript ? "start script found" : "missing package.json or start script"
+      });
+
+      // EVAL 3: Are files actual code (not architecture documents)?
+      let hasRealCode = false;
+      const codePatterns = [
+        /require\s*\(/,  /import\s+/,  /function\s+\w+/,  /class\s+\w+/,
+        /app\.(get|post|listen|use)\s*\(/,  /createElement|render|useState/,
+        /canvas|getContext|requestAnimationFrame/,  /socket|WebSocket|io\(/,
+        /<html|<body|<canvas|<div/,  /addEventListener/,  /console\.log/,
+        /express\(|http\.create|net\.create/,  /def\s+\w+|class\s+\w+:/,
+      ];
+      for (const f of allFilesDeep.slice(0, 30)) {
+        try {
+          const content = fs.readFileSync(path.join(projectDir, f), "utf8");
+          if (codePatterns.some(p => p.test(content))) { hasRealCode = true; break; }
+        } catch {}
+      }
+      evals.push({
+        name: "real_code_exists",
+        question: "Do files contain actual executable code (not just design docs)?",
+        pass: hasRealCode,
+        details: hasRealCode ? "real code found" : "only config/design files detected"
+      });
+
+      // EVAL 4: No architecture-document-only output
+      let hasArchDocOnly = false;
+      const archDocPatterns = [
+        /module\.exports\s*=\s*\{[\s\S]*?architecture/,
+        /module\.exports\s*=\s*\{[\s\S]*?project\s*:/,
+        /exports?\s*=\s*\{[\s\S]*?implementationPlan/,
+      ];
+      const srcFiles = allFilesDeep.filter(f => /\.(js|ts|mjs)$/.test(f) && !f.includes("test") && !f.includes("node_modules"));
+      if (srcFiles.length > 0 && srcFiles.length <= 3) {
+        for (const f of srcFiles) {
+          try {
+            const content = fs.readFileSync(path.join(projectDir, f), "utf8");
+            if (archDocPatterns.some(p => p.test(content)) && !codePatterns.slice(4).some(p => p.test(content))) {
+              hasArchDocOnly = true;
+            }
+          } catch {}
+        }
+      }
+      evals.push({
+        name: "not_arch_doc_only",
+        question: "Is the output NOT just architecture documents?",
+        pass: !hasArchDocOnly,
+        details: hasArchDocOnly ? "FAIL: output is just architecture export documents" : "output contains real application code"
+      });
+
+      // EVAL 5: Task-specific keyword matching
+      const taskLower = taskText.toLowerCase();
+      const taskKeywords = [];
+      if (/게임|game|shooting|슈팅/.test(taskLower)) taskKeywords.push("canvas", "game", "loop", "render", "player");
+      if (/서버|server|api|백엔드/.test(taskLower)) taskKeywords.push("listen", "port", "express", "http", "app.get");
+      if (/웹|web|사이트|site|html/.test(taskLower)) taskKeywords.push("html", "body", "script", "css");
+      if (/채팅|chat|메신저|messenger/.test(taskLower)) taskKeywords.push("socket", "message", "send", "receive");
+      if (/온라인|online|멀티|multi/.test(taskLower)) taskKeywords.push("socket", "WebSocket", "io", "connection");
+
+      if (taskKeywords.length > 0) {
+        let matchedKeywords = 0;
+        const allContent = allFilesDeep.slice(0, 30).map(f => {
+          try { return fs.readFileSync(path.join(projectDir, f), "utf8"); } catch { return ""; }
+        }).join("\n");
+        for (const kw of taskKeywords) {
+          if (allContent.toLowerCase().includes(kw.toLowerCase())) matchedKeywords++;
+        }
+        const keywordPassRate = taskKeywords.length > 0 ? matchedKeywords / taskKeywords.length : 1;
+        evals.push({
+          name: "task_keywords_match",
+          question: `Does the code contain task-relevant keywords? (${taskKeywords.join(", ")})`,
+          pass: keywordPassRate >= 0.4,
+          details: `${matchedKeywords}/${taskKeywords.length} keywords found (${(keywordPassRate * 100).toFixed(0)}%)`
+        });
+      }
+
+      // EVAL 6: Multiple source files (not just 1-2 files for a full app)
+      if (isFullApp) {
+        const srcCount = allFilesDeep.filter(f => /\.(js|ts|html|css|py|jsx|tsx)$/.test(f)).length;
+        evals.push({
+          name: "sufficient_files",
+          question: "Are there enough source files for a full application?",
+          pass: srcCount >= 4,
+          details: `${srcCount} source files found`
+        });
+      }
+
+      return evals;
+    }
+
+    // Score output against evals
+    function scoreEvals(evals) {
+      const passed = evals.filter(e => e.pass).length;
+      return {
+        score: passed,
+        maxScore: evals.length,
+        passRate: evals.length > 0 ? (passed / evals.length * 100) : 100,
+        failures: evals.filter(e => !e.pass),
+        passes: evals.filter(e => e.pass),
+        evals,
+      };
+    }
+
+    // Identify which step caused the failures
+    function identifyWeakStep(failures, stepResults) {
+      // Priority: build > design > analyze
+      const failNames = failures.map(f => f.name);
+
+      if (failNames.includes("real_code_exists") || failNames.includes("not_arch_doc_only") || failNames.includes("task_keywords_match") || failNames.includes("sufficient_files")) {
+        return "build"; // BUILD didn't produce real code
+      }
+      if (failNames.includes("package_json_start")) {
+        return "build"; // BUILD didn't set up package.json properly
+      }
+      if (failNames.includes("files_created")) {
+        // Check if design was clear enough
+        const designResult = stepResults.find(r => r.type === "design");
+        if (!designResult || !designResult.summary || designResult.summary.length < 200) {
+          return "design"; // Design was too vague
+        }
+        return "build"; // Design was ok but build didn't execute
+      }
+      return "build"; // Default: BUILD is most likely the problem
+    }
+
+    // Generate a mutated prompt for the weak step
+    function generateMutation(weakStep, failures, iteration, previousMutations) {
+      const failDescriptions = failures.map(f => `- [FAIL] ${f.question}: ${f.details}`).join("\n");
+
+      const mutationStrategies = [
+        // Iteration 1: Be more explicit about what to build
+        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration})
+The previous attempt FAILED these checks:
+${failDescriptions}
+
+YOU MUST FIX THESE FAILURES. Specifically:
+- If "real code" failed: You are writing DESIGN DOCUMENTS instead of APPLICATION CODE. Write ACTUAL server/client code.
+- If "task keywords" failed: Your code doesn't implement what was asked. Re-read the original task.
+- If "architecture doc only" failed: STOP exporting JSON objects. Write executable code with app.listen(), game loops, etc.
+- If "files created" failed: You didn't write enough files. Use the write tool for EVERY file.
+- If "package.json start" failed: Create package.json with a "start" script that runs the app.`,
+
+        // Iteration 2: Give concrete file list
+        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration}) — EXPLICIT FILE LIST
+Previous ${iteration - 1} attempts all failed. The output was NOT what was requested.
+
+FAILED CHECKS:
+${failDescriptions}
+
+YOU MUST CREATE THESE EXACT FILES (adapt to the task):
+1. package.json — with dependencies and "start" script
+2. server.js or index.js — main entry point that RUNS something
+3. public/index.html — if web app, the HTML page
+4. public/game.js or public/app.js — client-side code
+5. Any additional files needed for the task
+
+EACH FILE MUST CONTAIN 50+ LINES OF REAL CODE. Not exports, not JSON, not comments.`,
+
+        // Iteration 3: Completely different approach
+        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration}) — ALTERNATIVE STRATEGY
+${iteration - 1} previous attempts have all failed. CHANGE YOUR APPROACH COMPLETELY.
+
+FAILED CHECKS:
+${failDescriptions}
+
+INSTEAD OF YOUR PREVIOUS APPROACH, TRY THIS:
+1. Do NOT read any existing files first. Start fresh.
+2. Write package.json with express, socket.io, and a "start" script.
+3. Write a working Express server (server.js) with static file serving.
+4. Write the client HTML with embedded JavaScript.
+5. Run npm install && npm start to verify.
+6. If the task involves networking: add WebSocket/Socket.IO.
+7. If the task involves graphics: add HTML5 Canvas with game loop.`,
+
+        // Iteration 4: Minimal viable product
+        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration}) — MINIMUM VIABLE PRODUCT
+ALL previous attempts failed. Build the SIMPLEST possible version that passes all checks.
+
+FAILED CHECKS:
+${failDescriptions}
+
+BUILD THE ABSOLUTE MINIMUM:
+1. ONE server file that serves ONE HTML page
+2. The HTML page must do SOMETHING related to the task
+3. package.json with "start": "node server.js"
+4. npm install must work
+5. npm start must work
+DO NOT over-architect. Build the smallest thing that works.`,
+
+        // Iteration 5: Last resort — ultra explicit
+        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration}) — FINAL ATTEMPT
+This is the LAST attempt. Every previous attempt has failed.
+
+FAILED CHECKS:
+${failDescriptions}
+
+WRITE EXACTLY THIS STRUCTURE:
+- package.json: {"name":"app","scripts":{"start":"node server.js"},"dependencies":{"express":"^4"}}
+- server.js: Express server serving public/ folder on port 3000
+- public/index.html: Full HTML page with the application
+- public/style.css: Styling
+- public/app.js: Client-side JavaScript
+
+DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
+      ];
+
+      const strategyIdx = Math.min(iteration - 1, mutationStrategies.length - 1);
+      return mutationStrategies[strategyIdx];
+    }
+
+    // Save autoresearch results
+    function saveAutoresearchLog(data) {
+      try {
+        if (!fs.existsSync(AUTORESEARCH_DIR)) fs.mkdirSync(AUTORESEARCH_DIR, { recursive: true });
+        const logPath = path.join(AUTORESEARCH_DIR, "results.json");
+        fs.writeFileSync(logPath, JSON.stringify(data, null, 2), "utf8");
+      } catch {}
+    }
+
+    // ── AUTORESEARCH LOOP ──
+    if (!aborted && complexity !== "simple") {
+      const pipelineStartTime = Date.now();
+      const autoresearchLog = {
+        task,
+        startedAt: new Date().toISOString(),
+        baseline: null,
+        experiments: [],
+        bestScore: 0,
+        status: "running",
+      };
+
+      // Score baseline (current pipeline output)
+      const baselineEvals = generateBinaryEvals(task, childCwd);
+      const baselineScore = scoreEvals(baselineEvals);
+
+      autoresearchLog.baseline = {
+        score: baselineScore.score,
+        maxScore: baselineScore.maxScore,
+        passRate: baselineScore.passRate,
+        evals: baselineScore.evals.map(e => ({ name: e.name, pass: e.pass, details: e.details })),
+      };
+      autoresearchLog.bestScore = baselineScore.passRate;
+
+      sendAgi("agi.autoresearch.start", {
+        baselineScore: baselineScore.score,
+        maxScore: baselineScore.maxScore,
+        passRate: baselineScore.passRate,
+        evals: baselineScore.evals.map(e => ({ name: e.name, pass: e.pass, question: e.question, details: e.details })),
+      });
+
+      // Only enter autoresearch loop if score < 100%
+      if (baselineScore.passRate < 100 && !aborted) {
+        let currentScore = baselineScore;
+        let iteration = 0;
+        const promptMutations = {};
+        let consecutivePerfect = 0;
+
+        while (currentScore.passRate < 100 && iteration < AUTORESEARCH_MAX_ITERATIONS && !aborted) {
+          iteration++;
+
+          // Identify which step to fix
+          const weakStep = identifyWeakStep(currentScore.failures, ctx.stepResults);
+          const mutation = generateMutation(weakStep, currentScore.failures, iteration, promptMutations);
+          promptMutations[weakStep] = mutation;
+
+          sendAgi("agi.autoresearch.iteration", {
+            iteration,
+            maxIterations: AUTORESEARCH_MAX_ITERATIONS,
+            weakStep,
+            failureCount: currentScore.failures.length,
+            failures: currentScore.failures.map(f => f.name),
+            mutation: `Attempt ${iteration}: targeting ${weakStep} step`,
+          });
+
+          // Re-run the weak step with mutated prompt
+          const mutatedStep = steps.find(s => s.type === weakStep) || steps.find(s => s.type === "build");
+          if (!mutatedStep) break;
+
+          const mutatedPrompt = buildStepPrompt(mutatedStep) + mutation;
+
+          try {
+            const output = await executeStep(mutatedPrompt, mutatedStep.mode, mutatedStep.maxTurns);
+
+            // Wait for writes to be applied, then re-score
+            const newEvals = generateBinaryEvals(task, childCwd);
+            const newScore = scoreEvals(newEvals);
+
+            const experiment = {
+              iteration,
+              weakStep,
+              score: newScore.score,
+              maxScore: newScore.maxScore,
+              passRate: newScore.passRate,
+              previousPassRate: currentScore.passRate,
+              status: newScore.passRate > currentScore.passRate ? "keep" : "discard",
+              evals: newScore.evals.map(e => ({ name: e.name, pass: e.pass, details: e.details })),
+            };
+            autoresearchLog.experiments.push(experiment);
+
+            sendAgi("agi.autoresearch.result", {
+              iteration,
+              score: newScore.score,
+              maxScore: newScore.maxScore,
+              passRate: newScore.passRate,
+              previousPassRate: currentScore.passRate,
+              status: experiment.status,
+              improved: newScore.passRate > currentScore.passRate,
+              evals: newScore.evals.map(e => ({ name: e.name, pass: e.pass, details: e.details })),
+            });
+
+            if (newScore.passRate > currentScore.passRate) {
+              // KEEP — score improved
+              currentScore = newScore;
+              autoresearchLog.bestScore = newScore.passRate;
+
+              // Update step result in ctx
+              const existingIdx = ctx.stepResults.findIndex(r => r.type === weakStep);
+              if (existingIdx >= 0) {
+                ctx.stepResults[existingIdx] = {
+                  ...ctx.stepResults[existingIdx],
+                  summary: output.summary,
+                  changes: [...(ctx.stepResults[existingIdx].changes || []), ...(output.changes || [])],
+                  status: "completed",
+                  errors: output.errors,
+                };
+              }
+
+              if (newScore.passRate >= 100) {
+                consecutivePerfect++;
+                if (consecutivePerfect >= 1) break; // Perfect score — done
+              }
+            } else {
+              // DISCARD — no improvement, will try different mutation next iteration
+            }
+          } catch (e) {
+            autoresearchLog.experiments.push({
+              iteration, weakStep, score: 0, maxScore: currentScore.maxScore,
+              passRate: currentScore.passRate, status: "error", error: e.message,
+            });
+            sendAgi("agi.autoresearch.error", { iteration, error: e.message });
+          }
+        }
+
+        autoresearchLog.status = currentScore.passRate >= 100 ? "optimized" : "max_iterations";
+        autoresearchLog.finalScore = currentScore.passRate;
+        autoresearchLog.totalIterations = iteration;
+
+        sendAgi("agi.autoresearch.complete", {
+          baselinePassRate: baselineScore.passRate,
+          finalPassRate: currentScore.passRate,
+          improvement: currentScore.passRate - baselineScore.passRate,
+          iterations: iteration,
+          status: autoresearchLog.status,
+        });
+      } else {
+        autoresearchLog.status = "perfect_baseline";
+        sendAgi("agi.autoresearch.complete", {
+          baselinePassRate: baselineScore.passRate,
+          finalPassRate: baselineScore.passRate,
+          improvement: 0,
+          iterations: 0,
+          status: "perfect_baseline",
+        });
+      }
+
+      saveAutoresearchLog(autoresearchLog);
+    }
+
+    // ═══ Pipeline complete ═══
     const completed = ctx.stepResults.filter(r => r.status === "completed").length;
     const failed = ctx.stepResults.filter(r => r.status === "failed").length;
     const success = !aborted && failed === 0;

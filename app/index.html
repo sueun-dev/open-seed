@@ -2479,6 +2479,33 @@ async function startAgiV2(){
           else if(ev.type==='agi.pipeline.fail'){
             agiLog(`Pipeline FAILED: ${ev.error||'unknown'}`,'var(--red)');
           }
+          // ── AUTORESEARCH events ──
+          else if(ev.type==='agi.autoresearch.start'){
+            agiLog(`── AUTORESEARCH ──`,'var(--purple)');
+            agiLog(`Baseline: ${ev.score}/${ev.maxScore} (${ev.passRate.toFixed(0)}%)`,'var(--purple)');
+            for(const e of (ev.evals||[])){
+              agiLog(`  ${e.pass?'✓':'✗'} ${e.question}: ${e.details}`,e.pass?'var(--green)':'var(--red)');
+            }
+          }
+          else if(ev.type==='agi.autoresearch.iteration'){
+            agiLog(`[AR #${ev.iteration}/${ev.maxIterations}] Targeting: ${ev.weakStep} (${ev.failureCount} failures)`,'var(--yellow)');
+          }
+          else if(ev.type==='agi.autoresearch.result'){
+            const icon=ev.improved?'↑':'→';
+            const color=ev.improved?'var(--green)':'var(--fg3)';
+            agiLog(`[AR #${ev.iteration}] ${icon} ${ev.previousPassRate.toFixed(0)}% → ${ev.passRate.toFixed(0)}% (${ev.status})`,(color));
+            for(const e of (ev.evals||[])){
+              if(!e.pass) agiLog(`  ✗ ${e.name}: ${e.details}`,'var(--red)');
+            }
+          }
+          else if(ev.type==='agi.autoresearch.complete'){
+            const improved=ev.improvement>0;
+            agiLog(`── AUTORESEARCH ${ev.status==='perfect_baseline'?'SKIPPED (100%)':improved?'IMPROVED':'DONE'} ──`,'var(--purple)');
+            if(ev.iterations>0)agiLog(`${ev.baselinePassRate.toFixed(0)}% → ${ev.finalPassRate.toFixed(0)}% (+${ev.improvement.toFixed(0)}%) in ${ev.iterations} iterations`,'var(--purple)');
+          }
+          else if(ev.type==='agi.autoresearch.error'){
+            agiLog(`[AR ERROR] ${ev.error}`,'var(--red)');
+          }
           else if(ev.type==='event'){
             // Show ALL engine events — full transparency
             const cls=ev.eventType||'';
