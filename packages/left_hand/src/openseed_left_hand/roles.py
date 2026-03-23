@@ -19,6 +19,7 @@ class Role:
     model: str = "sonnet"  # "opus" for deep reasoning, "sonnet" for implementation
     tools: list[str] = field(default_factory=list)
     thinking_budget: int = 0  # 0 = no extended thinking
+    max_turns: int | None = None  # Per-role max turns (None = use agent default)
 
 
 # ─── Pre-defined Roles ───────────────────────────────────────────────────────

@@ -25,8 +25,20 @@ class AgentDefinition:
 class SpecialistResult:
     """Result from a single specialist agent run."""
     agent_name: str
+    agent_description: str = ""  # For evidence traceability — what this agent specializes in
     findings: list[dict[str, Any]] = field(default_factory=list)
     raw_output: str = ""
     success: bool = True
     error: str = ""
     duration_ms: int = 0
+
+
+@dataclass
+class SynthesisStats:
+    """Statistics from the synthesis process."""
+    total_raw_findings: int = 0
+    agents_succeeded: int = 0
+    agents_failed: int = 0
+    conflicts_resolved: int = 0
+    false_positives_removed: int = 0
+    llm_used: bool = False

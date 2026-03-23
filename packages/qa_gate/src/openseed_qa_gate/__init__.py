@@ -1,7 +1,50 @@
 """Open Seed v2 — QA Gate (specialist reviewers)."""
 
 from openseed_qa_gate.gate import run_qa_gate
-from openseed_qa_gate.agent_loader import load_agent, load_agents_from_dir, load_active_agents
+from openseed_qa_gate.agent_loader import (
+    load_agent,
+    load_agents_from_dir,
+    load_all_agents,
+    load_agents_by_category,
+    load_active_agents,
+)
+from openseed_qa_gate.agent_selector import select_agents
+from openseed_qa_gate.categories import (
+    AgentCategory,
+    CategoryInfo,
+    load_all_categories,
+    get_categories_for_task,
+)
 from openseed_qa_gate.types import AgentDefinition, SpecialistResult
+from openseed_qa_gate.workflow import (
+    WorkflowStage,
+    WorkflowOrchestrator,
+    WorkflowResult,
+    StageResult,
+)
 
-__all__ = ["run_qa_gate", "load_agent", "load_agents_from_dir", "load_active_agents", "AgentDefinition", "SpecialistResult"]
+__all__ = [
+    # gate
+    "run_qa_gate",
+    # agent loader
+    "load_agent",
+    "load_agents_from_dir",
+    "load_all_agents",
+    "load_agents_by_category",
+    "load_active_agents",
+    # agent selector
+    "select_agents",
+    # category system
+    "AgentCategory",
+    "CategoryInfo",
+    "load_all_categories",
+    "get_categories_for_task",
+    # types
+    "AgentDefinition",
+    "SpecialistResult",
+    # workflow orchestrator
+    "WorkflowStage",
+    "WorkflowOrchestrator",
+    "WorkflowResult",
+    "StageResult",
+]

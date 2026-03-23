@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 
 from openseed_brain.state import PipelineState, Plan, PlanTask, FileEntry
-from openseed_core.types import AgentProvider
 
 
 async def plan_node(state: PipelineState) -> dict:

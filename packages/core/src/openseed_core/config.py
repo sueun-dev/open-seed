@@ -117,11 +117,17 @@ class BodyConfig(BaseModel):
 
 
 class MemoryConfig(BaseModel):
-    backend: Literal["qdrant", "sqlite"] = "qdrant"
+    backend: Literal["qdrant", "pgvector", "sqlite"] = "qdrant"
+    # Qdrant (via mem0)
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "openseed"
+    # PostgreSQL + pgvector
+    pgvector_url: str = "postgresql://localhost/openseed"
+    pgvector_collection: str = "openseed_memories"
+    # SQLite fallback
     sqlite_path: Path = Path("~/.openseed/memory.db")
     history_path: Path = Path("~/.openseed/history.db")
+    # Shared embedder settings
     embedding_model: str = "text-embedding-3-small"
     embedding_dims: int = 1536
 
