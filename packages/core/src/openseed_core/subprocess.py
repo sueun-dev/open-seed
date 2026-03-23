@@ -58,11 +58,15 @@ async def run_streaming(
 
     process = await asyncio.create_subprocess_exec(
         *command,
+        stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
         env=full_env,
     )
+    # Close stdin immediately so child process doesn't wait for input
+    if process.stdin:
+        process.stdin.close()
 
     lines: list[StreamLine] = []
     stdout_parts: list[str] = []
