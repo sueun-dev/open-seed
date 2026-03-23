@@ -16,6 +16,13 @@ from openseed_brain.subgraphs import (
     FixSubState,
     build_fix_subgraph,
 )
+from openseed_brain.specialists import (
+    get_specialist_prompt,
+    list_domains,
+    SPECIALIST_PROMPTS,
+    VALID_DOMAINS,
+)
+from openseed_brain.task_router import route_tasks
 
 __all__ = [
     # Graph
@@ -44,4 +51,11 @@ __all__ = [
     "build_qa_subgraph",
     "FixSubState",
     "build_fix_subgraph",
+    # Specialists
+    "get_specialist_prompt",
+    "list_domains",
+    "SPECIALIST_PROMPTS",
+    "VALID_DOMAINS",
+    # Task routing
+    "route_tasks",
 ]
