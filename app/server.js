@@ -3720,14 +3720,17 @@ ${prompt}`
           }
         }
         if (step.type === "fix" && result.status !== "completed") {
-          // FIX failed — ask user for help
+          // FIX failed — offer discussion or AI-vs-AI debate
           sendAgi("agi.pipeline.awaiting_input", {
             stepId: step.id,
             stepType: step.type,
             nextStep: "verify",
             reason: "needs_user_help",
-            summary: `FIX step could not resolve all issues. Please help or provide guidance.`,
+            summary: `FIX step could not resolve all issues.`,
             errors: result.errors || [],
+            discussionTopic: `FIX step failed. Errors: ${(result.errors || []).join("; ")}`,
+            discussionContext: `Task: ${task}\nStep: ${step.title}\nPrevious attempts: ${verifyFixCycles}`,
+            allowDiscussion: true,
           });
           res.write("data: [DONE]\n\n");
           res.end();
@@ -3752,8 +3755,11 @@ ${prompt}`
                 stepType: "fix",
                 nextStep: "verify",
                 reason: "needs_user_help",
-                summary: `VERIFY-FIX loop exhausted ${MAX_VERIFY_FIX_CYCLES} cycles without resolving all issues. Please help or provide guidance.`,
+                summary: `VERIFY-FIX loop exhausted ${MAX_VERIFY_FIX_CYCLES} cycles without resolving all issues.`,
                 errors: result.errors || [],
+                discussionTopic: `VERIFY-FIX loop failed after ${MAX_VERIFY_FIX_CYCLES} cycles. Errors: ${(result.errors || []).join("; ")}`,
+                discussionContext: `Task: ${task}\nCycles attempted: ${MAX_VERIFY_FIX_CYCLES}\nAll step results available.`,
+                allowDiscussion: true,
               });
               res.write("data: [DONE]\n\n");
               res.end();
@@ -3849,6 +3855,114 @@ ${prompt}`
       durationMs: Date.now() - pipelineStartedAt,
       tracePath
     });
+
+    res.write("data: [DONE]\n\n");
+    res.end();
+    return;
+  }
+
+  // ── AGI Discussion System — User↔AI or AI↔AI debate to resolve issues ──
+  if (url.pathname === "/api/agi/discuss" && req.method === "POST") {
+    const body = await readBody(req);
+    const { topic, context, userMessage, mode, provider: discussProvider } = safeJsonParse(body) || {};
+    // mode: "user" (user types input) or "auto" (AI-vs-AI debate)
+
+    if (!topic) { res.writeHead(400); res.end("Missing topic"); return; }
+
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
+    const sendDisc = (type, data) => { try { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); } catch {} };
+
+    try {
+      const { ProviderRegistry } = require(path.join(PROJECT_DIR, "dist", "providers", "registry.js"));
+      const { loadConfig } = require(path.join(PROJECT_DIR, "dist", "core", "config.js"));
+      const config = await loadConfig(CWD);
+      const registry = new ProviderRegistry();
+      const selectedProv = discussProvider || "anthropic";
+
+      if (mode === "auto") {
+        // ── AI-vs-AI Debate Mode ──
+        // Two AI perspectives debate to reach optimal conclusion
+        sendDisc("agi.discussion.start", { mode: "auto", topic });
+
+        const MAX_DEBATE_ROUNDS = 3;
+        const debateHistory = [];
+
+        // Perspective A: Optimistic / Build-forward
+        const perspectiveA = await registry.invokeWithFailover(config, selectedProv, {
+          role: "planner", category: "planning",
+          systemPrompt: "You are Perspective A — the pragmatic builder. You favor practical solutions that unblock progress. Be concise.",
+          prompt: `Topic: ${topic}\n\nContext: ${context || "none"}\n\nPropose the most practical solution to move forward. Be specific — give exact steps. Output JSON:\n{"position": "your position", "reasoning": "why", "steps": ["step 1", "step 2"], "confidence": "high|medium|low"}`,
+          responseFormat: "json"
+        }, {});
+        sendDisc("agi.discussion.message", { from: "AI-A (Builder)", text: perspectiveA.text });
+        debateHistory.push({ from: "A", text: perspectiveA.text });
+
+        // Perspective B: Critical / Risk-aware
+        const perspectiveB = await registry.invokeWithFailover(config, selectedProv, {
+          role: "reviewer", category: "review",
+          systemPrompt: "You are Perspective B — the critical reviewer. You challenge assumptions, find risks, and ensure quality. Be concise.",
+          prompt: `Topic: ${topic}\n\nContext: ${context || "none"}\n\nPerspective A proposed:\n${perspectiveA.text}\n\nChallenge this proposal. What could go wrong? What's missing? Suggest improvements or an alternative. Output JSON:\n{"position": "your position", "challenges": ["challenge 1"], "improvements": ["improvement 1"], "alternative": "if you have a better approach", "confidence": "high|medium|low"}`,
+          responseFormat: "json"
+        }, {});
+        sendDisc("agi.discussion.message", { from: "AI-B (Critic)", text: perspectiveB.text });
+        debateHistory.push({ from: "B", text: perspectiveB.text });
+
+        // Rounds of refinement
+        let lastA = perspectiveA.text;
+        let lastB = perspectiveB.text;
+        for (let round = 2; round <= MAX_DEBATE_ROUNDS; round++) {
+          // A responds to B's challenges
+          const responseA = await registry.invokeWithFailover(config, selectedProv, {
+            role: "planner", category: "planning",
+            systemPrompt: "You are Perspective A. Address the critic's challenges. Adjust your proposal if they have valid points. Be concise.",
+            prompt: `Topic: ${topic}\n\nYour previous position:\n${lastA}\n\nCritic's response:\n${lastB}\n\nAddress their challenges. Update your proposal. If they're right about something, incorporate it. Output JSON:\n{"updatedPosition": "refined position", "accepted": ["what you accepted from critic"], "defended": ["what you defended"], "finalSteps": ["step 1", "step 2"]}`,
+            responseFormat: "json"
+          }, {});
+          sendDisc("agi.discussion.message", { from: `AI-A (Round ${round})`, text: responseA.text });
+          lastA = responseA.text;
+
+          // B reviews A's update
+          const responseB = await registry.invokeWithFailover(config, selectedProv, {
+            role: "reviewer", category: "review",
+            systemPrompt: "You are Perspective B. Review the updated proposal. If acceptable, APPROVE. If not, explain remaining concerns. Be concise.",
+            prompt: `Topic: ${topic}\n\nBuilder's updated proposal:\n${lastA}\n\nIs this acceptable now? Output JSON:\n{"verdict": "approve|needs-work", "reason": "why", "remainingConcerns": []}`,
+            responseFormat: "json"
+          }, {});
+          sendDisc("agi.discussion.message", { from: `AI-B (Round ${round})`, text: responseB.text });
+          lastB = responseB.text;
+
+          // Check if approved
+          if (lastB.toLowerCase().includes('"approve"') || lastB.toLowerCase().includes("verdict\":\"approve")) break;
+        }
+
+        // Final synthesis — combine both perspectives into one conclusion
+        const synthesis = await registry.invokeWithFailover(config, selectedProv, {
+          role: "planner", category: "planning",
+          systemPrompt: "You are a neutral synthesizer. Combine the best of both perspectives into a single actionable conclusion.",
+          prompt: `Topic: ${topic}\n\nDebate summary:\n${debateHistory.map(d => `[${d.from}]: ${d.text}`).join("\n\n")}\n\nFinal Builder position: ${lastA}\nFinal Critic position: ${lastB}\n\nSynthesize the OPTIMAL conclusion. Output JSON:\n{"conclusion": "the final decision", "reasoning": "why this is optimal", "actionSteps": ["step 1", "step 2", "step 3"], "risksAccepted": ["risk 1"], "risksMitigated": ["mitigation 1"]}`,
+          responseFormat: "json"
+        }, {});
+
+        sendDisc("agi.discussion.conclusion", { text: synthesis.text, rounds: debateHistory.length });
+        sendDisc("agi.discussion.done", { mode: "auto" });
+
+      } else {
+        // ── User↔AI Discussion Mode ──
+        sendDisc("agi.discussion.start", { mode: "user", topic });
+
+        const aiResponse = await registry.invokeWithFailover(config, selectedProv, {
+          role: "planner", category: "planning",
+          systemPrompt: "You are discussing an issue with the user. Be helpful, concise, and suggest actionable solutions. Match the user's language.",
+          prompt: `Topic: ${topic}\n\nContext: ${context || "none"}\n\nUser says: ${userMessage}\n\nRespond helpfully. If you can resolve the issue, explain how. If you need more info, ask a specific question.`,
+          responseFormat: "text"
+        }, {});
+
+        sendDisc("agi.discussion.message", { from: "AI", text: aiResponse.text });
+        sendDisc("agi.discussion.done", { mode: "user" });
+      }
+    } catch (err) {
+      sendDisc("agi.discussion.error", { error: err.message || String(err) });
+    }
 
     res.write("data: [DONE]\n\n");
     res.end();
