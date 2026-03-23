@@ -1,7 +1,7 @@
 """
 7-Step Execution Loop: EXPLORE → PLAN → ROUTE → EXECUTE → VERIFY → RETRY → DONE
 
-Pattern from: OmO Sisyphus protocol — Phase 0 through Phase 3.
+Pattern from: OmO Sentinel protocol — Phase 0 through Phase 3.
 
 Steps:
   1. EXPLORE  — search memory, assess codebase context
@@ -22,15 +22,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from openseed_core.auth.claude import require_claude_auth
-from openseed_core.config import SisyphusConfig
+from openseed_core.config import SentinelConfig
 from openseed_core.events import EventBus, EventType
 from openseed_core.subprocess import run_streaming
-from openseed_sisyphus.evidence import (
+from openseed_sentinel.evidence import (
     auto_detect_test_commands,
     verify_files_exist,
     verify_implementation,
 )
-from openseed_sisyphus.prompts import (
+from openseed_sentinel.prompts import (
     ModelFamily,
     PromptVariant,
     detect_model_family,
@@ -97,7 +97,7 @@ def _parse_json_from_text(text: str) -> dict[str, Any]:
 
 class ExecutionLoop:
     """
-    The 7-step Sisyphus execution loop.
+    The 7-step Sentinel execution loop.
 
     Integrates intent classification, codebase exploration, planning,
     routing, execution context, evidence-based verification, and retry.
@@ -111,11 +111,11 @@ class ExecutionLoop:
 
     def __init__(
         self,
-        config: SisyphusConfig | None = None,
+        config: SentinelConfig | None = None,
         event_bus: EventBus | None = None,
         model: str | None = None,
     ) -> None:
-        self.config = config or SisyphusConfig()
+        self.config = config or SentinelConfig()
         self.event_bus = event_bus
         self.model = model
         self._model_family: ModelFamily = (
@@ -181,8 +181,8 @@ class ExecutionLoop:
         while not verify.get("passed", False) and retry_count < 3:
             retry_count += 1
             await self._emit(
-                EventType.SISYPHUS_RETRY,
-                node="sisyphus",
+                EventType.SENTINEL_RETRY,
+                node="sentinel",
                 retry_count=retry_count,
             )
             exec_result = await self._retry(task, working_dir, verify, retry_count, plan, cli_path)

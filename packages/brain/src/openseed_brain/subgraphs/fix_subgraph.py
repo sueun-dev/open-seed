@@ -79,7 +79,7 @@ Be brief — this plan will be fed directly to an automated fix agent."""
 async def fix_node(state: FixSubState) -> dict:
     """
     Apply fixes according to the repair plan using ClaudeAgent (claude-sonnet).
-    Mirrors the logic of openseed_brain.nodes.sisyphus.fix_node but is
+    Mirrors the logic of openseed_brain.nodes.sentinel.fix_node but is
     driven by the locally produced repair_plan rather than QA findings.
     """
     from openseed_left_hand.agent import ClaudeAgent
@@ -122,14 +122,14 @@ Rules:
 async def verify_node(state: FixSubState) -> dict:
     """
     Evidence-based verification that the fix was applied correctly.
-    Uses openseed_sisyphus.evidence.verify_implementation when available;
+    Uses openseed_sentinel.evidence.verify_implementation when available;
     falls back to a lightweight file-existence check.
     """
     working_dir = state.get("working_dir", "")
     task = state.get("task", "")
 
     try:
-        from openseed_sisyphus.evidence import verify_implementation
+        from openseed_sentinel.evidence import verify_implementation
 
         result = await verify_implementation(
             working_dir=working_dir,
@@ -138,7 +138,7 @@ async def verify_node(state: FixSubState) -> dict:
         passed = result.get("passed", False)
         summary = result.get("summary", "Verification complete")
     except Exception as exc:
-        # Fallback: if sisyphus is unavailable, fail safe — don't assume success
+        # Fallback: if sentinel is unavailable, fail safe — don't assume success
         passed = False
         summary = f"Evidence check skipped ({exc}); verification unavailable"
 

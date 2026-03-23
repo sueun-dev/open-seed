@@ -45,7 +45,7 @@ async def record_failure(
     await store.add(
         content=content,
         user_id=user_id,
-        agent_id="sisyphus",
+        agent_id="sentinel",
         memory_type=MemoryType.PROCEDURAL,
         metadata={
             "type": "failure_pattern",

@@ -77,10 +77,10 @@ class QAGateConfig(BaseModel):
     enforce_output_contract: bool = True
 
 
-# ─── Sisyphus ─────────────────────────────────────────────────────────────────
+# ─── Sentinel ─────────────────────────────────────────────────────────────────
 
 
-class SisyphusConfig(BaseModel):
+class SentinelConfig(BaseModel):
     max_retries: int = 10
     stagnation_threshold: int = 3
     backoff_base_ms: int = 5_000
@@ -150,7 +150,7 @@ class OpenSeedConfig(BaseModel):
     left_hand: ClaudeConfig = Field(default_factory=ClaudeConfig)
     right_hand: CodexConfig = Field(default_factory=CodexConfig)
     qa_gate: QAGateConfig = Field(default_factory=QAGateConfig)
-    sisyphus: SisyphusConfig = Field(default_factory=SisyphusConfig)
+    sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     body: BodyConfig = Field(default_factory=BodyConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

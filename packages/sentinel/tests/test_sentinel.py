@@ -1,5 +1,5 @@
 """
-Comprehensive tests for openseed-sisyphus.
+Comprehensive tests for openseed-sentinel.
 
 Coverage:
   - IntentGate: classify_intent (all IntentTypes + fallbacks)
@@ -21,24 +21,24 @@ import pytest
 
 # ─── Core types ───────────────────────────────────────────────────────────────
 
-from openseed_core.config import SisyphusConfig
+from openseed_core.config import SentinelConfig
 from openseed_core.types import Finding, QAResult, Verdict
 
-# ─── Sisyphus modules ─────────────────────────────────────────────────────────
+# ─── Sentinel modules ─────────────────────────────────────────────────────────
 
-from openseed_sisyphus.backoff import compute_backoff_ms, should_retry
-from openseed_sisyphus.delegation import build_delegation_prompt
-from openseed_sisyphus.evidence import (
+from openseed_sentinel.backoff import compute_backoff_ms, should_retry
+from openseed_sentinel.delegation import build_delegation_prompt
+from openseed_sentinel.evidence import (
     Evidence,
     VerificationResult,
     verify_files_exist,
 )
-from openseed_sisyphus.execution_loop import ExecutionLoop, ExecutionResult
-from openseed_sisyphus.intent_gate import IntentClassification, IntentType, classify_intent
-from openseed_sisyphus.loop import LoopDecision, LoopState, evaluate_loop
-from openseed_sisyphus.oracle import OracleAdvice
-from openseed_sisyphus.progress import ProgressSnapshot, ProgressTracker, ProgressUpdate
-from openseed_sisyphus.stagnation import is_stagnated, stagnation_message
+from openseed_sentinel.execution_loop import ExecutionLoop, ExecutionResult
+from openseed_sentinel.intent_gate import IntentClassification, IntentType, classify_intent
+from openseed_sentinel.loop import LoopDecision, LoopState, evaluate_loop
+from openseed_sentinel.oracle import OracleAdvice
+from openseed_sentinel.progress import ProgressSnapshot, ProgressTracker, ProgressUpdate
+from openseed_sentinel.stagnation import is_stagnated, stagnation_message
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -92,11 +92,11 @@ def _make_verification(all_passed: bool = True) -> VerificationResult:
 
 
 class TestIntentGate:
-    """Tests for openseed_sisyphus.intent_gate.classify_intent."""
+    """Tests for openseed_sentinel.intent_gate.classify_intent."""
 
     @pytest.fixture
     def _patch_auth(self):
-        with patch("openseed_sisyphus.intent_gate.require_claude_auth", return_value="/usr/bin/claude"):
+        with patch("openseed_sentinel.intent_gate.require_claude_auth", return_value="/usr/bin/claude"):
             yield
 
     # ── Implementation ────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ class TestIntentGate:
             '"suggested_approach": "plan and implement"}'
         )
         with patch(
-            "openseed_sisyphus.intent_gate.run_streaming",
+            "openseed_sentinel.intent_gate.run_streaming",
             side_effect=_make_streaming_side_effect(json_text),
         ):
             result = await classify_intent("Add a new login page")
@@ -126,7 +126,7 @@ class TestIntentGate:
             '"suggested_approach": "explore → answer"}'
         )
         with patch(
-            "openseed_sisyphus.intent_gate.run_streaming",
+            "openseed_sentinel.intent_gate.run_streaming",
             side_effect=_make_streaming_side_effect(json_text),
         ):
             result = await classify_intent("How does LangGraph work?")
@@ -143,7 +143,7 @@ class TestIntentGate:
             '"suggested_approach": "diagnose → fix minimally"}'
         )
         with patch(
-            "openseed_sisyphus.intent_gate.run_streaming",
+            "openseed_sentinel.intent_gate.run_streaming",
             side_effect=_make_streaming_side_effect(json_text),
         ):
             result = await classify_intent("Fix the broken pytest suite")
@@ -156,7 +156,7 @@ class TestIntentGate:
     async def test_classify_intent_fallback_on_parse_error(self, _patch_auth):
         """Garbled LLM output → open_ended fallback with low confidence."""
         with patch(
-            "openseed_sisyphus.intent_gate.run_streaming",
+            "openseed_sentinel.intent_gate.run_streaming",
             side_effect=_make_streaming_side_effect("not valid json at all!!!"),
         ):
             result = await classify_intent("Do something")
@@ -172,7 +172,7 @@ class TestIntentGate:
         async def _noop(command, timeout_seconds, on_line):  # noqa: ARG001
             pass  # never calls on_line
 
-        with patch("openseed_sisyphus.intent_gate.run_streaming", side_effect=_noop):
+        with patch("openseed_sentinel.intent_gate.run_streaming", side_effect=_noop):
             result = await classify_intent("Whatever task")
 
         assert result.intent_type == IntentType.OPEN_ENDED
@@ -186,7 +186,7 @@ class TestIntentGate:
             '"reasoning": "unknown", "suggested_approach": "?"}'
         )
         with patch(
-            "openseed_sisyphus.intent_gate.run_streaming",
+            "openseed_sentinel.intent_gate.run_streaming",
             side_effect=_make_streaming_side_effect(json_text),
         ):
             result = await classify_intent("Some task")
@@ -204,7 +204,7 @@ class TestIntentGate:
             '\nHope that helps!'
         )
         with patch(
-            "openseed_sisyphus.intent_gate.run_streaming",
+            "openseed_sentinel.intent_gate.run_streaming",
             side_effect=_make_streaming_side_effect(json_text),
         ):
             result = await classify_intent("What do you think about this design?")
@@ -221,7 +221,7 @@ class TestIntentGate:
             '"reasoning": "ok", "suggested_approach": "assess"}'
         )
         with patch(
-            "openseed_sisyphus.intent_gate.run_streaming",
+            "openseed_sentinel.intent_gate.run_streaming",
             side_effect=_make_streaming_side_effect(json_text),
         ) as mock_rs:
             result = await classify_intent("Task", codebase_context=long_context)
@@ -237,12 +237,12 @@ class TestIntentGate:
 
 
 class TestExecutionLoop:
-    """Tests for openseed_sisyphus.execution_loop.ExecutionLoop."""
+    """Tests for openseed_sentinel.execution_loop.ExecutionLoop."""
 
     @pytest.fixture
     def _patch_auth(self):
         with patch(
-            "openseed_sisyphus.execution_loop.require_claude_auth",
+            "openseed_sentinel.execution_loop.require_claude_auth",
             return_value="/usr/bin/claude",
         ):
             yield
@@ -257,7 +257,7 @@ class TestExecutionLoop:
             failing_commands=[],
         )
         with patch(
-            "openseed_sisyphus.execution_loop.verify_implementation",
+            "openseed_sentinel.execution_loop.verify_implementation",
             new_callable=AsyncMock,
             return_value=ok,
         ):
@@ -273,7 +273,7 @@ class TestExecutionLoop:
             failing_commands=["pytest"],
         )
         with patch(
-            "openseed_sisyphus.execution_loop.verify_implementation",
+            "openseed_sentinel.execution_loop.verify_implementation",
             new_callable=AsyncMock,
             return_value=fail,
         ):
@@ -317,7 +317,7 @@ class TestExecutionLoop:
             self._route_side_effect(),
         ]
         with patch(
-            "openseed_sisyphus.execution_loop.run_streaming",
+            "openseed_sentinel.execution_loop.run_streaming",
             side_effect=call_sequence,
         ):
             loop = ExecutionLoop()
@@ -351,10 +351,10 @@ class TestExecutionLoop:
         verify_mock = AsyncMock(side_effect=[fail, ok])
 
         with patch(
-            "openseed_sisyphus.execution_loop.verify_implementation",
+            "openseed_sentinel.execution_loop.verify_implementation",
             verify_mock,
         ), patch(
-            "openseed_sisyphus.execution_loop.run_streaming",
+            "openseed_sentinel.execution_loop.run_streaming",
             side_effect=[
                 self._explore_side_effect(),
                 self._plan_side_effect(),
@@ -375,7 +375,7 @@ class TestExecutionLoop:
         """When verify always fails the loop exits after exactly 3 retries."""
         retry_responses = [self._retry_side_effect() for _ in range(3)]
         with patch(
-            "openseed_sisyphus.execution_loop.run_streaming",
+            "openseed_sentinel.execution_loop.run_streaming",
             side_effect=[
                 self._explore_side_effect(),
                 self._plan_side_effect(),
@@ -397,7 +397,7 @@ class TestExecutionLoop:
     async def test_explore_returns_structured_data(self, _patch_auth):
         """_explore should parse JSON and return a dict with codebase_state."""
         with patch(
-            "openseed_sisyphus.execution_loop.run_streaming",
+            "openseed_sentinel.execution_loop.run_streaming",
             side_effect=self._explore_side_effect(),
         ):
             loop = ExecutionLoop()
@@ -416,7 +416,7 @@ class TestExecutionLoop:
     async def test_plan_returns_structured_data(self, _patch_auth):
         """_plan should parse JSON and return files_to_create / complexity."""
         with patch(
-            "openseed_sisyphus.execution_loop.run_streaming",
+            "openseed_sentinel.execution_loop.run_streaming",
             side_effect=self._plan_side_effect(),
         ):
             loop = ExecutionLoop()
@@ -435,7 +435,7 @@ class TestExecutionLoop:
     async def test_route_returns_decision(self, _patch_auth):
         """_route decision must be one of the four valid routing choices."""
         with patch(
-            "openseed_sisyphus.execution_loop.run_streaming",
+            "openseed_sentinel.execution_loop.run_streaming",
             side_effect=self._route_side_effect(),
         ):
             loop = ExecutionLoop()
@@ -458,7 +458,7 @@ class TestExecutionLoop:
             failing_commands=[],
         )
         with patch(
-            "openseed_sisyphus.execution_loop.verify_implementation",
+            "openseed_sentinel.execution_loop.verify_implementation",
             new_callable=AsyncMock,
             return_value=ok,
         ) as mock_vi:
@@ -478,7 +478,7 @@ class TestExecutionLoop:
     async def test_explore_fallback_on_non_json(self, _patch_auth):
         """When Claude returns plain text instead of JSON, _explore uses fallback dict."""
         with patch(
-            "openseed_sisyphus.execution_loop.run_streaming",
+            "openseed_sentinel.execution_loop.run_streaming",
             side_effect=_make_streaming_side_effect("I cannot analyse this codebase right now."),
         ):
             loop = ExecutionLoop()
@@ -500,7 +500,7 @@ class TestExecutionLoop:
 
 
 class TestDelegation:
-    """Tests for openseed_sisyphus.delegation.build_delegation_prompt."""
+    """Tests for openseed_sentinel.delegation.build_delegation_prompt."""
 
     def test_build_delegation_prompt_has_all_sections(self):
         prompt = build_delegation_prompt(
@@ -588,7 +588,7 @@ class TestDelegation:
 
 
 class TestBackoff:
-    """Tests for openseed_sisyphus.backoff — pure functions, no mocking required."""
+    """Tests for openseed_sentinel.backoff — pure functions, no mocking required."""
 
     def test_compute_backoff_initial(self):
         """0 failures → base delay (5000 ms by default)."""
@@ -634,7 +634,7 @@ class TestBackoff:
 
 
 class TestStagnation:
-    """Tests for openseed_sisyphus.stagnation — pure functions."""
+    """Tests for openseed_sentinel.stagnation — pure functions."""
 
     def _update(self, stagnation_count: int) -> ProgressUpdate:
         return ProgressUpdate(
@@ -674,7 +674,7 @@ class TestStagnation:
 
 
 class TestProgress:
-    """Tests for openseed_sisyphus.progress.ProgressTracker."""
+    """Tests for openseed_sentinel.progress.ProgressTracker."""
 
     def test_first_call_is_baseline(self):
         """First track() call is always a baseline — not yet improvement."""
@@ -757,7 +757,7 @@ class TestProgress:
 
 
 class TestEvaluateLoop:
-    """Tests for openseed_sisyphus.loop.evaluate_loop."""
+    """Tests for openseed_sentinel.loop.evaluate_loop."""
 
     # ── PASS: QA + verification both pass ────────────────────────────────────
 
@@ -774,7 +774,7 @@ class TestEvaluateLoop:
         qa = _make_qa_result(Verdict.BLOCK, findings=[Finding(description="err")])
         vr = _make_verification(all_passed=False)
         state = LoopState(consecutive_failures=0)
-        cfg = SisyphusConfig(max_retries=5, stagnation_threshold=10)
+        cfg = SentinelConfig(max_retries=5, stagnation_threshold=10)
 
         decision = await evaluate_loop(qa, vr, state, config=cfg)
         assert decision.action == "retry"
@@ -789,7 +789,7 @@ class TestEvaluateLoop:
         qa = _make_qa_result(Verdict.BLOCK, findings=[Finding(description="error")])
         vr = _make_verification(all_passed=False)
         state = LoopState(consecutive_failures=1)
-        cfg = SisyphusConfig(stagnation_threshold=3, oracle_enabled=True, max_retries=10)
+        cfg = SentinelConfig(stagnation_threshold=3, oracle_enabled=True, max_retries=10)
 
         oracle_advice = OracleAdvice(
             diagnosis="root cause",
@@ -797,8 +797,8 @@ class TestEvaluateLoop:
             should_abandon=False,
         )
 
-        with patch("openseed_sisyphus.loop.is_stagnated", return_value=True), patch(
-            "openseed_sisyphus.loop.consult_oracle",
+        with patch("openseed_sentinel.loop.is_stagnated", return_value=True), patch(
+            "openseed_sentinel.loop.consult_oracle",
             new_callable=AsyncMock,
             return_value=oracle_advice,
         ):
@@ -816,9 +816,9 @@ class TestEvaluateLoop:
         vr = _make_verification(all_passed=False)
         # Oracle already consulted in a prior iteration
         state = LoopState(consecutive_failures=1, oracle_consulted=True)
-        cfg = SisyphusConfig(stagnation_threshold=3, oracle_enabled=True, max_retries=10)
+        cfg = SentinelConfig(stagnation_threshold=3, oracle_enabled=True, max_retries=10)
 
-        with patch("openseed_sisyphus.loop.is_stagnated", return_value=True):
+        with patch("openseed_sentinel.loop.is_stagnated", return_value=True):
             decision = await evaluate_loop(qa, vr, state, config=cfg)
 
         assert decision.action == "user_escalate"
@@ -828,7 +828,7 @@ class TestEvaluateLoop:
     async def test_evaluate_loop_abort_on_max_retries(self):
         qa = _make_qa_result(Verdict.BLOCK, findings=[Finding(description="err")])
         vr = _make_verification(all_passed=False)
-        cfg = SisyphusConfig(max_retries=3, stagnation_threshold=100)
+        cfg = SentinelConfig(max_retries=3, stagnation_threshold=100)
         # consecutive_failures equals max_retries → should_retry returns False
         state = LoopState(consecutive_failures=3)
 
@@ -850,7 +850,7 @@ class TestEvaluateLoop:
         qa = _make_qa_result(Verdict.BLOCK, findings=[Finding(description="fatal")])
         vr = _make_verification(all_passed=False)
         state = LoopState(consecutive_failures=0)
-        cfg = SisyphusConfig(stagnation_threshold=3, oracle_enabled=True, max_retries=10)
+        cfg = SentinelConfig(stagnation_threshold=3, oracle_enabled=True, max_retries=10)
 
         abandon_advice = OracleAdvice(
             diagnosis="impossible task",
@@ -859,8 +859,8 @@ class TestEvaluateLoop:
             reason="The task cannot be completed with available tools.",
         )
 
-        with patch("openseed_sisyphus.loop.is_stagnated", return_value=True), patch(
-            "openseed_sisyphus.loop.consult_oracle",
+        with patch("openseed_sentinel.loop.is_stagnated", return_value=True), patch(
+            "openseed_sentinel.loop.consult_oracle",
             new_callable=AsyncMock,
             return_value=abandon_advice,
         ):
@@ -876,7 +876,7 @@ class TestEvaluateLoop:
 
 
 class TestEvidenceVerifyFilesExist:
-    """Tests for openseed_sisyphus.evidence.verify_files_exist."""
+    """Tests for openseed_sentinel.evidence.verify_files_exist."""
 
     async def test_file_exists_passes(self):
         with tempfile.TemporaryDirectory() as tmp:

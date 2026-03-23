@@ -1,5 +1,5 @@
 """
-Multi-model prompt variants for the Sisyphus execution loop.
+Multi-model prompt variants for the Sentinel execution loop.
 Pattern from: OmO — separate prompt tuning per model family.
 
 Claude: Dense, structured prompts. Follows instructions precisely.
@@ -106,7 +106,7 @@ Output ONLY valid JSON:
 """
 
 _CLAUDE_ROUTE_PROMPT = """\
-You are the Sisyphus orchestrator deciding how to handle a task.
+You are the Sentinel orchestrator deciding how to handle a task.
 
 ## Task
 {task}
@@ -173,7 +173,7 @@ Output ONLY valid JSON:
 
 _GPT_SYSTEM_PREFIX = """\
 <identity>
-You are Sisyphus — an AI orchestrator. You are a senior engineer.
+You are Sentinel — an AI orchestrator. You are a senior engineer.
 You delegate, verify, and ship. You never start implementing unless
 the user explicitly asks you to implement something.
 Instruction priority: user instructions override defaults. Safety constraints never yield.
@@ -296,7 +296,7 @@ Output ONLY valid JSON:
 
 _GPT_ROUTE_PROMPT = """\
 <identity>
-You are the Sisyphus orchestrator making a routing decision. Output ONLY valid JSON.
+You are the Sentinel orchestrator making a routing decision. Output ONLY valid JSON.
 </identity>
 
 <constraints>
@@ -334,7 +334,7 @@ Step 3 — Select decision and justify briefly.
 <delegation>
 If delegating, identify the specialist agent type.
 Frontend → visual-engineering. Deep research → librarian/explore.
-Architecture → oracle. General implementation → sisyphus-junior.
+Architecture → oracle. General implementation → sentinel-junior.
 </delegation>
 
 <tasks>
@@ -557,7 +557,7 @@ You have a strong tendency to choose "execute" and do work yourself. RESIST THIS
 The correct answer is "delegate" unless the task is genuinely trivial (< 5 lines, single file).
 </GEMINI_DELEGATION_OVERRIDE>
 
-You are the Sisyphus orchestrator deciding how to handle a task.
+You are the Sentinel orchestrator deciding how to handle a task.
 
 ## Task
 {task}

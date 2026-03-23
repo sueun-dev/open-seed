@@ -22,7 +22,7 @@ from openseed_brain.nodes.intake import intake_node
 from openseed_brain.nodes.plan import plan_node
 from openseed_brain.nodes.implement import implement_node
 from openseed_brain.nodes.qa_gate import qa_gate_node
-from openseed_brain.nodes.sisyphus import sisyphus_check_node, fix_node
+from openseed_brain.nodes.sentinel import sentinel_check_node, fix_node
 from openseed_brain.nodes.deploy import deploy_node
 from openseed_brain.nodes.memorize import memorize_node
 from openseed_brain.routing import route_after_qa, route_after_intake
@@ -33,7 +33,7 @@ from openseed_brain.subgraphs.fix_subgraph import build_fix_subgraph
 
 async def user_escalate_node(state: PipelineState) -> dict:
     """
-    User escalation node — pipeline reaches here when Sisyphus gives up.
+    User escalation node — pipeline reaches here when Sentinel gives up.
     If compiled with interrupt_before=["user_escalate"], the graph pauses
     and waits for human input via Command(resume=...).
     """
@@ -74,7 +74,7 @@ def build_graph(use_subgraphs: bool = False) -> StateGraph:
         graph.add_node("qa_gate", qa_gate_node, retry_policy=QA_RETRY)
         graph.add_node("fix", fix_node)
 
-    graph.add_node("sisyphus_check", sisyphus_check_node)
+    graph.add_node("sentinel_check", sentinel_check_node)
     graph.add_node("user_escalate", user_escalate_node)
     graph.add_node("deploy", deploy_node, retry_policy=DEPLOY_RETRY)
     graph.add_node("memorize", memorize_node)
@@ -93,11 +93,11 @@ def build_graph(use_subgraphs: bool = False) -> StateGraph:
 
     graph.add_edge("plan", "implement")
     graph.add_edge("implement", "qa_gate")
-    graph.add_edge("qa_gate", "sisyphus_check")
+    graph.add_edge("qa_gate", "sentinel_check")
 
-    # Sisyphus decides: pass → deploy, fail → fix, exhausted → user_escalate
+    # Sentinel decides: pass → deploy, fail → fix, exhausted → user_escalate
     graph.add_conditional_edges(
-        "sisyphus_check",
+        "sentinel_check",
         route_after_qa,
         {
             "deploy": "deploy",

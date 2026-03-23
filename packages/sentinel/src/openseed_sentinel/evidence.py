@@ -114,7 +114,7 @@ async def verify_implementation(
     """
     Full verification: check files exist + auto-detect + run test commands.
 
-    This is the evidence gate — the Sisyphus loop only advances
+    This is the evidence gate — the Sentinel loop only advances
     if ALL evidence checks pass.
     """
     evidence: list[Evidence] = []

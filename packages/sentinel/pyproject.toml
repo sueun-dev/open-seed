@@ -1,7 +1,7 @@
 [project]
-name = "openseed-sisyphus"
+name = "openseed-sentinel"
 version = "2.0.0-alpha.0"
-description = "Sisyphus protocol — infinite retry loop until zero errors"
+description = "Sentinel protocol — infinite retry loop until zero errors"
 requires-python = ">=3.11"
 dependencies = [
     "openseed-core",
@@ -12,4 +12,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/openseed_sisyphus"]
+packages = ["src/openseed_sentinel"]

@@ -126,7 +126,7 @@ class TestBuildGraphWithSubgraphs:
             "implement_node": AsyncMock(return_value={}),
             "deploy_node": AsyncMock(return_value={}),
             "memorize_node": AsyncMock(return_value={}),
-            "sisyphus_check_node": AsyncMock(return_value={}),
+            "sentinel_check_node": AsyncMock(return_value={}),
         }
 
         # Patch heavy qa / fix imports so compile() doesn't need real credentials
@@ -149,7 +149,7 @@ class TestBuildGraphWithSubgraphs:
     def test_build_graph_with_subgraphs_has_all_standard_nodes(self):
         """All non-subgraph nodes are still present when use_subgraphs=True."""
         graph = self._build()
-        standard_nodes = {"intake", "plan", "implement", "sisyphus_check", "user_escalate", "deploy", "memorize"}
+        standard_nodes = {"intake", "plan", "implement", "sentinel_check", "user_escalate", "deploy", "memorize"}
         node_ids = set(graph.nodes.keys())
         assert standard_nodes.issubset(node_ids), f"Missing nodes: {standard_nodes - node_ids}"
 
@@ -165,7 +165,7 @@ class TestBuildGraphWithSubgraphs:
         graph = self._build()
         edges: set[tuple[str, str]] = set(graph.edges)
         assert ("implement", "qa_gate") in edges
-        assert ("qa_gate", "sisyphus_check") in edges
+        assert ("qa_gate", "sentinel_check") in edges
         assert ("fix", "qa_gate") in edges
         assert ("deploy", "memorize") in edges
 
@@ -184,7 +184,7 @@ class TestBuildGraphWithoutSubgraphsDefault:
             "plan_node": AsyncMock(return_value={}),
             "implement_node": AsyncMock(return_value={}),
             "qa_gate_node": AsyncMock(return_value={}),
-            "sisyphus_check_node": AsyncMock(return_value={}),
+            "sentinel_check_node": AsyncMock(return_value={}),
             "fix_node": AsyncMock(return_value={}),
             "deploy_node": AsyncMock(return_value={}),
             "memorize_node": AsyncMock(return_value={}),
@@ -198,7 +198,7 @@ class TestBuildGraphWithoutSubgraphsDefault:
         graph = self._build()
         expected = {
             "intake", "plan", "implement", "qa_gate",
-            "sisyphus_check", "fix", "user_escalate", "deploy", "memorize",
+            "sentinel_check", "fix", "user_escalate", "deploy", "memorize",
         }
         node_ids = set(graph.nodes.keys())
         assert expected.issubset(node_ids), f"Missing nodes: {expected - node_ids}"
@@ -212,7 +212,7 @@ class TestBuildGraphWithoutSubgraphsDefault:
             "plan_node": AsyncMock(return_value={}),
             "implement_node": AsyncMock(return_value={}),
             "qa_gate_node": AsyncMock(return_value={}),
-            "sisyphus_check_node": AsyncMock(return_value={}),
+            "sentinel_check_node": AsyncMock(return_value={}),
             "fix_node": AsyncMock(return_value={}),
             "deploy_node": AsyncMock(return_value={}),
             "memorize_node": AsyncMock(return_value={}),
@@ -240,6 +240,6 @@ class TestBuildGraphWithoutSubgraphsDefault:
         edges: set[tuple[str, str]] = set(graph.edges)
         assert ("plan", "implement") in edges
         assert ("implement", "qa_gate") in edges
-        assert ("qa_gate", "sisyphus_check") in edges
+        assert ("qa_gate", "sentinel_check") in edges
         assert ("fix", "qa_gate") in edges
         assert ("deploy", "memorize") in edges

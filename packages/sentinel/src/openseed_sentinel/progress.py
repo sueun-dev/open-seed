@@ -1,5 +1,5 @@
 """
-Open Seed v2 — Progress tracking for Sisyphus loop.
+Open Seed v2 — Progress tracking for Sentinel loop.
 
 Tracks TODO completion, file changes, and test results to determine
 if real progress is being made vs spinning in place.
@@ -37,7 +37,7 @@ class ProgressUpdate:
 
 class ProgressTracker:
     """
-    Tracks progress across Sisyphus retry cycles.
+    Tracks progress across Sentinel retry cycles.
 
     Key insight from OmO: only count as "progress" if the snapshot
     actually changed, not just because the agent claimed to be done.

@@ -82,7 +82,7 @@ async def store_fix_strategy(
     return await store.add(
         content=content,
         user_id="system",
-        agent_id="sisyphus",
+        agent_id="sentinel",
         memory_type=MemoryType.PROCEDURAL,
         metadata={
             "type": "fix_strategy",

@@ -28,7 +28,7 @@ def route_after_intake(state: PipelineState) -> Literal["plan", "implement"]:
 
 def route_after_qa(state: PipelineState) -> Literal["deploy", "fix", "user_escalate", "end"]:
     """
-    After QA + Sisyphus check, decide next step.
+    After QA + Sentinel check, decide next step.
 
     - QA passed → deploy
     - QA failed, retries left → fix

@@ -1,5 +1,5 @@
 """
-Open Seed v2 — Exponential backoff for Sisyphus retries.
+Open Seed v2 — Exponential backoff for Sentinel retries.
 
 Pattern from: OmO todo-continuation-enforcer idle-event.ts
   cooldown = BASE * 2^min(failures, CAP)

@@ -5,7 +5,7 @@ const STEPS = [
   { id: "plan", label: "Plan", icon: "📋" },
   { id: "implement", label: "Build", icon: "🔨" },
   { id: "qa_gate", label: "QA Gate", icon: "⚖️" },
-  { id: "sisyphus_check", label: "Sisyphus", icon: "♾️" },
+  { id: "sentinel_check", label: "Sentinel", icon: "♾️" },
   { id: "deploy", label: "Deploy", icon: "🚀" },
   { id: "memorize", label: "Memory", icon: "💾" },
 ];

@@ -14,7 +14,7 @@ dependencies = [
     "openseed-left-hand",
     "openseed-right-hand",
     "openseed-qa-gate",
-    "openseed-sisyphus",
+    "openseed-sentinel",
     "openseed-body",
     "openseed-memory",
 ]
