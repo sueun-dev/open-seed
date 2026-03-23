@@ -1,0 +1,30 @@
+[project]
+name = "openseed-cli"
+version = "2.0.0-alpha.0"
+description = "CLI and API server for Open Seed"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "rich>=13.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "websockets>=13.0",
+    "openseed-core",
+    "openseed-brain",
+    "openseed-left-hand",
+    "openseed-right-hand",
+    "openseed-qa-gate",
+    "openseed-sisyphus",
+    "openseed-body",
+    "openseed-memory",
+]
+
+[project.scripts]
+openseed = "openseed_cli.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openseed_cli"]

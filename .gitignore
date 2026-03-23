@@ -1,14 +1,37 @@
-node_modules/
-dist/
-.agent/
-.research/
-.pytest_cache/
-coverage/
-workspace/
-*.tmp
-*.log
-.DS_Store
-app/node_modules/
-release/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node
+node_modules/
+web/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Secrets
+.env
+*.pem
+
+# Research repos (cloned for analysis, not part of source)
+research/
+
+# Docker
+docker/data/
+
+# Memory DB
+*.db
+
+# Logs
+*.log
+*.tmp
