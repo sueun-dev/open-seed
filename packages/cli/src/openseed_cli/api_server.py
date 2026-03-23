@@ -91,6 +91,89 @@ async def get_config() -> dict:
     return cfg.model_dump()
 
 
+@app.get("/api/resolve-folder")
+async def resolve_folder(name: str) -> dict:
+    """Resolve a folder name to its full absolute path by searching common locations."""
+    import os
+    import subprocess
+
+    folder_name = name.strip().strip("/")
+    if not folder_name:
+        return {"error": "Empty folder name", "matches": []}
+
+    # If already absolute path, just verify it exists
+    if name.startswith("/") and os.path.isdir(name):
+        return {"matches": [name]}
+
+    # Search common parent directories
+    home = os.path.expanduser("~")
+    search_roots = [
+        home,
+        os.path.join(home, "Desktop"),
+        os.path.join(home, "Documents"),
+        os.path.join(home, "Developer"),
+        os.path.join(home, "Projects"),
+        "/Volumes",
+        "/tmp",
+    ]
+
+    # Also search all mounted volumes
+    if os.path.isdir("/Volumes"):
+        for vol in os.listdir("/Volumes"):
+            vol_path = os.path.join("/Volumes", vol)
+            if os.path.isdir(vol_path):
+                search_roots.append(vol_path)
+
+    matches = []
+    seen = set()
+
+    # Quick search: walk 3 levels deep in common locations
+    for root in search_roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            for dirpath, dirnames, _ in os.walk(root):
+                # Limit depth to 4 levels
+                depth = dirpath.replace(root, "").count(os.sep)
+                if depth > 4:
+                    dirnames.clear()
+                    continue
+                # Skip hidden dirs and common noise
+                dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in ("node_modules", "__pycache__", ".git", "Library", "Applications")]
+                for d in dirnames:
+                    if d.lower() == folder_name.lower():
+                        full = os.path.join(dirpath, d)
+                        if full not in seen:
+                            seen.add(full)
+                            matches.append(full)
+                            if len(matches) >= 10:
+                                return {"matches": matches}
+        except PermissionError:
+            continue
+
+    # Fallback: use mdfind on macOS (Spotlight)
+    if not matches:
+        try:
+            result = subprocess.run(
+                ["mdfind", f"kMDItemFSName == '{folder_name}' && kMDItemContentType == 'public.folder'"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.strip().split("\n"):
+                line = line.strip()
+                if line and os.path.isdir(line) and line not in seen:
+                    # Skip system folders
+                    if "/Library/" in line or "/Applications/" in line:
+                        continue
+                    seen.add(line)
+                    matches.append(line)
+                    if len(matches) >= 10:
+                        break
+        except Exception:
+            pass
+
+    return {"matches": matches}
+
+
 @app.get("/api/browse")
 async def browse_folder(path: str = "") -> dict:
     """Browse folders on the server filesystem."""

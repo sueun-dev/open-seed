@@ -102,16 +102,61 @@ export default function App() {
           </div>
 
           <div
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.style.borderColor = "#2563eb"; e.currentTarget.style.background = "#0c1a2e"; }}
+            onDragLeave={(e) => { e.currentTarget.style.borderColor = "#222"; e.currentTarget.style.background = "transparent"; }}
+            onDrop={async (e) => {
+              e.preventDefault(); e.stopPropagation();
+              e.currentTarget.style.borderColor = "#222";
+              e.currentTarget.style.background = "transparent";
+              // Get folder name from drop
+              let folderName = "";
+              const items = e.dataTransfer.items;
+              if (items?.length) {
+                for (let i = 0; i < items.length; i++) {
+                  const entry = (items[i] as any).webkitGetAsEntry?.();
+                  if (entry?.isDirectory) { folderName = entry.name; break; }
+                }
+              }
+              if (!folderName) {
+                const files = e.dataTransfer.files;
+                if (files.length > 0) folderName = (files[0] as any).path || files[0].name;
+              }
+              if (!folderName) {
+                const text = e.dataTransfer.getData("text/plain");
+                if (text) folderName = text.trim();
+              }
+              if (!folderName) return;
+              // If already absolute path, use directly
+              if (folderName.startsWith("/")) { setWorkingDir(folderName); return; }
+              // Resolve folder name to full path via server
+              try {
+                const res = await fetch(`/api/resolve-folder?name=${encodeURIComponent(folderName)}`);
+                const data = await res.json();
+                if (data.matches?.length === 1) {
+                  setWorkingDir(data.matches[0]);
+                } else if (data.matches?.length > 1) {
+                  // Show picker for multiple matches
+                  const choice = window.prompt(
+                    `Multiple folders named "${folderName}" found:\n\n${data.matches.map((m: string, i: number) => `${i + 1}. ${m}`).join("\n")}\n\nEnter number:`,
+                    "1"
+                  );
+                  const idx = parseInt(choice || "1", 10) - 1;
+                  if (idx >= 0 && idx < data.matches.length) setWorkingDir(data.matches[idx]);
+                } else {
+                  setWorkingDir("/" + folderName); // Fallback
+                }
+              } catch { setWorkingDir("/" + folderName); }
+            }}
             style={{
               display: "flex", gap: 8, marginBottom: 24, padding: "8px 12px",
-              borderRadius: 8, border: "1px solid #222",
+              borderRadius: 8, border: "2px dashed #222", transition: "all 0.2s",
             }}
           >
             <span style={{ color: "#555", fontSize: 12, lineHeight: "32px", whiteSpace: "nowrap" }}>📁 Output:</span>
             <input
               value={workingDir}
               onChange={(e) => setWorkingDir(e.target.value)}
-              placeholder="Click Browse to select folder, or type full path..."
+              placeholder="Drag folder here, Browse, or type full path..."
               style={{
                 flex: 1, padding: "6px 12px", borderRadius: 6,
                 border: "none", background: "transparent", color: "#888",
