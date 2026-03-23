@@ -68,19 +68,58 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
     # Build and run graph
     state = initial_state(task=task, working_dir=str(Path(working_dir).resolve()))
 
-    # TODO: Add checkpointer for resume support
-    graph = compile_graph()
+    # Checkpointer required for astream + state tracking
+    checkpoint_dir = str(Path("~/.openseed/checkpoints").expanduser())
+    graph = compile_graph(checkpoint_dir=checkpoint_dir)
 
     console.print("\n[bold]Pipeline starting...[/bold]\n")
 
     try:
-        result = await graph.ainvoke(state)
+        # Use streaming to show real-time progress
+        from openseed_brain.streaming import PipelineStreamMode
 
-        # Summary
+        config = {"configurable": {"thread_id": f"run-{id(state)}"}}
+
+        console.print()
+        async for chunk in graph.astream(state, config=config, stream_mode="updates"):
+            if isinstance(chunk, dict):
+                for node_name, update in chunk.items():
+                    # Show node execution
+                    console.print(f"  [bold cyan]▶[/] [bold]{node_name}[/bold]")
+
+                    # Show messages from this node
+                    node_messages = update.get("messages", [])
+                    for msg in node_messages:
+                        text = str(msg)[:200]
+                        console.print(f"    [dim]{text}[/dim]")
+
+                    # Show errors
+                    node_errors = update.get("errors", [])
+                    for err in node_errors:
+                        console.print(f"    [red]✗ {err.message}[/red]")
+
+                    # Show QA verdict
+                    qa = update.get("qa_result")
+                    if qa:
+                        color = {"pass": "green", "warn": "yellow", "block": "red"}.get(qa.verdict.value, "white")
+                        console.print(f"    [bold {color}]QA: {qa.verdict.value.upper()}[/] — {qa.synthesis[:100]}")
+
+                    # Show deploy result
+                    deploy = update.get("deploy_result")
+                    if deploy:
+                        if deploy.success:
+                            console.print(f"    [green]✓ Deployed: {deploy.message}[/green]")
+                        else:
+                            console.print(f"    [red]✗ Deploy failed: {deploy.message}[/red]")
+
+        # Get final state
+        final_state = await graph.aget_state(config)
+        result = final_state.values if final_state else {}
+
         errors = result.get("errors", [])
-        messages = result.get("messages", [])
         deploy = result.get("deploy_result")
 
+        console.print()
         if not errors:
             console.print(Panel(
                 "[bold green]Pipeline COMPLETE — zero errors[/bold green]",
