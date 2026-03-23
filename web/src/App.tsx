@@ -11,6 +11,7 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [events, setEvents] = useState<any[]>([]);
   const [showBrowser, setShowBrowser] = useState(false);
+  const [provider, setProvider] = useState<"claude" | "codex" | "both">("claude");
 
   const startRun = async () => {
     if (!task.trim() || running) return;
@@ -43,7 +44,7 @@ export default function App() {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task, working_dir: workingDir }),
+        body: JSON.stringify({ task, working_dir: workingDir, provider }),
       });
       const data = await res.json();
       if (data.error) {
@@ -75,6 +76,23 @@ export default function App() {
 
       {tab === "game" ? <SnakeGame /> : (
         <>
+          {/* Provider selector */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+            {(["claude", "codex", "both"] as const).map((p) => (
+              <button key={p} onClick={() => setProvider(p)} style={{
+                padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                border: provider === p ? "1px solid #2563eb" : "1px solid #333",
+                background: provider === p ? "#1e3a5f" : "#111",
+                color: provider === p ? "#60a5fa" : "#666",
+              }}>
+                {p === "claude" ? "🟣 Claude" : p === "codex" ? "🟢 Codex" : "⚡ Both"}
+              </button>
+            ))}
+            <span style={{ color: "#444", fontSize: 11, lineHeight: "28px", marginLeft: 8 }}>
+              {provider === "claude" ? "Deep reasoning (Opus/Sonnet)" : provider === "codex" ? "Fast parallel (GPT-5)" : "Claude designs + Codex builds"}
+            </span>
+          </div>
+
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
             <input
               value={task}

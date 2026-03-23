@@ -38,6 +38,10 @@ class ClaudeAgent:
     Usage:
         agent = ClaudeAgent(config)
         response = await agent.invoke("Analyze this architecture", model="opus")
+
+        # Multi-turn session:
+        response1 = await agent.invoke("Analyze this", session_id="my-session")
+        response2 = await agent.invoke("Now fix it", continue_session=True)
     """
 
     def __init__(
@@ -48,6 +52,7 @@ class ClaudeAgent:
         self.config = config or ClaudeConfig()
         self.event_bus = event_bus
         self._cli_path: str | None = None
+        self._last_session_id: str | None = None
 
     def _resolve_cli(self) -> str:
         """Find and verify Claude CLI."""
@@ -74,6 +79,8 @@ class ClaudeAgent:
         allowed_tools: list[str] | None = None,
         max_turns: int | None = None,
         role: str | None = None,
+        session_id: str | None = None,
+        continue_session: bool = False,
     ) -> ClaudeResponse:
         """
         Invoke Claude for a single task.
@@ -109,6 +116,11 @@ class ClaudeAgent:
         resolved_model = self._resolve_model(model)
 
         cmd = [cli, "--print", "--dangerously-skip-permissions"]
+        # Session support: continue previous conversation
+        if continue_session and self._last_session_id:
+            cmd.extend(["--resume", self._last_session_id])
+        elif session_id:
+            cmd.extend(["--session-id", session_id])
         if resolved_model:
             cmd.extend(["--model", resolved_model])
         if system_prompt:
@@ -137,9 +149,15 @@ class ClaudeAgent:
         result = await run_streaming(
             cmd,
             cwd=working_dir,
-            timeout_seconds=self.config.max_turns * 60,  # Generous timeout
+            timeout_seconds=self.config.max_turns * 60,
             on_line=on_line,
         )
+
+        # Capture session_id for multi-turn continuation
+        for line in result.lines:
+            if line.parsed and line.parsed.get("session_id"):
+                self._last_session_id = line.parsed["session_id"]
+                break
 
         return ClaudeResponse(
             text="\n".join(text_parts),
