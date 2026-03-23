@@ -38,10 +38,16 @@ class GitChannel(DeployChannel):
             if init.exit_code != 0:
                 return ChannelResult(channel="git", success=False, message=f"git init failed: {init.stderr}")
 
-        # Stage all changes
-        stage = await run_simple(["git", "add", "-A"], cwd=working_dir)
+        # Stage all changes (use "." instead of "-A" to respect .gitignore)
+        stage = await run_simple(["git", "add", "."], cwd=working_dir)
         if stage.exit_code != 0:
-            return ChannelResult(channel="git", success=False, message=f"git add failed: {stage.stderr}")
+            # Fallback: try adding only known file types
+            stage = await run_simple(
+                ["git", "add", "*.js", "*.jsx", "*.ts", "*.tsx", "*.json", "*.html", "*.css", "*.py", "*.md"],
+                cwd=working_dir,
+            )
+            if stage.exit_code != 0:
+                return ChannelResult(channel="git", success=False, message=f"git add failed: {stage.stderr[:200]}")
 
         # Check if there's anything to commit
         status = await run_simple(["git", "status", "--porcelain"], cwd=working_dir)
