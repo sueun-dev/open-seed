@@ -1,0 +1,155 @@
+"""
+Open Seed v2 — Sisyphus main loop.
+
+The infinite retry loop that guarantees zero errors.
+Build → Test → Fail? → Fix → Retest. Until 0 errors. Never stops early.
+
+Pattern from: OmO Sisyphus protocol + todo-continuation-enforcer
+
+Escalation chain:
+  retry (backoff) → retry (different approach) → Oracle → User
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from openseed_core.config import SisyphusConfig
+from openseed_core.events import EventBus, EventType
+from openseed_core.types import QAResult, Verdict
+from openseed_sisyphus.backoff import compute_backoff_ms, should_retry
+from openseed_sisyphus.evidence import VerificationResult
+from openseed_sisyphus.oracle import OracleAdvice, consult_oracle
+from openseed_sisyphus.progress import ProgressSnapshot, ProgressTracker
+from openseed_sisyphus.stagnation import is_stagnated
+
+
+@dataclass
+class LoopState:
+    """Sisyphus loop state."""
+    retry_count: int = 0
+    consecutive_failures: int = 0
+    oracle_consulted: bool = False
+    oracle_advice: OracleAdvice | None = None
+    user_escalated: bool = False
+    failure_history: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LoopDecision:
+    """What the Sisyphus loop decides to do next."""
+    action: str  # "retry", "oracle", "user_escalate", "pass", "abort"
+    reason: str
+    backoff_ms: int = 0
+    oracle_advice: OracleAdvice | None = None
+
+
+async def evaluate_loop(
+    qa_result: QAResult,
+    verification: VerificationResult | None,
+    loop_state: LoopState,
+    config: SisyphusConfig | None = None,
+    task: str = "",
+    event_bus: EventBus | None = None,
+) -> LoopDecision:
+    """
+    Evaluate whether to continue the Sisyphus loop.
+
+    Decision tree:
+    1. QA passed + verification passed → PASS
+    2. QA failed, retries left, not stagnated → RETRY (with backoff)
+    3. Stagnated (3+ cycles no progress) → ORACLE
+    4. Oracle consulted but still failing → USER_ESCALATE
+    5. Max retries exhausted → ABORT
+
+    Args:
+        qa_result: Latest QA gate result
+        verification: File/command verification result
+        loop_state: Current loop state
+        config: Sisyphus configuration
+        task: Original task (for Oracle context)
+        event_bus: For streaming events
+
+    Returns:
+        LoopDecision with next action
+    """
+    cfg = config or SisyphusConfig()
+    tracker = ProgressTracker()
+
+    # 1. Check if we passed
+    qa_passed = qa_result.verdict == Verdict.PASS
+    verification_passed = verification.all_passed if verification else True
+
+    if qa_passed and verification_passed:
+        return LoopDecision(action="pass", reason="QA passed and all evidence verified")
+
+    # Track progress
+    snapshot = ProgressSnapshot(
+        incomplete_count=len([f for f in qa_result.findings]),
+        error_count=len([f for f in qa_result.findings]),
+    )
+    progress = tracker.track(snapshot)
+
+    # 2. Check stagnation
+    if is_stagnated(progress, cfg.stagnation_threshold):
+        if event_bus:
+            await event_bus.emit_simple(
+                EventType.SISYPHUS_STAGNATION,
+                node="sisyphus",
+                stagnation_count=progress.stagnation_count,
+            )
+
+        # 3. Consult Oracle if not already done
+        if cfg.oracle_enabled and not loop_state.oracle_consulted:
+            if event_bus:
+                await event_bus.emit_simple(EventType.SISYPHUS_ESCALATE, node="sisyphus", escalation="oracle")
+
+            advice = await consult_oracle(
+                task=task,
+                failure_history=loop_state.failure_history,
+                current_errors=[f.description for f in qa_result.findings[:5]],
+                event_bus=event_bus,
+            )
+            loop_state.oracle_consulted = True
+            loop_state.oracle_advice = advice
+
+            if advice.should_abandon:
+                return LoopDecision(action="abort", reason=f"Oracle recommends abandoning: {advice.reason}")
+
+            return LoopDecision(
+                action="retry",
+                reason=f"Oracle suggests new approach: {advice.suggested_approach[:200]}",
+                oracle_advice=advice,
+            )
+
+        # 4. User escalation
+        return LoopDecision(
+            action="user_escalate",
+            reason=f"Stagnated for {progress.stagnation_count} cycles, Oracle already consulted",
+        )
+
+    # 5. Check retry budget
+    if not should_retry(loop_state.consecutive_failures, cfg.max_retries):
+        return LoopDecision(action="abort", reason=f"Max retries ({cfg.max_retries}) exhausted")
+
+    # 6. Retry with backoff
+    backoff = compute_backoff_ms(
+        loop_state.consecutive_failures,
+        base_ms=cfg.backoff_base_ms,
+        cap_exponent=cfg.backoff_cap_exponent,
+        max_ms=cfg.backoff_max_ms,
+    )
+
+    if event_bus:
+        await event_bus.emit_simple(
+            EventType.SISYPHUS_RETRY,
+            node="sisyphus",
+            retry_count=loop_state.retry_count + 1,
+            backoff_ms=backoff,
+        )
+
+    return LoopDecision(
+        action="retry",
+        reason=f"Retry {loop_state.retry_count + 1} (backoff {backoff}ms)",
+        backoff_ms=backoff,
+    )
