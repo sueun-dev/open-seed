@@ -562,10 +562,10 @@ const server = http.createServer(async (req, res) => {
     // Extract keywords from question and grep for them in the codebase
     // This fills the biggest gap vs Cursor/Windsurf (they have semantic search, we do keyword grep)
     if (totalCtxLen < CTX_BUDGET) {
-      const keywords = question.split(/\s+/)
-        .filter(w => w.length > 4 && !/^(what|where|when|which|does|this|that|have|from|with|about|should|could|would|their|there|these|those|after|before|between|during|into)$/i.test(w))
-        .map(w => w.replace(/[^a-zA-Z0-9_]/g, ""))
-        .filter(w => w.length > 4)
+      const STOPWORDS = new Set(["what","where","when","which","does","this","that","have","from","with","about","should","could","would","their","there","these","those","after","before","between","during","into"]);
+      const keywords = question.split(" ").filter(Boolean)
+        .map(w => { let clean = ""; for (const ch of w) { const c = ch.charCodeAt(0); if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c === 95) clean += ch; } return clean; })
+        .filter(w => w.length > 4 && !STOPWORDS.has(w.toLowerCase()))
         .slice(0, 3);
       if (keywords.length > 0) {
         try {
@@ -590,7 +590,8 @@ const server = http.createServer(async (req, res) => {
     if (activeFile && totalCtxLen < CTX_BUDGET) {
       const base = require("node:path").basename(activeFile).replace(/\.[^.]+$/, "");
       const dir = require("node:path").dirname(activeFile);
-      const isTest = /\.(test|spec)\.(ts|js|tsx|jsx)$/.test(activeFile);
+      const fileLower = activeFile.toLowerCase();
+      const isTest = fileLower.includes(".test.") || fileLower.includes(".spec.");
       if (isTest) {
         // Viewing test → find source
         const srcName = base.replace(/\.(test|spec)$/, "");
@@ -4598,8 +4599,9 @@ ${prompt}`
       openaiHistory.push({ role: "assistant", content: round1OpenAI });
       send("openai", round1OpenAI);
 
-      // Check if there are disagreements
-      let hasDisagreement = /REJECT|MODIFY/i.test(round1OpenAI);
+      // Check if there are disagreements — keyword presence in AI's structured verdict output
+      const openAILower = round1OpenAI.toLowerCase();
+      let hasDisagreement = openAILower.includes("reject") || openAILower.includes("modify");
       let roundCount = 1;
       let lastClaudeResponse = round1Claude;
       let lastOpenAIResponse = round1OpenAI;
@@ -4629,7 +4631,7 @@ ${prompt}`
         send("openai", lastOpenAIResponse);
 
         // Check if still disagreeing
-        hasDisagreement = /MODIFY/i.test(lastOpenAIResponse);
+        hasDisagreement = lastOpenAIResponse.toLowerCase().includes("modify");
         // On final round, force conclusion regardless
         if (roundCount >= MAX_ROUNDS) hasDisagreement = false;
       }
