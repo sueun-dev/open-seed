@@ -793,10 +793,17 @@ ${contextLines.join("\n")}`;
   // ── AGI Pipeline (server-orchestrated) ──
   if (url.pathname === "/api/agi/run" && req.method === "POST") {
     const body = await readBody(req);
-    const { task, targetDir, provider } = safeJsonParse(body) || {};
-    if (!task) { res.writeHead(400); res.end("Missing task"); return; }
+    const { task: rawTask, targetDir, provider } = safeJsonParse(body) || {};
+    if (!rawTask) { res.writeHead(400); res.end("Missing task"); return; }
+    // task will be cleaned of [Previous Run: ...] tags after previous-run detection
+    let task = rawTask;
 
     // Workspace setup — targetDir can be absolute path or relative to CWD
+    if (!CWD) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "No workspace open. Open a folder first." }));
+      return;
+    }
     let childCwd = CWD;
     let projName = path.basename(CWD);
     if (targetDir) {
@@ -807,27 +814,384 @@ ${contextLines.join("\n")}`;
         try {
           fs.mkdirSync(childCwd, { recursive: true });
         } catch (error) {
+          res.writeHead(400, { "Content-Type": "application/json" });
           const hint = path.isAbsolute(targetDir)
             ? `Target folder "${targetDir}" could not be created. If you meant a workspace subfolder, use "${targetDir.replace(/^\/+/, "")}" instead of an absolute path.`
             : `Target folder "${targetDir}" could not be created inside the workspace.`;
-          throw new Error(`${hint} ${error.message}`);
+          res.end(JSON.stringify({ error: `${hint} ${error.message}` }));
+          return;
         }
+      }
+    } else {
+      // No targetDir — create a safe subdirectory so we don't pollute the user's workspace
+      const safeName = `agi-${Date.now().toString(36)}`;
+      childCwd = path.join(CWD, safeName);
+      projName = safeName;
+      fs.mkdirSync(childCwd, { recursive: true });
+    }
+
+    // ═══ Previous Run Detection (before SSE starts) ═══
+    const prevAgentDir = path.join(childCwd, ".agent");
+    const prevRunSummaryPath = path.join(prevAgentDir, "run-summary.json");
+    let previousRunSummary = null;
+    const userChoseContinue = /\[Previous Run:\s*continue\]/i.test(task);
+    const userChoseFresh = /\[Previous Run:\s*fresh\]/i.test(task);
+    const userAlreadyChose = userChoseContinue || userChoseFresh;
+
+    if (fs.existsSync(prevRunSummaryPath)) {
+      try { previousRunSummary = JSON.parse(fs.readFileSync(prevRunSummaryPath, "utf8")); } catch {}
+    }
+
+    // If previous run exists and user hasn't chosen yet → ask via SSE and return
+    if (previousRunSummary && !userAlreadyChose) {
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
+      const sendEvt = (type, data) => { try { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); } catch {} };
+      const prevTask = previousRunSummary.task || "(unknown)";
+      const prevFiles = previousRunSummary.filesCreated || 0;
+      const prevSteps = previousRunSummary.completedSteps || 0;
+      const prevTotal = previousRunSummary.totalSteps || 0;
+      const prevSuccess = previousRunSummary.success;
+      const prevDate = previousRunSummary.completedAt ? new Date(previousRunSummary.completedAt).toLocaleString() : "unknown";
+      const isKo = /[가-힣]/.test(task || "");
+      sendEvt("agi.previous_run.detected", {
+        previousTask: prevTask, filesCreated: prevFiles, stepsCompleted: `${prevSteps}/${prevTotal}`,
+        success: prevSuccess, completedAt: prevDate,
+        decisions: (previousRunSummary.decisions || []).slice(0, 5),
+        debateConclusion: previousRunSummary.debateConclusion || "",
+        message: isKo
+          ? `이전 실행 결과가 있습니다 (${prevDate}). 이어서 할까요, 새로 시작할까요?`
+          : `A previous run exists (${prevDate}). Continue from it or start fresh?`,
+        options: [
+          { id: "continue", label: isKo ? "이어서 하기" : "Continue",
+            detail: isKo ? `이전 분석/결정을 유지하고 그 위에 작업합니다 (${prevFiles}개 파일 보존)` : `Keep previous analysis/decisions and build on top (${prevFiles} files preserved)`,
+            promptFragment: "[Previous Run: continue]" },
+          { id: "fresh", label: isKo ? "새로 시작" : "Start Fresh",
+            detail: isKo ? "이전 결과를 모두 삭제하고 처음부터 다시 시작합니다" : "Delete previous results and start from scratch",
+            promptFragment: "[Previous Run: fresh]" }
+        ]
+      });
+      sendEvt("agi.pipeline.awaiting_input", { stepId: "pre-pipeline", stepType: "previous_run_check", nextStep: "analyze", reason: "previous_run_detected" });
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
+    // ═══ Preflight Self-Healing System (AI-Driven) ═══
+    // 1. Run deterministic checks (is git installed? is node 18+? etc.)
+    // 2. If ANY check fails → ask AI to diagnose and fix it
+    // 3. AI runs bash commands, reads error output, tries solutions
+    // 4. If AI can't fix → AI explains to user what to do
+    // NO hardcoded remedies. NO if/else rules. AI decides everything.
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive"
+    });
+    const sendPreflight = (type, data) => {
+      try { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); } catch {}
+    };
+    sendPreflight("agi.preflight.start", { message: "Running pre-flight checks..." });
+
+    const cp = require("child_process");
+    const selectedProvider = provider || "openai";
+
+    // Gather environment info once — AI will use this to make decisions
+    const envInfo = {
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      shell: process.env.SHELL || "unknown",
+      home: os.homedir(),
+      cwd: childCwd,
+      user: os.userInfo().username,
+      pathDirs: (process.env.PATH || "").split(":").slice(0, 10),
+    };
+
+    // Run all checks — collect failures
+    const preflightChecks = [];
+    function runCheck(name, fn) {
+      try {
+        fn();
+        preflightChecks.push({ name, status: "ok", error: null });
+        sendPreflight("agi.preflight.check", { name, status: "ok" });
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        preflightChecks.push({ name, status: "failed", error });
+        sendPreflight("agi.preflight.check", { name, status: "failed", error });
       }
     }
 
-    // Ensure target directory is a git repo with at least one commit
-    if (!fs.existsSync(path.join(childCwd, ".git"))) {
-      try {
-        const cp = require("child_process");
-        cp.execSync("git init", { cwd: childCwd, stdio: "ignore" });
-        cp.execSync("git commit --allow-empty -m 'init'", { cwd: childCwd, stdio: "ignore", env: { ...process.env, GIT_AUTHOR_NAME: "AGI", GIT_AUTHOR_EMAIL: "agi@local", GIT_COMMITTER_NAME: "AGI", GIT_COMMITTER_EMAIL: "agi@local" } });
-      } catch {}
+    runCheck("git", () => {
+      const out = cp.execSync("git --version 2>&1", { encoding: "utf8", timeout: 5000 }).trim();
+      if (!out.includes("git version")) throw new Error("git not found");
+    });
+    runCheck("node", () => {
+      const major = parseInt(process.version.replace("v", "").split(".")[0], 10);
+      if (major < 18) throw new Error(`Node.js ${process.version} too old (need 18+)`);
+    });
+    runCheck("npm", () => {
+      cp.execSync("npm --version", { stdio: "ignore", timeout: 5000 });
+    });
+    runCheck("provider-auth", () => {
+      const { getProviderAuthStatus } = require(path.join(PROJECT_DIR, "dist", "providers", "auth.js"));
+      let testConfig;
+      try { testConfig = JSON.parse(fs.readFileSync(path.join(CWD, ".agent", "config.json"), "utf8")); } catch {
+        testConfig = { providers: {
+          anthropic: { enabled: selectedProvider === "anthropic" || selectedProvider === "both", authMode: "oauth", defaultModel: "claude-opus-4-6" },
+          openai: { enabled: selectedProvider === "openai" || selectedProvider === "both", authMode: "oauth", defaultModel: "gpt-5.4" }
+        }};
+      }
+      const toCheck = selectedProvider === "both" ? ["anthropic", "openai"] : [selectedProvider];
+      for (const pid of toCheck) {
+        const status = getProviderAuthStatus(pid, testConfig.providers?.[pid]);
+        if (!status.ready) throw new Error(`${pid}: ${status.summary}`);
+      }
+    });
+    runCheck("write-access", () => {
+      const testFile = path.join(childCwd, ".agi-preflight-test");
+      fs.writeFileSync(testFile, "test", "utf8");
+      fs.unlinkSync(testFile);
+    });
+    runCheck("disk-space", () => {
+      const dfOut = cp.execSync(`df -k "${childCwd}" 2>&1 | tail -1`, { encoding: "utf8", timeout: 5000 });
+      const availKB = parseInt(dfOut.trim().split(/\s+/)[3], 10);
+      if (Number.isFinite(availKB) && availKB < 500000) throw new Error(`Only ${Math.round(availKB / 1024)}MB free (need 500MB+)`);
+    });
+
+    // If all passed → continue immediately
+    const failures = preflightChecks.filter(c => c.status === "failed");
+
+    if (failures.length > 0) {
+      // ── AI Self-Healing: ask AI to diagnose and fix all failures ──
+      sendPreflight("agi.preflight.healing", {
+        message: `${failures.length} issue(s) found — AI is diagnosing and attempting to fix...`,
+        failures: failures.map(f => ({ name: f.name, error: f.error }))
+      });
+
+      // Find a working provider for the healing call.
+      // If provider-auth itself failed, try the other provider or fall back to guidance-only.
+      let healingProvider = null;
+      const providerAuthFailed = failures.some(f => f.name === "provider-auth");
+      if (!providerAuthFailed) {
+        healingProvider = selectedProvider === "both" ? "anthropic" : selectedProvider;
+      } else {
+        // Try the opposite provider
+        const opposite = selectedProvider === "anthropic" ? "openai" : "anthropic";
+        try {
+          const { getProviderAuthStatus } = require(path.join(PROJECT_DIR, "dist", "providers", "auth.js"));
+          let tc; try { tc = JSON.parse(fs.readFileSync(path.join(CWD, ".agent", "config.json"), "utf8")); } catch { tc = { providers: { anthropic: { enabled: true, authMode: "oauth", defaultModel: "claude-opus-4-6" }, openai: { enabled: true, authMode: "oauth", defaultModel: "gpt-5.4" } } }; }
+          const st = getProviderAuthStatus(opposite, tc.providers?.[opposite]);
+          if (st.ready) healingProvider = opposite;
+        } catch {}
+      }
+
+      let healed = false;
+
+      if (healingProvider) {
+        // Ask AI to fix the failures
+        try {
+          const { ProviderRegistry } = require(path.join(PROJECT_DIR, "dist", "providers", "registry.js"));
+          const { loadConfig } = require(path.join(PROJECT_DIR, "dist", "core", "config.js"));
+          const healConfig = await loadConfig(CWD);
+          const healRegistry = new ProviderRegistry();
+
+          const failureReport = failures.map(f => `- ${f.name}: ${f.error}`).join("\n");
+          const healPrompt = `You are a system diagnostician for an AGI coding engine called Open Seed.
+
+## Environment
+- Platform: ${envInfo.platform} (${envInfo.arch})
+- Node: ${envInfo.nodeVersion}
+- Shell: ${envInfo.shell}
+- User: ${envInfo.user}
+- Home: ${envInfo.home}
+- Working directory: ${envInfo.cwd}
+- PATH (first 10): ${envInfo.pathDirs.join(":")}
+- Selected AI provider: ${selectedProvider}
+
+## Failed Pre-flight Checks
+${failureReport}
+
+## Your Job
+For EACH failure, output a JSON array of fix attempts. Each attempt is a bash command to run.
+After the commands, output a "userGuidance" message for any issue you CANNOT fix via bash (e.g., provider auth requires interactive login).
+
+Rules:
+- Only output commands that are SAFE and non-destructive
+- Do NOT use sudo unless absolutely necessary
+- If a tool needs to be installed, use the package manager appropriate for the platform
+- If you cannot fix something (e.g., OAuth login is interactive), say so clearly in userGuidance
+- Match the user's language: if the task contains Korean, write guidance in Korean
+
+The user's task starts with: "${task.slice(0, 100)}"
+
+Output ONLY this JSON (no markdown fences, no explanation):
+{
+  "fixes": [
+    { "name": "check-name", "commands": ["bash command 1", "bash command 2"], "explanation": "what this does" }
+  ],
+  "userGuidance": "Message to show user for things AI cannot auto-fix. Empty string if all fixed."
+}`;
+
+          const healResponse = await healRegistry.invokeWithFailover(healConfig, healingProvider, {
+            role: "planner",
+            category: "planning",
+            systemPrompt: "You are a system diagnostician. Output valid JSON only. No markdown fences.",
+            prompt: healPrompt,
+            responseFormat: "json"
+          }, {
+            onTextDelta: async (chunk) => {
+              if (typeof chunk === "string" && chunk.trim()) {
+                sendPreflight("agi.preflight.healing.stream", { text: chunk });
+              }
+            }
+          });
+
+          // Parse AI response
+          let healPlan = null;
+          try {
+            const raw = healResponse.text.trim();
+            const jsonStart = raw.indexOf("{");
+            const jsonEnd = raw.lastIndexOf("}");
+            if (jsonStart !== -1 && jsonEnd > jsonStart) {
+              healPlan = JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
+            }
+          } catch {}
+
+          if (healPlan?.fixes && Array.isArray(healPlan.fixes)) {
+            // Execute AI's fix commands
+            for (const fix of healPlan.fixes) {
+              if (!fix.commands || !Array.isArray(fix.commands)) continue;
+              sendPreflight("agi.preflight.healing.attempt", {
+                name: fix.name,
+                explanation: fix.explanation || "",
+                commands: fix.commands
+              });
+              for (const cmd of fix.commands) {
+                if (typeof cmd !== "string" || !cmd.trim()) continue;
+                try {
+                  const output = cp.execSync(cmd, { encoding: "utf8", timeout: 120000, cwd: childCwd, stdio: ["ignore", "pipe", "pipe"] });
+                  sendPreflight("agi.preflight.healing.result", { command: cmd, success: true, output: (output || "").slice(0, 500) });
+                } catch (cmdErr) {
+                  const stderr = cmdErr.stderr ? cmdErr.stderr.toString().slice(0, 500) : cmdErr.message;
+                  sendPreflight("agi.preflight.healing.result", { command: cmd, success: false, error: stderr });
+                }
+              }
+            }
+
+            // Re-run failed checks to see if they're fixed now
+            const stillFailing = [];
+            for (const f of failures) {
+              const original = preflightChecks.find(c => c.name === f.name);
+              // Re-run the same check
+              try {
+                if (f.name === "git") cp.execSync("git --version", { stdio: "ignore", timeout: 5000 });
+                else if (f.name === "npm") cp.execSync("npm --version", { stdio: "ignore", timeout: 5000 });
+                else if (f.name === "write-access") { const tf = path.join(childCwd, ".agi-preflight-test"); fs.writeFileSync(tf, "test"); fs.unlinkSync(tf); }
+                else if (f.name === "disk-space") { const df = cp.execSync(`df -k "${childCwd}" 2>&1 | tail -1`, { encoding: "utf8", timeout: 5000 }); const av = parseInt(df.trim().split(/\s+/)[3], 10); if (Number.isFinite(av) && av < 500000) throw new Error("still low"); }
+                else if (f.name === "provider-auth") {
+                  const { getProviderAuthStatus } = require(path.join(PROJECT_DIR, "dist", "providers", "auth.js"));
+                  let tc; try { tc = JSON.parse(fs.readFileSync(path.join(CWD, ".agent", "config.json"), "utf8")); } catch { tc = { providers: { anthropic: { enabled: true, authMode: "oauth", defaultModel: "claude-opus-4-6" }, openai: { enabled: true, authMode: "oauth", defaultModel: "gpt-5.4" } } }; }
+                  const toCheck = selectedProvider === "both" ? ["anthropic", "openai"] : [selectedProvider];
+                  for (const pid of toCheck) { const st = getProviderAuthStatus(pid, tc.providers?.[pid]); if (!st.ready) throw new Error(`${pid}: ${st.summary}`); }
+                }
+                // Check passed after fix
+                sendPreflight("agi.preflight.check", { name: f.name, status: "fixed" });
+                if (original) original.status = "fixed";
+              } catch {
+                stillFailing.push(f);
+              }
+            }
+
+            if (stillFailing.length === 0) {
+              healed = true;
+              sendPreflight("agi.preflight.healed", {
+                message: `AI successfully fixed ${failures.length} issue(s). Continuing pipeline.`
+              });
+            } else {
+              // Some still failing — show AI's guidance
+              sendPreflight("agi.preflight.failed", {
+                message: healPlan.userGuidance || `${stillFailing.length} issue(s) could not be auto-fixed.`,
+                failures: stillFailing.map(f => ({ name: f.name, error: f.error }))
+              });
+            }
+          } else {
+            // AI didn't produce valid fix plan
+            sendPreflight("agi.preflight.failed", {
+              message: healPlan?.userGuidance || `AI could not generate a fix plan for: ${failures.map(f => f.name).join(", ")}`,
+              failures: failures.map(f => ({ name: f.name, error: f.error }))
+            });
+          }
+        } catch (healErr) {
+          // Healing LLM call itself failed
+          sendPreflight("agi.preflight.failed", {
+            message: `AI healing failed: ${healErr.message || healErr}. Manual intervention needed.`,
+            failures: failures.map(f => ({ name: f.name, error: f.error }))
+          });
+        }
+      } else {
+        // No provider available for healing — can't call AI
+        sendPreflight("agi.preflight.failed", {
+          message: "No AI provider available to diagnose issues. Please fix manually and retry.",
+          failures: failures.map(f => ({ name: f.name, error: f.error }))
+        });
+      }
+
+      if (!healed) {
+        res.write("data: [DONE]\n\n");
+        res.end();
+        return;
+      }
+    } else {
+      sendPreflight("agi.preflight.passed", {
+        message: `All ${preflightChecks.length} checks passed`,
+        checks: preflightChecks.map(r => r.name)
+      });
     }
 
-    // Clean leftover .agent/ artifacts from previous AGI runs (BEFORE writing config)
-    const prevAgentDir = path.join(childCwd, ".agent");
+    // ── Git init (now safe — we know git is installed) ──
+    if (!fs.existsSync(path.join(childCwd, ".git"))) {
+      cp.execSync("git init", { cwd: childCwd, stdio: "ignore" });
+      cp.execSync("git commit --allow-empty -m 'init'", { cwd: childCwd, stdio: "ignore", env: { ...process.env, GIT_AUTHOR_NAME: "AGI", GIT_AUTHOR_EMAIL: "agi@local", GIT_COMMITTER_NAME: "AGI", GIT_COMMITTER_EMAIL: "agi@local" } });
+    }
+
+    // Strip the [Previous Run: ...] tag from task for downstream use
+    task = task.replace(/\[Previous Run:\s*(?:continue|fresh)\]\s*/gi, "").trim();
+
+    // Load previous artifacts if user chose "continue"
+    let previousContext = null;
+    if (userChoseContinue && previousRunSummary) {
+      previousContext = {
+        task: previousRunSummary.task,
+        analyzeArtifact: previousRunSummary.analyzeArtifact || null,
+        debateArtifact: previousRunSummary.debateArtifact || null,
+        designArtifact: previousRunSummary.designArtifact || null,
+        decisions: previousRunSummary.decisions || [],
+        filesCreated: previousRunSummary.allFiles || [],
+        debateConclusion: previousRunSummary.debateConclusion || "",
+        completedAt: previousRunSummary.completedAt
+      };
+    }
+
+    // Clean .agent/ — always clean sessions/traces, but archive run-summary
     if (fs.existsSync(prevAgentDir)) {
-      try { fs.rmSync(prevAgentDir, { recursive: true, force: true }); } catch {}
+      // Archive previous run-summary into runs/ before cleaning
+      if (previousRunSummary) {
+        const runsDir = path.join(prevAgentDir, "runs");
+        if (!fs.existsSync(runsDir)) fs.mkdirSync(runsDir, { recursive: true });
+        const archiveId = previousRunSummary.runId || `run-${Date.now()}`;
+        try {
+          fs.writeFileSync(path.join(runsDir, `${archiveId}.json`), JSON.stringify(previousRunSummary, null, 2), "utf8");
+        } catch {}
+      }
+      // Clean sessions, traces, config (but keep runs/ archive)
+      const keepDirs = new Set(["runs"]);
+      try {
+        for (const entry of fs.readdirSync(prevAgentDir)) {
+          if (keepDirs.has(entry)) continue;
+          const entryPath = path.join(prevAgentDir, entry);
+          try { fs.rmSync(entryPath, { recursive: true, force: true }); } catch {}
+        }
+      } catch {}
     }
 
     // Build config — start from source config or create default
@@ -854,8 +1218,7 @@ ${contextLines.join("\n")}`;
       if (cfg.providers?.[p]) cfg.providers[p].timeoutMs = 0;
     }
 
-    // Apply provider selection from UI
-    const selectedProvider = provider || "openai";
+    // Apply provider selection from UI (selectedProvider already set in preflight)
     if (selectedProvider === "anthropic") {
       if (cfg.providers?.anthropic) { cfg.providers.anthropic.enabled = true; cfg.providers.anthropic.authMode = "oauth"; }
       if (cfg.providers?.openai) cfg.providers.openai.enabled = false;
@@ -912,12 +1275,7 @@ ${contextLines.join("\n")}`;
     }
     writeStepAgentsMd("build"); // default
 
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive"
-    });
-
+    // SSE headers already sent by preflight system above — no need to re-send
     const traceRunId = `agi-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const traceDir = path.join(childCwd, ".agent", "traces");
     const tracePath = path.join(traceDir, `${traceRunId}.md`);
@@ -976,15 +1334,10 @@ ${contextLines.join("\n")}`;
     traceJson("Run Setup", "request", { task, targetDir: targetDir || null, childCwd, projName });
     sendAgi("agi.trace.ready", { tracePath });
 
-    // Assess complexity
-    const words = task.split(/\s+/).length;
+    // Initial complexity — set to "complex" as safe default.
+    // The AI ANALYZE step will determine real complexity and we adjust BUILD turns dynamically.
     const dirFiles = fs.readdirSync(childCwd).filter(f => !f.startsWith(".") && f !== "node_modules");
-    const isFullApp = /full.*app|complete.*project|entire.*system|from.*scratch|만들어|생성|구현|개발해|빌드|게임|앱|사이트|서비스|플랫폼|시스템|웹|서버|클라이언트|온라인|멀티플레이어|shooting|game|server|website|platform/i.test(task);
-    const isSimple = !isFullApp && /fix.*bug|rename|add.*comment|update.*version|change.*color|수정|고쳐|바꿔/i.test(task);
-    let complexity = "moderate";
-    if (isSimple && words < 20) complexity = "simple";
-    else if (isFullApp || words > 100 || dirFiles.length === 0) complexity = "complex";
-    else if (words > 40) complexity = "complex";
+    let complexity = dirFiles.length === 0 ? "complex" : "moderate";
 
     // Generate dynamic plan
     const steps = [];
@@ -1036,7 +1389,24 @@ ${contextLines.join("\n")}`;
       designArtifact: null,
       repoMap,
       userProfile,
+      previousContext, // loaded from run-summary.json if user chose "continue"
     };
+
+    // If continuing from previous run, seed context with previous artifacts and decisions
+    if (previousContext) {
+      ctx.decisions = [...(previousContext.decisions || [])];
+      ctx.allFiles = [...(previousContext.filesCreated || [])];
+      sendAgi("agi.debug", {
+        message: "Continuing from previous run — loaded artifacts and decisions",
+        previousTask: previousContext.task,
+        decisionsLoaded: ctx.decisions.length,
+        filesKnown: ctx.allFiles.length,
+        hasAnalyze: !!previousContext.analyzeArtifact,
+        hasDebate: !!previousContext.debateArtifact,
+        hasDesign: !!previousContext.designArtifact,
+      });
+    }
+
     let clarificationRequest = null;
     let verifyFixCycles = 0;
     const MAX_VERIFY_FIX_CYCLES = 3;
@@ -2166,6 +2536,33 @@ ${values.map((value) => `- ${value}`).join("\n")}`);
       sections.push(`# AGI Pipeline — ${step.title}`);
       sections.push(`## Original Task (NEVER FORGET THIS)\n**"${task}"**\nEverything you do must serve this task. If you find yourself writing design documents instead of application code, STOP and refocus on the task.`);
 
+      // Inject previous run context if continuing from a prior execution
+      if (ctx.previousContext && step.type === "analyze") {
+        const prev = ctx.previousContext;
+        const prevParts = [`## Previous Run Context (IMPORTANT — READ THIS FIRST)`,
+          `This folder was previously used for an AGI run. The user chose to CONTINUE from that run.`,
+          `**Previous Task**: "${prev.task}"`,
+          `**Completed At**: ${prev.completedAt || "unknown"}`,
+        ];
+        if (prev.debateConclusion) {
+          prevParts.push(`**Previous DEBATE Conclusion**: ${prev.debateConclusion}`);
+        }
+        if (prev.decisions?.length > 0) {
+          prevParts.push(`**Previous Decisions**:\n${prev.decisions.map((d, i) => `${i + 1}. ${d}`).join("\n")}`);
+        }
+        if (prev.filesCreated?.length > 0) {
+          prevParts.push(`**Files from previous run** (${prev.filesCreated.length}):\n${prev.filesCreated.map(f => `- ${f}`).join("\n")}`);
+        }
+        if (prev.analyzeArtifact) {
+          prevParts.push(`**Previous Analysis (summary)**:\n- Intent: ${prev.analyzeArtifact.intent?.type || "unknown"}\n- Codebase: ${prev.analyzeArtifact.codebaseState || "unknown"}\n- Features: ${(prev.analyzeArtifact.features || []).map(f => f.name).join(", ") || "none"}`);
+          if (prev.analyzeArtifact.techStack?.justification) {
+            prevParts.push(`- Tech stack justification: ${prev.analyzeArtifact.techStack.justification}`);
+          }
+        }
+        prevParts.push(`\n**Instructions**: Use the previous run's decisions as a STARTING POINT. You may refine or override them if the new task requires it, but do not ignore them. The existing files in the workspace are from the previous run — build ON TOP of them unless the new task explicitly contradicts previous decisions.`);
+        sections.push(prevParts.join("\n"));
+      }
+
       const analysisArtifact = step.type !== "analyze"
         ? (ctx.analyzeArtifact || (ctx.analysis ? normalizeAnalyzeArtifact(task, ctx.analysis) : null))
         : null;
@@ -3258,6 +3655,23 @@ ${prompt}`
         }
       }
 
+      // Artifact dependency validation — don't run steps if required upstream artifacts are missing
+      if (step.type === "debate" && !ctx.analyzeArtifact) {
+        sendAgi("agi.debug", { message: "DEBATE requires analyzeArtifact but it is null — pipeline cannot continue" });
+        sendAgi("agi.pipeline.fail", { error: "DEBATE step requires a valid ANALYZE artifact. ANALYZE may have failed to produce structured output." });
+        break;
+      }
+      if (step.type === "design" && !ctx.debateArtifact) {
+        sendAgi("agi.debug", { message: "DESIGN requires debateArtifact but it is null — pipeline cannot continue" });
+        sendAgi("agi.pipeline.fail", { error: "DESIGN step requires a valid DEBATE artifact. DEBATE may have failed to produce structured output." });
+        break;
+      }
+      if (step.type === "build" && !ctx.designArtifact) {
+        sendAgi("agi.debug", { message: "BUILD requires designArtifact but it is null — pipeline cannot continue" });
+        sendAgi("agi.pipeline.fail", { error: "BUILD step requires a valid DESIGN artifact. DESIGN may have failed to produce structured output." });
+        break;
+      }
+
       // [FIX] Write step-specific AGENTS.md before each step
       writeStepAgentsMd(step.type);
 
@@ -3400,6 +3814,18 @@ ${prompt}`
               featureCount: parsedFromOutput.features?.length || 0,
             });
             applyAnalyzeArtifact(parsedFromOutput);
+
+            // Dynamic complexity adjustment — AI decides, not regex
+            const aiComplexity = parsedFromOutput.complexity?.level;
+            if (aiComplexity) {
+              complexity = aiComplexity;
+              const buildStep = steps.find(s => s.type === "build" && !String(s.title || "").startsWith("Build Wave "));
+              if (buildStep) {
+                const turnMap = { "simple": 150, "moderate": 300, "complex": 500, "very-complex": 500 };
+                buildStep.maxTurns = turnMap[aiComplexity] || 300;
+                sendAgi("agi.debug", { message: `AI complexity: ${aiComplexity} → BUILD maxTurns=${buildStep.maxTurns}` });
+              }
+            }
           }
         }
 
@@ -3408,7 +3834,9 @@ ${prompt}`
             || (() => {
               const parsed = extractStructuredJson(result.rawOutput || result.summary || "");
               if (parsed) return normalizeDebateArtifact(task, parsed, ctx.analyzeArtifact);
-              return normalizeDebateArtifact(task, { summary: result.summary }, ctx.analyzeArtifact);
+              // No structured JSON found — this is a real failure, don't fabricate a minimal artifact
+              sendAgi("agi.debug", { message: "DEBATE produced no structured JSON — cannot create valid artifact" });
+              return null;
             })();
 
           if (!parsedFromOutput) {
@@ -3440,9 +3868,14 @@ ${prompt}`
         if (step.type === "design" && result.status === "completed") {
           // Use AI output directly — no regex, no hardcoded overrides
           const sourceForDesign = result.designArtifact
-            || extractStructuredJson(result.rawOutput || result.summary || "")
-            || { summary: result.summary };
-          const parsedFromOutput = normalizeDesignArtifact(task, sourceForDesign, ctx.analyzeArtifact, ctx.debateArtifact);
+            || extractStructuredJson(result.rawOutput || result.summary || "");
+          if (!sourceForDesign) {
+            result.status = "failed";
+            result.summary = "DESIGN produced no structured JSON output.";
+            result.errors = [...new Set([...(result.errors || []), "DESIGN produced no structured JSON output."])];
+            sendAgi("agi.design.parseError", { error: "DESIGN produced no structured JSON output." });
+          }
+          const parsedFromOutput = sourceForDesign ? normalizeDesignArtifact(task, sourceForDesign, ctx.analyzeArtifact, ctx.debateArtifact) : null;
 
           if (!parsedFromOutput) {
             result.status = "failed";
@@ -3560,10 +3993,22 @@ ${prompt}`
               const verifyIdx = steps.findIndex((s, i) => i < stepIdx && s.type === "verify");
               if (verifyIdx >= 0) {
                 sendAgi("agi.debug", { message: `FIX completed, VERIFY was failing — re-running VERIFY (cycle ${verifyFixCycles}/${MAX_VERIFY_FIX_CYCLES})` });
-                stepIdx = verifyIdx - 1;
+                stepIdx = verifyIdx - 1; // will be incremented by stepIdx++ at bottom of loop
               }
             } else {
-              sendAgi("agi.debug", { message: `Max VERIFY-FIX cycles (${MAX_VERIFY_FIX_CYCLES}) reached` });
+              // Max cycles exhausted — ask user for help instead of silently continuing
+              sendAgi("agi.debug", { message: `Max VERIFY-FIX cycles (${MAX_VERIFY_FIX_CYCLES}) reached — escalating to user` });
+              sendAgi("agi.pipeline.awaiting_input", {
+                stepId: step.id,
+                stepType: "fix",
+                nextStep: "verify",
+                reason: "needs_user_help",
+                summary: `VERIFY-FIX loop exhausted ${MAX_VERIFY_FIX_CYCLES} cycles without resolving all issues. Please help or provide guidance.`,
+                errors: result.errors || [],
+              });
+              res.write("data: [DONE]\n\n");
+              res.end();
+              return;
             }
           }
           // If last VERIFY passed, don't loop back — we're done
@@ -3604,6 +4049,32 @@ ${prompt}`
     const completed = ctx.stepResults.filter(r => r.status === "completed").length;
     const failed = ctx.stepResults.filter(r => r.status === "failed").length;
     const success = !aborted && failed === 0;
+
+    // Save run-summary.json for future runs to detect and optionally continue from
+    try {
+      const runSummary = {
+        runId: traceRunId,
+        task,
+        completedAt: new Date().toISOString(),
+        success,
+        totalSteps: steps.length,
+        completedSteps: completed,
+        failedSteps: failed,
+        filesCreated: ctx.allFiles.length,
+        totalTokens: ctx.totalTokens,
+        durationMs: Date.now() - pipelineStartedAt,
+        allFiles: ctx.allFiles,
+        decisions: ctx.decisions,
+        debateConclusion: ctx.debateArtifact?.recommendedApproach || ctx.debateArtifact?.summary || "",
+        // Store full artifacts for "continue" mode
+        analyzeArtifact: ctx.analyzeArtifact || null,
+        debateArtifact: ctx.debateArtifact || null,
+        designArtifact: ctx.designArtifact || null,
+      };
+      const summaryDir = path.join(childCwd, ".agent");
+      if (!fs.existsSync(summaryDir)) fs.mkdirSync(summaryDir, { recursive: true });
+      fs.writeFileSync(path.join(summaryDir, "run-summary.json"), JSON.stringify(runSummary, null, 2), "utf8");
+    } catch {}
 
     sendAgi("agi.pipeline.complete", {
       success,

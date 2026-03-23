@@ -3125,6 +3125,47 @@ function buildAgiClarifiedPrompt(payload,selections){
   ].join('\n').trim();
 }
 
+function renderAgiPreviousRunCard(payload){
+  const card=document.createElement('div');
+  card.style.cssText='border:1px solid rgba(255,200,50,.4);background:rgba(255,200,50,.08);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px';
+
+  const title=document.createElement('div');
+  title.style.cssText='font-size:13px;font-weight:700;color:var(--fg)';
+  title.textContent=payload.message||'A previous run was detected.';
+  card.appendChild(title);
+
+  const info=document.createElement('div');
+  info.style.cssText='font-size:11px;color:var(--fg2);line-height:1.5';
+  const infoLines=[`Task: "${payload.previousTask||'unknown'}"`,`Files: ${payload.filesCreated||0} | Steps: ${payload.stepsCompleted||'?'}`,`Result: ${payload.success?'Success':'Incomplete'} | ${payload.completedAt||''}`];
+  if(payload.debateConclusion)infoLines.push(`Debate: ${payload.debateConclusion.slice(0,120)}${payload.debateConclusion.length>120?'...':''}`);
+  if(payload.decisions&&payload.decisions.length>0)infoLines.push(`Decisions: ${payload.decisions.slice(0,3).join('; ').slice(0,150)}...`);
+  info.innerHTML=infoLines.map(l=>`<div>${l}</div>`).join('');
+  card.appendChild(info);
+
+  const btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:8px;margin-top:4px';
+
+  for(const opt of (payload.options||[])){
+    const btn=document.createElement('button');
+    btn.style.cssText=opt.id==='continue'
+      ?'flex:1;padding:10px 14px;border-radius:8px;border:1px solid rgba(88,166,255,.5);background:rgba(88,166,255,.15);color:var(--accent);cursor:pointer;font-size:12px;font-weight:600'
+      :'flex:1;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:var(--fg2);cursor:pointer;font-size:12px;font-weight:500';
+    btn.innerHTML=`<div>${opt.label}</div><div style="font-size:10px;margin-top:3px;opacity:.7">${opt.detail||''}</div>`;
+    btn.addEventListener('click',()=>{
+      card.remove();
+      _agiAwaitingClarification=false;
+      const originalPrompt=(document.getElementById('agiPrompt').value||'').trim();
+      const newPrompt=`${originalPrompt}\n\n${opt.promptFragment}`;
+      document.getElementById('agiPrompt').value=newPrompt;
+      startAgiPipeline(newPrompt);
+    });
+    btnRow.appendChild(btn);
+  }
+  card.appendChild(btnRow);
+
+  const agiActivity=document.getElementById('agiActivity');
+  if(agiActivity)agiActivity.appendChild(card);
+}
 
 function renderAgiClarificationCard(payload){
   const card=document.createElement('div');
@@ -3458,7 +3499,46 @@ async function startAgiV2(){
         try{
           const ev=JSON.parse(d);
 
-          if(ev.type==='agi.pipeline.start'){
+          if(ev.type==='agi.preflight.start'){
+            agiLog('Pre-flight checks...','var(--fg3)');
+          }
+          else if(ev.type==='agi.preflight.check'){
+            const icon=ev.status==='ok'?'OK':ev.status==='fixed'?'FIXED':'FAIL';
+            const color=ev.status==='failed'?'var(--red)':ev.status==='fixed'?'var(--yellow)':'var(--green)';
+            agiLog(`  [${icon}] ${ev.name}${ev.error?' — '+ev.error:''}`,color);
+          }
+          else if(ev.type==='agi.preflight.fixed'){
+            agiLog(ev.message,'var(--yellow)');
+          }
+          else if(ev.type==='agi.preflight.healing'){
+            agiLog(ev.message,'var(--yellow)','!');
+          }
+          else if(ev.type==='agi.preflight.healing.stream'){
+            // AI thinking stream — show as subtle text
+          }
+          else if(ev.type==='agi.preflight.healing.attempt'){
+            agiLog(`  AI fix: ${ev.name} — ${ev.explanation||''}`, 'var(--accent)');
+            for(const cmd of (ev.commands||[])) agiLog(`    $ ${cmd}`,'var(--fg3)');
+          }
+          else if(ev.type==='agi.preflight.healing.result'){
+            const icon=ev.success?'OK':'FAIL';
+            const color=ev.success?'var(--green)':'var(--red)';
+            agiLog(`    [${icon}] ${ev.command}${ev.error?' — '+ev.error:''}`,color);
+          }
+          else if(ev.type==='agi.preflight.healed'){
+            agiLog(ev.message,'var(--green)');
+          }
+          else if(ev.type==='agi.preflight.failed'){
+            agiLog(ev.message,'var(--red)','!');
+            for(const f of (ev.failures||[])){
+              agiLog(`  ${f.name}: ${f.error}`,'var(--red)');
+            }
+            updateAgiDashboard({status:'Pre-flight Failed',phase:'error'});
+          }
+          else if(ev.type==='agi.preflight.passed'){
+            agiLog(ev.message,'var(--green)');
+          }
+          else if(ev.type==='agi.pipeline.start'){
             currentSteps=ev.plan?.steps||[];
             renderPipelineSteps(currentSteps);
             currentSteps.forEach(s=>setAgiStepById(s.id,'pending'));
@@ -3505,6 +3585,12 @@ async function startAgiV2(){
             _agiFileCount=finalFiles;
             agiLog(`Pipeline ${ev.success?'COMPLETE':'FINISHED'}: ${ev.completedSteps}/${ev.totalSteps} steps, ${finalFiles} files`,'var(--green)');
             if(ev.replanCount>0)agiLog(`Auto-replanned ${ev.replanCount} times`,'var(--fg3)');
+          }
+          else if(ev.type==='agi.previous_run.detected'){
+            _agiAwaitingClarification=true;
+            agiLog(`Previous run detected: "${ev.previousTask}" (${ev.filesCreated} files, ${ev.stepsCompleted} steps)`,'var(--yellow)','!');
+            renderAgiPreviousRunCard(ev);
+            updateAgiDashboard({status:'Needs Input',phase:'previous_run'});
           }
           else if(ev.type==='agi.pipeline.awaiting_input'){
             _agiAwaitingClarification=true;
