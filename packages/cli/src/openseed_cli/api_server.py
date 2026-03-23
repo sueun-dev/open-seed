@@ -91,6 +91,30 @@ async def get_config() -> dict:
     return cfg.model_dump()
 
 
+@app.get("/api/browse")
+async def browse_folder(path: str = "") -> dict:
+    """Browse folders on the server filesystem."""
+    import os
+    target = path or os.path.expanduser("~")
+    target = os.path.expanduser(target)
+
+    if not os.path.isdir(target):
+        return {"error": f"Not a directory: {target}", "current": target, "parent": "", "dirs": []}
+
+    parent = os.path.dirname(target)
+    dirs = []
+    try:
+        for entry in sorted(os.scandir(target), key=lambda e: e.name.lower()):
+            if entry.name.startswith("."):
+                continue
+            if entry.is_dir():
+                dirs.append({"name": entry.name, "path": os.path.join(target, entry.name)})
+    except PermissionError:
+        pass
+
+    return {"current": target, "parent": parent, "dirs": dirs}
+
+
 @app.get("/api/memory/search")
 async def search_memory(q: str, limit: int = 10) -> dict:
     from openseed_memory import MemoryStore

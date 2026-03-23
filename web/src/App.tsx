@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import Pipeline from "./components/Pipeline";
 import TaskLog from "./components/TaskLog";
 import SnakeGame from "./components/SnakeGame";
+import FolderBrowser from "./components/FolderBrowser";
 
 export default function App() {
   const [tab, setTab] = useState<"pipeline" | "game">("pipeline");
@@ -9,6 +10,7 @@ export default function App() {
   const [workingDir, setWorkingDir] = useState("/tmp/openseed-output");
   const [running, setRunning] = useState(false);
   const [events, setEvents] = useState<any[]>([]);
+  const [showBrowser, setShowBrowser] = useState(false);
 
   const startRun = async () => {
     if (!task.trim() || running) return;
@@ -143,6 +145,13 @@ export default function App() {
                 fontSize: 12, outline: "none", fontFamily: "monospace",
               }}
             />
+            <button
+              onClick={() => setShowBrowser(true)}
+              style={{
+                background: "#1a1a1a", border: "1px solid #333", borderRadius: 6,
+                color: "#888", cursor: "pointer", padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap",
+              }}
+            >📁 Browse</button>
             {workingDir && (
               <button
                 onClick={() => setWorkingDir("")}
@@ -150,6 +159,13 @@ export default function App() {
               >✕</button>
             )}
           </div>
+
+          {showBrowser && (
+            <FolderBrowser
+              onSelect={(path) => setWorkingDir(path)}
+              onClose={() => setShowBrowser(false)}
+            />
+          )}
 
           <Pipeline events={events} />
           <TaskLog events={events} />
