@@ -1,7 +1,7 @@
 """
 Open Seed v2 — Stagnation detection.
 
-Detects when the Sisyphus loop is spinning without making real progress.
+Detects when the Sentinel loop is spinning without making real progress.
 After N cycles of no change → escalate.
 
 Pattern from: OmO constants.ts MAX_STAGNATION_COUNT = 3
@@ -9,7 +9,7 @@ Pattern from: OmO constants.ts MAX_STAGNATION_COUNT = 3
 
 from __future__ import annotations
 
-from openseed_sisyphus.progress import ProgressUpdate
+from openseed_sentinel.progress import ProgressUpdate
 
 
 def is_stagnated(update: ProgressUpdate, threshold: int = 3) -> bool:

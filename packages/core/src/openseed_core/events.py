@@ -40,10 +40,10 @@ class EventType(str, Enum):
     QA_AGENTS_SELECTED = "qa.agents_selected"
     QA_SYNTHESIS_COMPLETE = "qa.synthesis_complete"
 
-    # Sisyphus
-    SISYPHUS_RETRY = "sisyphus.retry"
-    SISYPHUS_STAGNATION = "sisyphus.stagnation"
-    SISYPHUS_ESCALATE = "sisyphus.escalate"
+    # Sentinel
+    SENTINEL_RETRY = "sentinel.retry"
+    SENTINEL_STAGNATION = "sentinel.stagnation"
+    SENTINEL_ESCALATE = "sentinel.escalate"
 
     # Healing
     HEAL_START = "heal.start"

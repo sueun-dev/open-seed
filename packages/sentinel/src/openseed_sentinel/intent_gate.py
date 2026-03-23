@@ -1,7 +1,7 @@
 """
 Intent Gate — classify task intent before execution.
 
-Pattern from: OmO Sisyphus Phase 0 — Intent Gate (EVERY message).
+Pattern from: OmO Sentinel Phase 0 — Intent Gate (EVERY message).
 Maps surface-form requests to true intents before routing.
 
 All decisions by LLM (Claude Haiku for speed). No regex, no hardcoded rules.
@@ -23,7 +23,7 @@ from enum import Enum
 
 from openseed_core.auth.claude import require_claude_auth
 from openseed_core.subprocess import StreamLine, run_streaming
-from openseed_sisyphus.prompts import ModelFamily, detect_model_family
+from openseed_sentinel.prompts import ModelFamily, detect_model_family
 
 
 class IntentType(str, Enum):

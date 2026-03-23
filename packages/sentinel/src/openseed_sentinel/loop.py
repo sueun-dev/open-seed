@@ -1,10 +1,10 @@
 """
-Open Seed v2 — Sisyphus main loop.
+Open Seed v2 — Sentinel main loop.
 
 The infinite retry loop that guarantees zero errors.
 Build → Test → Fail? → Fix → Retest. Until 0 errors. Never stops early.
 
-Pattern from: OmO Sisyphus protocol + todo-continuation-enforcer
+Pattern from: OmO Sentinel protocol + todo-continuation-enforcer
 
 Escalation chain:
   retry (backoff) → retry (different approach) → Oracle → User
@@ -15,21 +15,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from openseed_core.config import SisyphusConfig
+from openseed_core.config import SentinelConfig
 from openseed_core.events import EventBus, EventType
 from openseed_core.types import QAResult, Verdict
-from openseed_sisyphus.backoff import compute_backoff_ms, should_retry
-from openseed_sisyphus.evidence import VerificationResult
-from openseed_sisyphus.execution_loop import ExecutionLoop, ExecutionResult
-from openseed_sisyphus.intent_gate import classify_intent
-from openseed_sisyphus.oracle import OracleAdvice, consult_oracle
-from openseed_sisyphus.progress import ProgressSnapshot, ProgressTracker
-from openseed_sisyphus.stagnation import is_stagnated
+from openseed_sentinel.backoff import compute_backoff_ms, should_retry
+from openseed_sentinel.evidence import VerificationResult
+from openseed_sentinel.execution_loop import ExecutionLoop, ExecutionResult
+from openseed_sentinel.intent_gate import classify_intent
+from openseed_sentinel.oracle import OracleAdvice, consult_oracle
+from openseed_sentinel.progress import ProgressSnapshot, ProgressTracker
+from openseed_sentinel.stagnation import is_stagnated
 
 
 @dataclass
 class LoopState:
-    """Sisyphus loop state."""
+    """Sentinel loop state."""
     retry_count: int = 0
     consecutive_failures: int = 0
     oracle_consulted: bool = False
@@ -40,7 +40,7 @@ class LoopState:
 
 @dataclass
 class LoopDecision:
-    """What the Sisyphus loop decides to do next."""
+    """What the Sentinel loop decides to do next."""
     action: str  # "retry", "oracle", "user_escalate", "pass", "abort"
     reason: str
     backoff_ms: int = 0
@@ -51,12 +51,12 @@ async def evaluate_loop(
     qa_result: QAResult,
     verification: VerificationResult | None,
     loop_state: LoopState,
-    config: SisyphusConfig | None = None,
+    config: SentinelConfig | None = None,
     task: str = "",
     event_bus: EventBus | None = None,
 ) -> LoopDecision:
     """
-    Evaluate whether to continue the Sisyphus loop.
+    Evaluate whether to continue the Sentinel loop.
 
     Decision tree:
     1. QA passed + verification passed → PASS
@@ -69,14 +69,14 @@ async def evaluate_loop(
         qa_result: Latest QA gate result
         verification: File/command verification result
         loop_state: Current loop state
-        config: Sisyphus configuration
+        config: Sentinel configuration
         task: Original task (for Oracle context)
         event_bus: For streaming events
 
     Returns:
         LoopDecision with next action
     """
-    cfg = config or SisyphusConfig()
+    cfg = config or SentinelConfig()
     tracker = ProgressTracker()
 
     # 1. Check if we passed
@@ -97,15 +97,15 @@ async def evaluate_loop(
     if is_stagnated(progress, cfg.stagnation_threshold):
         if event_bus:
             await event_bus.emit_simple(
-                EventType.SISYPHUS_STAGNATION,
-                node="sisyphus",
+                EventType.SENTINEL_STAGNATION,
+                node="sentinel",
                 stagnation_count=progress.stagnation_count,
             )
 
         # 3. Consult Oracle if not already done
         if cfg.oracle_enabled and not loop_state.oracle_consulted:
             if event_bus:
-                await event_bus.emit_simple(EventType.SISYPHUS_ESCALATE, node="sisyphus", escalation="oracle")
+                await event_bus.emit_simple(EventType.SENTINEL_ESCALATE, node="sentinel", escalation="oracle")
 
             advice = await consult_oracle(
                 task=task,
@@ -145,8 +145,8 @@ async def evaluate_loop(
 
     if event_bus:
         await event_bus.emit_simple(
-            EventType.SISYPHUS_RETRY,
-            node="sisyphus",
+            EventType.SENTINEL_RETRY,
+            node="sentinel",
             retry_count=loop_state.retry_count + 1,
             backoff_ms=backoff,
         )
@@ -158,15 +158,15 @@ async def evaluate_loop(
     )
 
 
-async def run_sisyphus(
+async def run_sentinel(
     task: str,
     working_dir: str,
-    config: SisyphusConfig | None = None,
+    config: SentinelConfig | None = None,
     event_bus: EventBus | None = None,
     codebase_context: str = "",
 ) -> ExecutionResult:
     """
-    Full Sisyphus pipeline: Intent Gate → Execution Loop → evaluate_loop fallback.
+    Full Sentinel pipeline: Intent Gate → Execution Loop → evaluate_loop fallback.
 
     1. Classify intent with Haiku (fast, cheap routing decision)
     2. Run the 7-step ExecutionLoop with intent context
@@ -175,7 +175,7 @@ async def run_sisyphus(
     Args:
         task: The user task description.
         working_dir: Absolute path to the working directory.
-        config: Optional Sisyphus configuration (defaults used if None).
+        config: Optional Sentinel configuration (defaults used if None).
         event_bus: Optional event bus for real-time streaming.
         codebase_context: Optional codebase summary for better intent classification.
 
@@ -184,7 +184,7 @@ async def run_sisyphus(
     """
     intent = await classify_intent(task, codebase_context=codebase_context)
 
-    loop = ExecutionLoop(config=config or SisyphusConfig(), event_bus=event_bus)
+    loop = ExecutionLoop(config=config or SentinelConfig(), event_bus=event_bus)
 
     return await loop.run(
         task=task,

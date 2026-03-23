@@ -1,5 +1,5 @@
 """
-Sisyphus node — Zero-error guarantee loop.
+Sentinel node — Zero-error guarantee loop.
 
 Uses the 7-step ExecutionLoop (EXPLORE→PLAN→ROUTE→EXECUTE→VERIFY→RETRY→DONE)
 for intelligent verification, plus the evaluate_loop for retry/oracle/escalate decisions.
@@ -18,9 +18,9 @@ from openseed_brain.state import PipelineState
 from openseed_core.types import Error, Verdict
 
 
-async def sisyphus_check_node(state: PipelineState) -> dict:
+async def sentinel_check_node(state: PipelineState) -> dict:
     """
-    Evaluate QA result + run evidence verification via Sisyphus ExecutionLoop.
+    Evaluate QA result + run evidence verification via Sentinel ExecutionLoop.
     The routing function route_after_qa reads qa_result to decide next node.
 
     Flow:
@@ -39,7 +39,7 @@ async def sisyphus_check_node(state: PipelineState) -> dict:
     # ── QA PASSED — evidence verification via ExecutionLoop ──
     if qa_result and qa_result.verdict == Verdict.PASS:
         try:
-            from openseed_sisyphus.execution_loop import ExecutionLoop
+            from openseed_sentinel.execution_loop import ExecutionLoop
             loop = ExecutionLoop()
             # Run only the VERIFY step with the plan context
             verify = await loop._verify(
@@ -54,19 +54,19 @@ async def sisyphus_check_node(state: PipelineState) -> dict:
                 },
             )
             if verify.get("passed", False):
-                return {"messages": [f"Sisyphus: PASSED — QA clean + evidence verified ({retry_count} retries)"]}
+                return {"messages": [f"Sentinel: PASSED — QA clean + evidence verified ({retry_count} retries)"]}
             else:
                 return {
                     "retry_count": retry_count + 1,
-                    "messages": [f"Sisyphus: QA passed but evidence FAILED — {verify.get('summary', '')}. Retry #{retry_count + 1}"],
+                    "messages": [f"Sentinel: QA passed but evidence FAILED — {verify.get('summary', '')}. Retry #{retry_count + 1}"],
                 }
         except Exception as e:
-            return {"messages": [f"Sisyphus: PASSED (evidence check skipped: {e})"]}
+            return {"messages": [f"Sentinel: PASSED (evidence check skipped: {e})"]}
 
     # ── QA FAILED — evaluate_loop for retry/oracle/escalate ──
     try:
-        from openseed_sisyphus.loop import evaluate_loop, LoopState
-        from openseed_sisyphus.evidence import verify_implementation
+        from openseed_sentinel.loop import evaluate_loop, LoopState
+        from openseed_sentinel.evidence import verify_implementation
 
         verification = await verify_implementation(working_dir=working_dir, expected_files=expected_files)
 
@@ -87,28 +87,28 @@ async def sisyphus_check_node(state: PipelineState) -> dict:
         )
 
         if decision.action == "pass":
-            return {"messages": [f"Sisyphus: {decision.reason}"]}
+            return {"messages": [f"Sentinel: {decision.reason}"]}
         elif decision.action in ("retry", "oracle"):
             label = "ORACLE consulted" if decision.action == "oracle" else "RETRY"
             return {
                 "retry_count": retry_count + 1,
-                "messages": [f"Sisyphus: {label} — {decision.reason}"],
+                "messages": [f"Sentinel: {label} — {decision.reason}"],
             }
         elif decision.action == "user_escalate":
             return {
                 "retry_count": retry_count + 1,
-                "messages": [f"Sisyphus: USER ESCALATION — {decision.reason}"],
-                "errors": [Error(step="sisyphus", message=f"Needs user help: {decision.reason}")],
+                "messages": [f"Sentinel: USER ESCALATION — {decision.reason}"],
+                "errors": [Error(step="sentinel", message=f"Needs user help: {decision.reason}")],
             }
         else:  # abort
             return {
-                "messages": [f"Sisyphus: ABORT — {decision.reason}"],
-                "errors": [Error(step="sisyphus", message=f"Aborted: {decision.reason}")],
+                "messages": [f"Sentinel: ABORT — {decision.reason}"],
+                "errors": [Error(step="sentinel", message=f"Aborted: {decision.reason}")],
             }
     except Exception as e:
         return {
             "retry_count": retry_count + 1,
-            "messages": [f"Sisyphus: evaluation error — {e}. Retrying."],
+            "messages": [f"Sentinel: evaluation error — {e}. Retrying."],
         }
 
 

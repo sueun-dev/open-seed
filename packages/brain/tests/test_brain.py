@@ -452,7 +452,7 @@ class TestBuildGraph:
             "openseed_brain.graph.plan_node",
             "openseed_brain.graph.implement_node",
             "openseed_brain.graph.qa_gate_node",
-            "openseed_brain.graph.sisyphus_check_node",
+            "openseed_brain.graph.sentinel_check_node",
             "openseed_brain.graph.fix_node",
             "openseed_brain.graph.deploy_node",
             "openseed_brain.graph.memorize_node",
@@ -465,7 +465,7 @@ class TestBuildGraph:
         """build_graph registers every required pipeline node."""
         graph = self._get_graph()
         node_ids = set(graph.nodes.keys())
-        expected = {"intake", "plan", "implement", "qa_gate", "sisyphus_check", "fix", "user_escalate", "deploy", "memorize"}
+        expected = {"intake", "plan", "implement", "qa_gate", "sentinel_check", "fix", "user_escalate", "deploy", "memorize"}
         assert expected.issubset(node_ids), f"Missing nodes: {expected - node_ids}"
 
     def test_build_graph_has_all_edges(self):
@@ -478,7 +478,7 @@ class TestBuildGraph:
         edges: set[tuple[str, str]] = set(graph.edges)
         assert ("plan", "implement") in edges
         assert ("implement", "qa_gate") in edges
-        assert ("qa_gate", "sisyphus_check") in edges
+        assert ("qa_gate", "sentinel_check") in edges
         assert ("fix", "qa_gate") in edges
         assert ("deploy", "memorize") in edges
 
@@ -491,7 +491,7 @@ class TestCompileGraph:
             "plan_node",
             "implement_node",
             "qa_gate_node",
-            "sisyphus_check_node",
+            "sentinel_check_node",
             "fix_node",
             "deploy_node",
             "memorize_node",

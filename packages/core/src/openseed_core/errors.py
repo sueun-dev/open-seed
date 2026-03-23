@@ -24,8 +24,8 @@ class QAGateError(OpenSeedError):
     """QA gate blocked the pipeline."""
 
 
-class SisyphusError(OpenSeedError):
-    """Sisyphus loop exhausted all retries."""
+class SentinelError(OpenSeedError):
+    """Sentinel loop exhausted all retries."""
 
 
 class DeployError(OpenSeedError):

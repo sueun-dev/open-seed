@@ -2,7 +2,7 @@
 openseed run — Execute a full pipeline run.
 
 This is the main command. Takes a task, runs the full 7-system pipeline:
-Brain → Claude/Codex → QA Gate → Sisyphus → Body → Memory
+Brain → Claude/Codex → QA Gate → Sentinel → Body → Memory
 """
 
 from __future__ import annotations
@@ -53,8 +53,8 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
             EventType.NODE_FAIL: "[bold red]✗[/]",
             EventType.AGENT_TEXT: "[dim]…[/]",
             EventType.QA_VERDICT: "[bold yellow]⚖[/]",
-            EventType.SISYPHUS_RETRY: "[bold red]↻[/]",
-            EventType.SISYPHUS_ESCALATE: "[bold red]⚠[/]",
+            EventType.SENTINEL_RETRY: "[bold red]↻[/]",
+            EventType.SENTINEL_ESCALATE: "[bold red]⚠[/]",
             EventType.HEAL_START: "[bold yellow]🔧[/]",
             EventType.MEMORY_STORE: "[bold magenta]💾[/]",
         }.get(event.type, "[dim]·[/]")

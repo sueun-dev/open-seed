@@ -26,10 +26,10 @@ async def intake_node(state: PipelineState) -> dict:
     task = state["task"]
     working_dir = state["working_dir"]
 
-    # ── Step 1: Classify intent via Sisyphus Intent Gate ──
+    # ── Step 1: Classify intent via Sentinel Intent Gate ──
     intent_info = ""
     try:
-        from openseed_sisyphus.intent_gate import classify_intent
+        from openseed_sentinel.intent_gate import classify_intent
         intent = await classify_intent(task)
         intent_info = (
             f"\nIntent classification: {intent.intent_type.value} "

@@ -54,7 +54,7 @@
 
 | 가져올 것 | 소스 | 파일 | 이유 |
 |-----------|------|------|------|
-| Intent Gate (intake 노드) | OmO | `research/oh-my-openagent/src/agents/sisyphus.ts` (lines 95-164) | Phase 0 Intent Verbalization 패턴. "I detect [type] intent because [reason]" |
+| Intent Gate (intake 노드) | OmO | `research/oh-my-openagent/src/agents/sentinel.ts` (lines 95-164) | Phase 0 Intent Verbalization 패턴. "I detect [type] intent because [reason]" |
 | 태스크 분해 (plan 노드) | Subagents | `research/awesome-codex-subagents/categories/09-meta-orchestration/task-distributor.toml` | task-distributor의 지침 구조: 명확한 소유권, 분리된 write scope, 의존성 순서 |
 | 병렬 분석 디스패치 | LangGraph | `research/langgraph/examples/` | `Send()` 로 여러 분석 에이전트를 동시에 실행하는 패턴 |
 
@@ -150,7 +150,7 @@
 
 ---
 
-## 6. `packages/sisyphus` — 무한 완성 루프
+## 6. `packages/sentinel` — 무한 완성 루프
 
 ### loop.py — 메인 재시도 루프
 
@@ -185,7 +185,7 @@
 | 가져올 것 | 소스 | 파일 | 이유 |
 |-----------|------|------|------|
 | Oracle 에이전트 정의 | OmO | `research/oh-my-openagent/src/agents/oracle.ts` (278줄) | read-only 고추론 advisor. 사용 시점: 아키텍처 결정, 2+ 실패, 미지 패턴 |
-| 에스컬레이션 체인 | OmO | `research/oh-my-openagent/src/agents/sisyphus.ts` (lines 348-365) | 3 failures → STOP → REVERT → DOCUMENT → CONSULT ORACLE → ASK USER |
+| 에스컬레이션 체인 | OmO | `research/oh-my-openagent/src/agents/sentinel.ts` (lines 348-365) | 3 failures → STOP → REVERT → DOCUMENT → CONSULT ORACLE → ASK USER |
 
 ### evidence.py — 증거 기반 검증
 
@@ -302,7 +302,7 @@ Phase 1 (구조 + 핵심):
   core → brain → left_hand → right_hand
 
 Phase 2 (검증 + 루프):
-  qa_gate → sisyphus
+  qa_gate → sentinel
 
 Phase 3 (배포 + 기억):
   body → memory

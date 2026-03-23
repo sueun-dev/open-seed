@@ -1,7 +1,7 @@
 """
 Delegation prompt builder.
 
-Pattern from: OmO Sisyphus — "Delegation Prompt Structure (MANDATORY - ALL 6 sections)".
+Pattern from: OmO Sentinel — "Delegation Prompt Structure (MANDATORY - ALL 6 sections)".
 
 When delegating to a sub-agent, the prompt MUST include all 6 sections:
 1. TASK: Atomic, specific goal (one action per delegation)

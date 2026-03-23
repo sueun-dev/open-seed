@@ -1,7 +1,7 @@
 """
 Open Seed v2 — Oracle escalation.
 
-When Sisyphus is stuck after multiple retries, Oracle provides
+When Sentinel is stuck after multiple retries, Oracle provides
 high-reasoning analysis of what's going wrong and suggests
 a completely different approach.
 
@@ -47,8 +47,8 @@ async def consult_oracle(
     """
     if event_bus:
         await event_bus.emit_simple(
-            EventType.SISYPHUS_ESCALATE,
-            node="sisyphus",
+            EventType.SENTINEL_ESCALATE,
+            node="sentinel",
             escalation="oracle",
             retry_count=len(failure_history),
         )

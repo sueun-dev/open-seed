@@ -14,7 +14,7 @@ members = [
     "packages/left_hand",
     "packages/right_hand",
     "packages/qa_gate",
-    "packages/sisyphus",
+    "packages/sentinel",
     "packages/body",
     "packages/memory",
     "packages/cli",
@@ -26,7 +26,7 @@ openseed-brain = { workspace = true }
 openseed-left-hand = { workspace = true }
 openseed-right-hand = { workspace = true }
 openseed-qa-gate = { workspace = true }
-openseed-sisyphus = { workspace = true }
+openseed-sentinel = { workspace = true }
 openseed-body = { workspace = true }
 openseed-memory = { workspace = true }
 openseed-cli = { workspace = true }
@@ -47,3 +47,9 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["packages/*/tests", "tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]

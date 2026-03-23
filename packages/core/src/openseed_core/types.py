@@ -180,7 +180,7 @@ class PipelineState(TypedDict):
     # QA
     qa_result: QAResult | None
 
-    # Sisyphus loop
+    # Sentinel loop
     retry_count: int
     max_retries: int
 
