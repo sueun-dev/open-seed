@@ -3185,6 +3185,14 @@ function renderAgiDiscussionCard(payload){
     card.appendChild(errDiv);
   }
 
+  // Show AI diagnosis if available
+  if(payload.aiDiagnosis){
+    const diagDiv=document.createElement('div');
+    diagDiv.style.cssText='font-size:11px;color:var(--accent);line-height:1.4;padding:6px 8px;background:rgba(88,166,255,.06);border-radius:6px';
+    diagDiv.textContent='AI Diagnosis: '+(payload.aiDiagnosis||'').slice(0,300);
+    card.appendChild(diagDiv);
+  }
+
   // User input area
   const inputRow=document.createElement('div');
   inputRow.style.cssText='display:flex;gap:6px';
@@ -3633,6 +3641,21 @@ async function startAgiV2(){
           }
           else if(ev.type==='agi.preflight.passed'){
             agiLog(ev.message,'var(--green)');
+          }
+          // ── AI Self-Healing events (any section) ──
+          else if(ev.type==='agi.heal.start'){
+            agiLog(`AI diagnosing: ${ev.section} — ${(ev.error||'').slice(0,100)}`,'var(--yellow)');
+          }
+          else if(ev.type==='agi.heal.diagnosis'){
+            if(ev.diagnosis)agiLog(`  Diagnosis: ${ev.diagnosis.slice(0,200)}`,'var(--yellow)');
+            if(ev.suggestion)agiLog(`  Suggestion: ${ev.suggestion.slice(0,200)}`,'var(--accent)');
+          }
+          else if(ev.type==='agi.heal.command'){
+            const icon=ev.success?'OK':'FAIL';
+            agiLog(`  [${icon}] ${ev.command}`,ev.success?'var(--green)':'var(--red)');
+          }
+          else if(ev.type==='agi.heal.result'){
+            agiLog(`  ${ev.healed?'Healed':'Could not heal'}: ${(ev.message||'').slice(0,200)}`,ev.healed?'var(--green)':'var(--yellow)');
           }
           else if(ev.type==='agi.pipeline.start'){
             currentSteps=ev.plan?.steps||[];
