@@ -3487,7 +3487,10 @@ ${prompt}`
         traceJson("Step Results", `${step.type}:${step.title}`, result);
         ctx.totalTokens += result.tokensUsed;
         for (const c of (result.changes || [])) {
-          const clean = c.replace(/^(created|modified|updated|deleted)\s+/i, "").trim();
+          let clean = c.trim();
+          for (const prefix of ["created ", "modified ", "updated ", "deleted "]) {
+            if (clean.toLowerCase().startsWith(prefix)) { clean = clean.slice(prefix.length).trim(); break; }
+          }
           if (!ctx.allFiles.includes(clean)) ctx.allFiles.push(clean);
         }
 
@@ -3656,18 +3659,16 @@ ${prompt}`
           }
         }
 
-        // Extract decisions from design step too
-        if (step.type === "design" && result.status === "completed") {
-          const decisionPatterns = [
-            /(?:decision|chose|selected|will use|architecture|approach|strategy|recommendation|concluded|determined|opted for|going with|picked|prefer|using)[:.\-—]\s*([^\n]+)/gi,
-            /(?:we (?:will|should|need to|must|decided to|chose to))\s+([^\n]+)/gi,
-          ];
-          for (const pattern of decisionPatterns) {
-            const matches = (result.summary || "").matchAll(pattern);
-            for (const m of matches) {
-              const decision = m[0];
-              if (!ctx.decisions.includes(decision)) ctx.decisions.push(decision);
-            }
+        // Extract decisions from design artifact's structured fields — no regex keyword scanning
+        if (step.type === "design" && result.status === "completed" && ctx.designArtifact) {
+          for (const item of ctx.designArtifact.architecture || []) {
+            if (item && !ctx.decisions.includes(item)) ctx.decisions.push(item);
+          }
+          for (const item of ctx.designArtifact.executionNotes || []) {
+            if (item && !ctx.decisions.includes(item)) ctx.decisions.push(item);
+          }
+          for (const item of ctx.designArtifact.contracts || []) {
+            if (item && !ctx.decisions.includes(item)) ctx.decisions.push(item);
           }
         }
 
