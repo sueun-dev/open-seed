@@ -831,8 +831,9 @@ ${contextLines.join("\n")}`;
     const prevAgentDir = path.join(childCwd, ".agent");
     const prevRunSummaryPath = path.join(prevAgentDir, "run-summary.json");
     let previousRunSummary = null;
-    const userChoseContinue = /\[Previous Run:\s*continue\]/i.test(task);
-    const userChoseFresh = /\[Previous Run:\s*fresh\]/i.test(task);
+    const taskLower = task.toLowerCase();
+    const userChoseContinue = taskLower.includes("[previous run: continue]");
+    const userChoseFresh = taskLower.includes("[previous run: fresh]");
     const userAlreadyChose = userChoseContinue || userChoseFresh;
 
     if (fs.existsSync(prevRunSummaryPath)) {
@@ -849,7 +850,7 @@ ${contextLines.join("\n")}`;
       const prevTotal = previousRunSummary.totalSteps || 0;
       const prevSuccess = previousRunSummary.success;
       const prevDate = previousRunSummary.completedAt ? new Date(previousRunSummary.completedAt).toLocaleString() : "unknown";
-      const isKo = /[가-힣]/.test(task || "");
+      const isKo = Array.from(task || "").some(ch => ch.charCodeAt(0) >= 0xAC00 && ch.charCodeAt(0) <= 0xD7A3);
       sendEvt("agi.previous_run.detected", {
         previousTask: prevTask, filesCreated: prevFiles, stepsCompleted: `${prevSteps}/${prevTotal}`,
         success: prevSuccess, completedAt: prevDate,
@@ -1152,7 +1153,13 @@ Output ONLY this JSON (no markdown fences, no explanation):
     }
 
     // Strip the [Previous Run: ...] tag from task for downstream use
-    task = task.replace(/\[Previous Run:\s*(?:continue|fresh)\]\s*/gi, "").trim();
+    // Strip [Previous Run: continue] or [Previous Run: fresh] tags from task
+    for (const tag of ["[Previous Run: continue]", "[Previous Run: fresh]", "[previous run: continue]", "[previous run: fresh]"]) {
+      while (task.toLowerCase().includes(tag.toLowerCase())) {
+        const idx = task.toLowerCase().indexOf(tag.toLowerCase());
+        task = (task.slice(0, idx) + task.slice(idx + tag.length)).trim();
+      }
+    }
 
     // Load previous artifacts if user chose "continue"
     let previousContext = null;
