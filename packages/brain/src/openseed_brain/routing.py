@@ -15,21 +15,14 @@ from openseed_core.types import Verdict
 
 def route_after_intake(state: PipelineState) -> Literal["plan", "implement"]:
     """
-    After intake, decide: full planning or skip to implement.
+    After intake, decide: full planning or skip directly to implement.
 
-    - If intake detected trivial task (single file, obvious) → skip planning
-    - Otherwise → full plan
+    The intake node calls Claude to classify the task and sets skip_planning=True
+    when Claude determines the task is trivial enough to skip the planning phase.
+    This router reads that flag — no string matching, no hardcoded rules.
     """
-    messages = state.get("messages", [])
-    # Check if intake flagged it as trivial/simple
-    for msg in messages:
-        msg_lower = str(msg).lower()
-        if "complexity: simple" in msg_lower or "complexity: trivial" in msg_lower:
-            # Simple tasks can skip planning if the task is very specific
-            task_lower = state["task"].lower()
-            # Only skip if the task mentions a specific file
-            if any(ext in task_lower for ext in [".py", ".js", ".ts", ".html", ".css", ".json"]):
-                return "implement"
+    if state.get("skip_planning", False):
+        return "implement"
     return "plan"
 
 

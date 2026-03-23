@@ -6,7 +6,7 @@ Advanced features:
 - Command() for dynamic routing (intake can skip to implement for trivial tasks)
 - interrupt_before for human-in-the-loop (user_escalate pauses graph)
 - RetryPolicy on nodes for transient API failures
-- SqliteSaver checkpointing for crash recovery
+- AsyncSqliteSaver checkpointing for crash recovery + time travel
 
 Pattern from: LangGraph StateGraph API (research/langgraph/libs/langgraph/langgraph/graph/state.py)
 """
@@ -26,30 +26,62 @@ from openseed_brain.nodes.sisyphus import sisyphus_check_node, fix_node
 from openseed_brain.nodes.deploy import deploy_node
 from openseed_brain.nodes.memorize import memorize_node
 from openseed_brain.routing import route_after_qa, route_after_intake
+from openseed_brain.retry import IMPLEMENT_RETRY, QA_RETRY, DEPLOY_RETRY
+from openseed_brain.subgraphs.qa_subgraph import build_qa_subgraph
+from openseed_brain.subgraphs.fix_subgraph import build_fix_subgraph
 
 
-def build_graph() -> StateGraph:
-    """Build the Open Seed pipeline graph with advanced LangGraph features."""
+async def user_escalate_node(state: PipelineState) -> dict:
+    """
+    User escalation node — pipeline reaches here when Sisyphus gives up.
+    If compiled with interrupt_before=["user_escalate"], the graph pauses
+    and waits for human input via Command(resume=...).
+    """
+    retry_count = state.get("retry_count", 0)
+    errors = state.get("errors", [])
+    error_summary = "; ".join(e.message for e in errors[:5]) if errors else "unknown"
+    return {
+        "messages": [f"USER ESCALATION: Pipeline needs help after {retry_count} retries. Errors: {error_summary}"],
+    }
+
+
+def build_graph(use_subgraphs: bool = False) -> StateGraph:
+    """
+    Build the Open Seed pipeline graph with advanced LangGraph features.
+
+    Args:
+        use_subgraphs: When True, the qa_gate and fix nodes are replaced with
+            compiled LangGraph subgraphs (build_qa_subgraph / build_fix_subgraph).
+            When False (default), the original flat node functions are used —
+            preserving full backward compatibility.
+    """
     graph = StateGraph(PipelineState)
 
-    # ── Add nodes ──
+    # ── Add nodes — critical nodes get native LangGraph retry_policy ──
     graph.add_node("intake", intake_node)
     graph.add_node("plan", plan_node)
-    graph.add_node("implement", implement_node)
-    graph.add_node("qa_gate", qa_gate_node)
+    graph.add_node("implement", implement_node, retry_policy=IMPLEMENT_RETRY)
+
+    if use_subgraphs:
+        # Compiled subgraphs act as drop-in replacements for the flat nodes.
+        # retry_policy is omitted here because each subgraph manages its own
+        # internal retry / error-handling logic.
+        qa_sub = build_qa_subgraph().compile()
+        graph.add_node("qa_gate", qa_sub)
+        fix_sub = build_fix_subgraph().compile()
+        graph.add_node("fix", fix_sub)
+    else:
+        graph.add_node("qa_gate", qa_gate_node, retry_policy=QA_RETRY)
+        graph.add_node("fix", fix_node)
+
     graph.add_node("sisyphus_check", sisyphus_check_node)
-    graph.add_node("fix", fix_node)
     graph.add_node("user_escalate", user_escalate_node)
-    graph.add_node("deploy", deploy_node)
+    graph.add_node("deploy", deploy_node, retry_policy=DEPLOY_RETRY)
     graph.add_node("memorize", memorize_node)
 
     # ── Edges ──
     # Intake → conditional: trivial tasks skip planning, complex go through full pipeline
-    graph.add_conditional_edges(
-        START,
-        lambda state: "intake",  # Always start with intake
-        {"intake": "intake"},
-    )
+    graph.add_edge(START, "intake")
     graph.add_conditional_edges(
         "intake",
         route_after_intake,
@@ -87,23 +119,10 @@ def build_graph() -> StateGraph:
     return graph
 
 
-async def user_escalate_node(state: PipelineState) -> dict:
-    """
-    User escalation node — pipeline reaches here when Sisyphus gives up.
-    If compiled with interrupt_before=["user_escalate"], the graph pauses
-    and waits for human input via Command(resume=...).
-    """
-    retry_count = state.get("retry_count", 0)
-    errors = state.get("errors", [])
-    error_summary = "; ".join(e.message for e in errors[:5]) if errors else "unknown"
-    return {
-        "messages": [f"USER ESCALATION: Pipeline needs help after {retry_count} retries. Errors: {error_summary}"],
-    }
-
-
 def compile_graph(
     checkpoint_dir: str | None = None,
     interrupt_on_escalation: bool = True,
+    use_subgraphs: bool = False,
     **kwargs: Any,
 ) -> Any:
     """
@@ -112,20 +131,28 @@ def compile_graph(
     Args:
         checkpoint_dir: Path for SqliteSaver (crash recovery + resume)
         interrupt_on_escalation: If True, graph pauses at user_escalate for human input
+        use_subgraphs: If True, use compiled subgraphs for qa_gate and fix nodes
         **kwargs: Additional compile options
     """
-    graph = build_graph()
+    graph = build_graph(use_subgraphs=use_subgraphs)
 
     if checkpoint_dir:
         import os
         os.makedirs(checkpoint_dir, exist_ok=True)
         try:
-            from langgraph.checkpoint.sqlite import SqliteSaver
+            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
             db_path = os.path.join(checkpoint_dir, "checkpoints.db")
-            checkpointer = SqliteSaver.from_conn_string(db_path)
+            checkpointer = AsyncSqliteSaver.from_conn_string(db_path)
             kwargs["checkpointer"] = checkpointer
         except ImportError:
-            pass
+            # Fallback to sync SqliteSaver for environments without aiosqlite
+            try:
+                from langgraph.checkpoint.sqlite import SqliteSaver
+                db_path = os.path.join(checkpoint_dir, "checkpoints.db")
+                checkpointer = SqliteSaver.from_conn_string(db_path)
+                kwargs["checkpointer"] = checkpointer
+            except ImportError:
+                pass
 
     # Human-in-the-loop: pause before user_escalate so CLI/UI can get input
     if interrupt_on_escalation:

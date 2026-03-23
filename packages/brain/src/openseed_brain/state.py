@@ -37,6 +37,7 @@ def initial_state(task: str, working_dir: str, provider: str = "claude") -> Pipe
         max_retries=10,
         deploy_result=None,
         relevant_memories=[],
+        skip_planning=False,
         errors=[],
         messages=[],
         step_results=[],

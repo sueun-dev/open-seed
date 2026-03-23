@@ -116,20 +116,31 @@ async def _run_via_codex(
     working_dir: str,
 ) -> SpecialistResult:
     """Run specialist via Codex CLI."""
-    from openseed_right_hand.agent import CodexAgent
+    try:
+        from openseed_right_hand.agent import CodexAgent
+    except ImportError as exc:
+        # Codex (right_hand) package not installed — fall back to Claude
+        import logging
+        logging.getLogger(__name__).debug("CodexAgent unavailable (%s); falling back to Claude", exc)
+        return await _run_via_claude(agent, context, working_dir)
 
-    codex = CodexAgent()
-    response = await codex.invoke(
-        prompt=f"{context}\n\n---\n\nApply the following review focus:\n{agent.instructions}",
-        working_dir=working_dir,
-        auto_mode=agent.sandbox_mode == "workspace-write",
-    )
+    try:
+        codex = CodexAgent()
+        response = await codex.invoke(
+            prompt=f"{context}\n\n---\n\nApply the following review focus:\n{agent.instructions}",
+            working_dir=working_dir,
+            auto_mode=agent.sandbox_mode == "workspace-write",
+        )
 
-    return SpecialistResult(
-        agent_name=agent.name,
-        raw_output=response.text,
-        findings=_extract_findings(response.text, agent.name),
-    )
+        return SpecialistResult(
+            agent_name=agent.name,
+            raw_output=response.text,
+            findings=_extract_findings(response.text, agent.name),
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).debug("CodexAgent invocation failed (%s); falling back to Claude", exc)
+        return await _run_via_claude(agent, context, working_dir)
 
 
 def _extract_findings(text: str, agent_name: str) -> list[dict[str, Any]]:

@@ -13,12 +13,15 @@ Escalation chain:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from openseed_core.config import SisyphusConfig
 from openseed_core.events import EventBus, EventType
 from openseed_core.types import QAResult, Verdict
 from openseed_sisyphus.backoff import compute_backoff_ms, should_retry
 from openseed_sisyphus.evidence import VerificationResult
+from openseed_sisyphus.execution_loop import ExecutionLoop, ExecutionResult
+from openseed_sisyphus.intent_gate import classify_intent
 from openseed_sisyphus.oracle import OracleAdvice, consult_oracle
 from openseed_sisyphus.progress import ProgressSnapshot, ProgressTracker
 from openseed_sisyphus.stagnation import is_stagnated
@@ -152,4 +155,39 @@ async def evaluate_loop(
         action="retry",
         reason=f"Retry {loop_state.retry_count + 1} (backoff {backoff}ms)",
         backoff_ms=backoff,
+    )
+
+
+async def run_sisyphus(
+    task: str,
+    working_dir: str,
+    config: SisyphusConfig | None = None,
+    event_bus: EventBus | None = None,
+    codebase_context: str = "",
+) -> ExecutionResult:
+    """
+    Full Sisyphus pipeline: Intent Gate → Execution Loop → evaluate_loop fallback.
+
+    1. Classify intent with Haiku (fast, cheap routing decision)
+    2. Run the 7-step ExecutionLoop with intent context
+    3. The loop handles: explore → plan → route → execute → verify → retry → done
+
+    Args:
+        task: The user task description.
+        working_dir: Absolute path to the working directory.
+        config: Optional Sisyphus configuration (defaults used if None).
+        event_bus: Optional event bus for real-time streaming.
+        codebase_context: Optional codebase summary for better intent classification.
+
+    Returns:
+        ExecutionResult with success, summary, steps_completed, retry_count.
+    """
+    intent = await classify_intent(task, codebase_context=codebase_context)
+
+    loop = ExecutionLoop(config=config or SisyphusConfig(), event_bus=event_bus)
+
+    return await loop.run(
+        task=task,
+        working_dir=working_dir,
+        context={"intent": intent},
     )

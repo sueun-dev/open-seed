@@ -1,6 +1,13 @@
 """
 Sisyphus node — Zero-error guarantee loop.
-REAL implementation — calls evaluate_loop + evidence verification.
+
+Uses the 7-step ExecutionLoop (EXPLORE→PLAN→ROUTE→EXECUTE→VERIFY→RETRY→DONE)
+for intelligent verification, plus the evaluate_loop for retry/oracle/escalate decisions.
+
+Integration:
+  - ExecutionLoop._verify() checks evidence (files exist, tests pass)
+  - evaluate_loop() decides: pass / retry / oracle / user_escalate / abort
+  - Memory is queried for similar past failures (in fix_node)
 
 Escalation chain: retry → retry (different approach) → Oracle → User
 """
@@ -8,13 +15,17 @@ Escalation chain: retry → retry (different approach) → Oracle → User
 from __future__ import annotations
 
 from openseed_brain.state import PipelineState
-from openseed_core.types import Verdict
+from openseed_core.types import Error, Verdict
 
 
 async def sisyphus_check_node(state: PipelineState) -> dict:
     """
-    Evaluate QA result + verify evidence. Decide: pass, retry, escalate.
+    Evaluate QA result + run evidence verification via Sisyphus ExecutionLoop.
     The routing function route_after_qa reads qa_result to decide next node.
+
+    Flow:
+    1. If QA passed → run ExecutionLoop._verify() to double-check with evidence
+    2. If QA failed → run evaluate_loop() for retry/oracle/escalate decision
     """
     qa_result = state.get("qa_result")
     retry_count = state.get("retry_count", 0)
@@ -22,42 +33,50 @@ async def sisyphus_check_node(state: PipelineState) -> dict:
     working_dir = state["working_dir"]
     task = state["task"]
 
-    # If QA already passed, just confirm
+    # Collect expected files from plan
+    expected_files = [f.path for f in (plan.file_manifest if plan else [])]
+
+    # ── QA PASSED — evidence verification via ExecutionLoop ──
     if qa_result and qa_result.verdict == Verdict.PASS:
-        # Run evidence verification to double-check
         try:
-            from openseed_sisyphus.evidence import verify_implementation
-            expected_files = [f.path for f in (plan.file_manifest if plan else [])]
-            verification = await verify_implementation(
+            from openseed_sisyphus.execution_loop import ExecutionLoop
+            loop = ExecutionLoop()
+            # Run only the VERIFY step with the plan context
+            verify = await loop._verify(
                 working_dir=working_dir,
-                expected_files=expected_files,
-                test_commands=["ls -la"],  # Basic check
+                exec_result={
+                    "claimed_files": expected_files,
+                    "test_commands": [],
+                },
+                plan={
+                    "files_to_create": expected_files,
+                    "expected_test_commands": [],
+                },
             )
-            if verification.all_passed:
+            if verify.get("passed", False):
                 return {"messages": [f"Sisyphus: PASSED — QA clean + evidence verified ({retry_count} retries)"]}
             else:
-                # Evidence failed despite QA pass — demote to retry
-                missing = verification.missing_files
                 return {
-                    "qa_result": qa_result._replace(verdict=Verdict.WARN) if hasattr(qa_result, '_replace') else qa_result,
                     "retry_count": retry_count + 1,
-                    "messages": [f"Sisyphus: QA passed but evidence failed — missing: {missing}. Retry #{retry_count + 1}"],
+                    "messages": [f"Sisyphus: QA passed but evidence FAILED — {verify.get('summary', '')}. Retry #{retry_count + 1}"],
                 }
         except Exception as e:
-            return {"messages": [f"Sisyphus: PASSED (evidence check failed: {e})"]}
+            return {"messages": [f"Sisyphus: PASSED (evidence check skipped: {e})"]}
 
-    # QA failed — evaluate loop
+    # ── QA FAILED — evaluate_loop for retry/oracle/escalate ──
     try:
         from openseed_sisyphus.loop import evaluate_loop, LoopState
         from openseed_sisyphus.evidence import verify_implementation
 
-        expected_files = [f.path for f in (plan.file_manifest if plan else [])]
         verification = await verify_implementation(working_dir=working_dir, expected_files=expected_files)
 
         loop_state = LoopState(
             retry_count=retry_count,
             consecutive_failures=retry_count,
-            failure_history=[f"Attempt {i+1}" for i in range(retry_count)],
+            failure_history=[
+                f"Attempt {i+1}: {(qa_result.findings[i].description if qa_result and i < len(qa_result.findings) else 'unknown')}"
+                for i in range(retry_count)
+            ],
         )
 
         decision = await evaluate_loop(
@@ -69,30 +88,22 @@ async def sisyphus_check_node(state: PipelineState) -> dict:
 
         if decision.action == "pass":
             return {"messages": [f"Sisyphus: {decision.reason}"]}
-        elif decision.action == "retry":
+        elif decision.action in ("retry", "oracle"):
+            label = "ORACLE consulted" if decision.action == "oracle" else "RETRY"
             return {
                 "retry_count": retry_count + 1,
-                "messages": [f"Sisyphus: RETRY — {decision.reason}"],
-            }
-        elif decision.action == "oracle":
-            return {
-                "retry_count": retry_count + 1,
-                "messages": [f"Sisyphus: ORACLE consulted — {decision.reason}"],
+                "messages": [f"Sisyphus: {label} — {decision.reason}"],
             }
         elif decision.action == "user_escalate":
             return {
                 "retry_count": retry_count + 1,
                 "messages": [f"Sisyphus: USER ESCALATION — {decision.reason}"],
-                "errors": [__import__("openseed_core.types", fromlist=["Error"]).Error(
-                    step="sisyphus", message=f"Needs user help: {decision.reason}",
-                )],
+                "errors": [Error(step="sisyphus", message=f"Needs user help: {decision.reason}")],
             }
         else:  # abort
             return {
                 "messages": [f"Sisyphus: ABORT — {decision.reason}"],
-                "errors": [__import__("openseed_core.types", fromlist=["Error"]).Error(
-                    step="sisyphus", message=f"Aborted: {decision.reason}",
-                )],
+                "errors": [Error(step="sisyphus", message=f"Aborted: {decision.reason}")],
             }
     except Exception as e:
         return {

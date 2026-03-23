@@ -14,8 +14,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from openseed_memory.backends.base import MemoryBackend
+from openseed_memory.filters import build_sql_where, matches_filter
 
-class SQLiteMemoryBackend:
+
+class SQLiteMemoryBackend(MemoryBackend):
     """Simple SQLite-based memory store with FTS5 text search."""
 
     def __init__(self, db_path: str = "~/.openseed/memory.db") -> None:
@@ -81,20 +84,32 @@ class SQLiteMemoryBackend:
         self._conn.commit()
         return mem_id
 
-    def search(self, query: str, user_id: str = "default", limit: int = 10) -> list[dict]:
+    def search(
+        self,
+        query: str,
+        user_id: str = "default",
+        limit: int = 10,
+        filters: dict | None = None,
+    ) -> list[dict]:
         if not self._conn:
             self.initialize()
         assert self._conn
         results = []
+
+        # Build optional metadata filter clause
+        filter_sql, filter_params = build_sql_where(filters or {})
+
         try:
-            rows = self._conn.execute(
-                """SELECT m.id, m.content, m.memory_type, m.metadata, rank
-                   FROM memories_fts f
-                   JOIN memories m ON m.rowid = f.rowid
-                   WHERE memories_fts MATCH ? AND m.user_id = ?
-                   ORDER BY rank LIMIT ?""",
-                (query, user_id, limit),
-            ).fetchall()
+            sql = (
+                f"SELECT m.id, m.content, m.memory_type, m.metadata, rank"
+                f" FROM memories_fts f"
+                f" JOIN memories m ON m.rowid = f.rowid"
+                f" WHERE memories_fts MATCH :_query AND m.user_id = :_user_id"
+                f"   AND ({filter_sql})"
+                f" ORDER BY rank LIMIT :_limit"
+            )
+            named_params = {"_query": query, "_user_id": user_id, "_limit": limit, **filter_params}
+            rows = self._conn.execute(sql, named_params).fetchall()
             for row in rows:
                 results.append({
                     "id": row[0],
@@ -104,27 +119,91 @@ class SQLiteMemoryBackend:
                     "score": abs(row[4]) if row[4] else 0.0,
                 })
         except sqlite3.OperationalError:
-            # FTS query syntax error — fallback to LIKE
+            # FTS query syntax error — fallback to LIKE, then apply Python-side filter
             rows = self._conn.execute(
                 "SELECT id, content, memory_type, metadata FROM memories WHERE user_id = ? AND content LIKE ? LIMIT ?",
                 (user_id, f"%{query}%", limit),
             ).fetchall()
             for row in rows:
+                meta = json.loads(row[3] or "{}")
+                if filters and not matches_filter(meta, filters):
+                    continue
                 results.append({
                     "id": row[0], "memory": row[1], "memory_type": row[2],
-                    "metadata": json.loads(row[3] or "{}"), "score": 0.5,
+                    "metadata": meta, "score": 0.5,
                 })
         return results
 
-    def get_all(self, user_id: str = "default", limit: int = 100) -> list[dict]:
+    def get_all(
+        self,
+        user_id: str = "default",
+        limit: int = 100,
+        filters: dict | None = None,
+    ) -> list[dict]:
         if not self._conn:
             self.initialize()
         assert self._conn
-        rows = self._conn.execute(
-            "SELECT id, content, memory_type, metadata FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-            (user_id, limit),
-        ).fetchall()
-        return [{"id": r[0], "memory": r[1], "memory_type": r[2], "metadata": json.loads(r[3] or "{}")} for r in rows]
+
+        filter_sql, filter_params = build_sql_where(filters or {})
+        sql = (
+            f"SELECT id, content, memory_type, metadata"
+            f" FROM memories"
+            f" WHERE user_id = :_user_id AND ({filter_sql})"
+            f" ORDER BY created_at DESC LIMIT :_limit"
+        )
+        named_params = {"_user_id": user_id, "_limit": limit, **filter_params}
+        rows = self._conn.execute(sql, named_params).fetchall()
+        return [
+            {"id": r[0], "memory": r[1], "memory_type": r[2], "metadata": json.loads(r[3] or "{}")}
+            for r in rows
+        ]
+
+    def update(self, memory_id: str, content: str, metadata: dict[str, Any] | None = None) -> bool:
+        """Update an existing memory entry and record UPDATE event in history."""
+        if not self._conn:
+            self.initialize()
+        assert self._conn
+
+        # Fetch current content for history
+        row = self._conn.execute(
+            "SELECT content FROM memories WHERE id = ?", (memory_id,)
+        ).fetchone()
+        if not row:
+            return False
+
+        old_content = row[0]
+        now = datetime.now().isoformat()
+
+        # Update main table
+        if metadata is not None:
+            self._conn.execute(
+                "UPDATE memories SET content = ?, metadata = ?, updated_at = ? WHERE id = ?",
+                (content, json.dumps(metadata), now, memory_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE memories SET content = ?, updated_at = ? WHERE id = ?",
+                (content, now, memory_id),
+            )
+
+        # Rebuild FTS5 entry: delete old, insert new
+        self._conn.execute(
+            "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?)",
+            (memory_id,),
+        )
+        self._conn.execute(
+            "INSERT INTO memories_fts (rowid, content, memory_type, user_id) "
+            "SELECT rowid, content, memory_type, user_id FROM memories WHERE id = ?",
+            (memory_id,),
+        )
+
+        # Record history
+        self._conn.execute(
+            "INSERT INTO history (id, memory_id, old_content, new_content, event, created_at) VALUES (?,?,?,?,?,?)",
+            (str(uuid.uuid4())[:12], memory_id, old_content, content, "UPDATE", now),
+        )
+        self._conn.commit()
+        return True
 
     def delete(self, memory_id: str) -> bool:
         if not self._conn:

@@ -37,6 +37,8 @@ class EventType(str, Enum):
     QA_AGENT_START = "qa.agent_start"
     QA_AGENT_COMPLETE = "qa.agent_complete"
     QA_VERDICT = "qa.verdict"
+    QA_AGENTS_SELECTED = "qa.agents_selected"
+    QA_SYNTHESIS_COMPLETE = "qa.synthesis_complete"
 
     # Sisyphus
     SISYPHUS_RETRY = "sisyphus.retry"

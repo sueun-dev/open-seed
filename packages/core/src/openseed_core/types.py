@@ -190,6 +190,9 @@ class PipelineState(TypedDict):
     # Memory
     relevant_memories: list[Memory]
 
+    # Routing flags — set by nodes, read by conditional edge functions
+    skip_planning: bool  # Set by intake node when Claude determines task is trivial
+
     # Accumulated across parallel nodes (reducers)
     errors: Annotated[list[Error], operator.add]
     messages: Annotated[list[str], operator.add]
