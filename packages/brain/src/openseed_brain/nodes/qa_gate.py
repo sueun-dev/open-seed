@@ -17,8 +17,16 @@ async def qa_gate_node(state: PipelineState) -> dict:
     implementation = state.get("implementation")
     plan = state.get("plan")
 
-    # Build context for reviewers: what was built + plan
-    context_parts = []
+    task = state["task"]
+
+    # Build context for reviewers: task scope + what was built + plan
+    context_parts = [
+        f"ORIGINAL TASK: {task}",
+        f"SCOPE: Review ONLY what the task asked for. Do not demand production-grade features "
+        f"(graceful shutdown, helmet, rate limiting, etc.) unless the task explicitly requires them. "
+        f"A simple task should produce simple code. BLOCK only for actual bugs, syntax errors, or security vulnerabilities.",
+        "",
+    ]
     if plan:
         context_parts.append(f"Plan: {plan.summary}")
         for t in plan.tasks:
