@@ -879,7 +879,7 @@ ${contextLines.join("\n")}`;
     // 2. If ANY check fails → ask AI to diagnose and fix it
     // 3. AI runs bash commands, reads error output, tries solutions
     // 4. If AI can't fix → AI explains to user what to do
-    // NO hardcoded remedies. NO if/else rules. AI decides everything.
+    // NO hardcoded remedies. AI decides everything.
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -893,21 +893,56 @@ ${contextLines.join("\n")}`;
     const cp = require("child_process");
     const selectedProvider = provider || "openai";
 
-    // Gather environment info once — AI will use this to make decisions
     const envInfo = {
-      platform: process.platform,
-      arch: process.arch,
-      nodeVersion: process.version,
-      shell: process.env.SHELL || "unknown",
-      home: os.homedir(),
-      cwd: childCwd,
-      user: os.userInfo().username,
-      pathDirs: (process.env.PATH || "").split(":").slice(0, 10),
+      platform: process.platform, arch: process.arch, nodeVersion: process.version,
+      shell: process.env.SHELL || "unknown", home: os.homedir(), cwd: childCwd,
+      user: os.userInfo().username, pathDirs: (process.env.PATH || "").split(":").slice(0, 10),
     };
 
-    // Run all checks — collect failures
+    // ── Reusable check functions (used for initial check AND re-verification) ──
+    const checkFns = {
+      "git": () => {
+        const out = cp.execSync("git --version 2>&1", { encoding: "utf8", timeout: 5000 }).trim();
+        if (!out.includes("git version")) throw new Error("git not found");
+      },
+      "node": () => {
+        const major = parseInt(process.version.replace("v", "").split(".")[0], 10);
+        if (major < 18) throw new Error(`Node.js ${process.version} too old (need 18+)`);
+      },
+      "npm": () => {
+        cp.execSync("npm --version", { stdio: "ignore", timeout: 5000 });
+      },
+      "provider-auth": () => {
+        const { getProviderAuthStatus } = require(path.join(PROJECT_DIR, "dist", "providers", "auth.js"));
+        let testConfig;
+        try { testConfig = JSON.parse(fs.readFileSync(path.join(CWD, ".agent", "config.json"), "utf8")); } catch {
+          testConfig = { providers: {
+            anthropic: { enabled: selectedProvider === "anthropic" || selectedProvider === "both", authMode: "oauth", defaultModel: "claude-opus-4-6" },
+            openai: { enabled: selectedProvider === "openai" || selectedProvider === "both", authMode: "oauth", defaultModel: "gpt-5.4" }
+          }};
+        }
+        const toCheck = selectedProvider === "both" ? ["anthropic", "openai"] : [selectedProvider];
+        for (const pid of toCheck) {
+          const status = getProviderAuthStatus(pid, testConfig.providers?.[pid]);
+          if (!status.ready) throw new Error(`${pid}: ${status.summary}`);
+        }
+      },
+      "write-access": () => {
+        const testFile = path.join(childCwd, ".agi-preflight-test");
+        fs.writeFileSync(testFile, "test", "utf8");
+        fs.unlinkSync(testFile);
+      },
+      "disk-space": () => {
+        const dfOut = cp.execSync(`df -k "${childCwd}" 2>&1 | tail -1`, { encoding: "utf8", timeout: 5000 });
+        const parts = dfOut.trim().split(" ").filter(Boolean);
+        const availKB = parseInt(parts[3], 10);
+        if (Number.isFinite(availKB) && availKB < 500000) throw new Error(`Only ${Math.round(availKB / 1024)}MB free (need 500MB+)`);
+      },
+    };
+
+    // ── Run all checks ──
     const preflightChecks = [];
-    function runCheck(name, fn) {
+    for (const [name, fn] of Object.entries(checkFns)) {
       try {
         fn();
         preflightChecks.push({ name, status: "ok", error: null });
@@ -919,74 +954,34 @@ ${contextLines.join("\n")}`;
       }
     }
 
-    runCheck("git", () => {
-      const out = cp.execSync("git --version 2>&1", { encoding: "utf8", timeout: 5000 }).trim();
-      if (!out.includes("git version")) throw new Error("git not found");
-    });
-    runCheck("node", () => {
-      const major = parseInt(process.version.replace("v", "").split(".")[0], 10);
-      if (major < 18) throw new Error(`Node.js ${process.version} too old (need 18+)`);
-    });
-    runCheck("npm", () => {
-      cp.execSync("npm --version", { stdio: "ignore", timeout: 5000 });
-    });
-    runCheck("provider-auth", () => {
-      const { getProviderAuthStatus } = require(path.join(PROJECT_DIR, "dist", "providers", "auth.js"));
-      let testConfig;
-      try { testConfig = JSON.parse(fs.readFileSync(path.join(CWD, ".agent", "config.json"), "utf8")); } catch {
-        testConfig = { providers: {
-          anthropic: { enabled: selectedProvider === "anthropic" || selectedProvider === "both", authMode: "oauth", defaultModel: "claude-opus-4-6" },
-          openai: { enabled: selectedProvider === "openai" || selectedProvider === "both", authMode: "oauth", defaultModel: "gpt-5.4" }
-        }};
-      }
-      const toCheck = selectedProvider === "both" ? ["anthropic", "openai"] : [selectedProvider];
-      for (const pid of toCheck) {
-        const status = getProviderAuthStatus(pid, testConfig.providers?.[pid]);
-        if (!status.ready) throw new Error(`${pid}: ${status.summary}`);
-      }
-    });
-    runCheck("write-access", () => {
-      const testFile = path.join(childCwd, ".agi-preflight-test");
-      fs.writeFileSync(testFile, "test", "utf8");
-      fs.unlinkSync(testFile);
-    });
-    runCheck("disk-space", () => {
-      const dfOut = cp.execSync(`df -k "${childCwd}" 2>&1 | tail -1`, { encoding: "utf8", timeout: 5000 });
-      const availKB = parseInt(dfOut.trim().split(/\s+/)[3], 10);
-      if (Number.isFinite(availKB) && availKB < 500000) throw new Error(`Only ${Math.round(availKB / 1024)}MB free (need 500MB+)`);
-    });
-
-    // If all passed → continue immediately
     const failures = preflightChecks.filter(c => c.status === "failed");
 
     if (failures.length > 0) {
-      // ── AI Self-Healing: ask AI to diagnose and fix all failures ──
       sendPreflight("agi.preflight.healing", {
         message: `${failures.length} issue(s) found — AI is diagnosing and attempting to fix...`,
         failures: failures.map(f => ({ name: f.name, error: f.error }))
       });
 
-      // Find a working provider for the healing call.
-      // If provider-auth itself failed, try the other provider or fall back to guidance-only.
+      // ── Find a working provider for the healing LLM call ──
       let healingProvider = null;
       const providerAuthFailed = failures.some(f => f.name === "provider-auth");
       if (!providerAuthFailed) {
         healingProvider = selectedProvider === "both" ? "anthropic" : selectedProvider;
       } else {
-        // Try the opposite provider
-        const opposite = selectedProvider === "anthropic" ? "openai" : "anthropic";
-        try {
-          const { getProviderAuthStatus } = require(path.join(PROJECT_DIR, "dist", "providers", "auth.js"));
-          let tc; try { tc = JSON.parse(fs.readFileSync(path.join(CWD, ".agent", "config.json"), "utf8")); } catch { tc = { providers: { anthropic: { enabled: true, authMode: "oauth", defaultModel: "claude-opus-4-6" }, openai: { enabled: true, authMode: "oauth", defaultModel: "gpt-5.4" } } }; }
-          const st = getProviderAuthStatus(opposite, tc.providers?.[opposite]);
-          if (st.ready) healingProvider = opposite;
-        } catch {}
+        // Selected provider's auth is broken — try the other one
+        for (const alt of ["anthropic", "openai"]) {
+          if (alt === selectedProvider) continue;
+          try {
+            const { getProviderAuthStatus } = require(path.join(PROJECT_DIR, "dist", "providers", "auth.js"));
+            const defaultCfg = { enabled: true, authMode: "oauth", defaultModel: alt === "anthropic" ? "claude-opus-4-6" : "gpt-5.4" };
+            if (getProviderAuthStatus(alt, defaultCfg).ready) { healingProvider = alt; break; }
+          } catch {}
+        }
       }
 
       let healed = false;
 
       if (healingProvider) {
-        // Ask AI to fix the failures
         try {
           const { ProviderRegistry } = require(path.join(PROJECT_DIR, "dist", "providers", "registry.js"));
           const { loadConfig } = require(path.join(PROJECT_DIR, "dist", "core", "config.js"));
@@ -994,7 +989,7 @@ ${contextLines.join("\n")}`;
           const healRegistry = new ProviderRegistry();
 
           const failureReport = failures.map(f => `- ${f.name}: ${f.error}`).join("\n");
-          const healPrompt = `You are a system diagnostician for an AGI coding engine called Open Seed.
+          const healPrompt = `You are a system diagnostician for an AGI coding engine.
 
 ## Environment
 - Platform: ${envInfo.platform} (${envInfo.arch})
@@ -1003,44 +998,39 @@ ${contextLines.join("\n")}`;
 - User: ${envInfo.user}
 - Home: ${envInfo.home}
 - Working directory: ${envInfo.cwd}
-- PATH (first 10): ${envInfo.pathDirs.join(":")}
+- PATH: ${envInfo.pathDirs.join(":")}
 - Selected AI provider: ${selectedProvider}
 
 ## Failed Pre-flight Checks
 ${failureReport}
 
 ## Your Job
-For EACH failure, output a JSON array of fix attempts. Each attempt is a bash command to run.
-After the commands, output a "userGuidance" message for any issue you CANNOT fix via bash (e.g., provider auth requires interactive login).
+For EACH failure, output bash commands to fix it. If you CANNOT fix it via bash (e.g., OAuth requires interactive login), explain clearly in userGuidance.
 
 Rules:
-- Only output commands that are SAFE and non-destructive
-- Do NOT use sudo unless absolutely necessary
-- If a tool needs to be installed, use the package manager appropriate for the platform
-- If you cannot fix something (e.g., OAuth login is interactive), say so clearly in userGuidance
-- Match the user's language: if the task contains Korean, write guidance in Korean
+- SAFE commands only. NEVER use: rm -rf /, rm -rf ~, dd, mkfs, format, or any destructive command
+- Do NOT delete user data or project files
+- Prefer package managers (brew on macOS, apt on Linux)
+- No sudo unless absolutely required
+- Match the user's language for userGuidance (Korean if task is Korean)
 
-The user's task starts with: "${task.slice(0, 100)}"
+User's task: "${task.slice(0, 100)}"
 
-Output ONLY this JSON (no markdown fences, no explanation):
+Output ONLY valid JSON:
 {
   "fixes": [
-    { "name": "check-name", "commands": ["bash command 1", "bash command 2"], "explanation": "what this does" }
+    { "name": "check-name", "commands": ["safe bash command"], "explanation": "what this does" }
   ],
-  "userGuidance": "Message to show user for things AI cannot auto-fix. Empty string if all fixed."
+  "userGuidance": "For issues that need manual action. Empty string if all auto-fixed."
 }`;
 
           const healResponse = await healRegistry.invokeWithFailover(healConfig, healingProvider, {
-            role: "planner",
-            category: "planning",
-            systemPrompt: "You are a system diagnostician. Output valid JSON only. No markdown fences.",
-            prompt: healPrompt,
-            responseFormat: "json"
+            role: "planner", category: "planning",
+            systemPrompt: "You are a system diagnostician. Output valid JSON only.",
+            prompt: healPrompt, responseFormat: "json"
           }, {
             onTextDelta: async (chunk) => {
-              if (typeof chunk === "string" && chunk.trim()) {
-                sendPreflight("agi.preflight.healing.stream", { text: chunk });
-              }
+              if (typeof chunk === "string" && chunk.trim()) sendPreflight("agi.preflight.healing.stream", { text: chunk });
             }
           });
 
@@ -1048,24 +1038,26 @@ Output ONLY this JSON (no markdown fences, no explanation):
           let healPlan = null;
           try {
             const raw = healResponse.text.trim();
-            const jsonStart = raw.indexOf("{");
-            const jsonEnd = raw.lastIndexOf("}");
-            if (jsonStart !== -1 && jsonEnd > jsonStart) {
-              healPlan = JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
-            }
+            const start = raw.indexOf("{");
+            const end = raw.lastIndexOf("}");
+            if (start !== -1 && end > start) healPlan = JSON.parse(raw.slice(start, end + 1));
           } catch {}
 
           if (healPlan?.fixes && Array.isArray(healPlan.fixes)) {
-            // Execute AI's fix commands
+            // ── Dangerous command blocklist — AI should never run these ──
+            const dangerousPatterns = ["rm -rf /", "rm -rf ~", "mkfs", "dd if=", "format c:", "> /dev/sd", "chmod 777 /", ":(){ :|:& };:"];
+
             for (const fix of healPlan.fixes) {
               if (!fix.commands || !Array.isArray(fix.commands)) continue;
-              sendPreflight("agi.preflight.healing.attempt", {
-                name: fix.name,
-                explanation: fix.explanation || "",
-                commands: fix.commands
-              });
+              sendPreflight("agi.preflight.healing.attempt", { name: fix.name, explanation: fix.explanation || "", commands: fix.commands });
               for (const cmd of fix.commands) {
                 if (typeof cmd !== "string" || !cmd.trim()) continue;
+                // Block dangerous commands
+                const cmdLower = cmd.toLowerCase();
+                if (dangerousPatterns.some(d => cmdLower.includes(d))) {
+                  sendPreflight("agi.preflight.healing.result", { command: cmd, success: false, error: "BLOCKED — dangerous command" });
+                  continue;
+                }
                 try {
                   const output = cp.execSync(cmd, { encoding: "utf8", timeout: 120000, cwd: childCwd, stdio: ["ignore", "pipe", "pipe"] });
                   sendPreflight("agi.preflight.healing.result", { command: cmd, success: true, output: (output || "").slice(0, 500) });
@@ -1076,25 +1068,14 @@ Output ONLY this JSON (no markdown fences, no explanation):
               }
             }
 
-            // Re-run failed checks to see if they're fixed now
+            // ── Re-verify using the SAME check functions (DRY) ──
             const stillFailing = [];
             for (const f of failures) {
-              const original = preflightChecks.find(c => c.name === f.name);
-              // Re-run the same check
+              const checkFn = checkFns[f.name];
+              if (!checkFn) { stillFailing.push(f); continue; }
               try {
-                if (f.name === "git") cp.execSync("git --version", { stdio: "ignore", timeout: 5000 });
-                else if (f.name === "npm") cp.execSync("npm --version", { stdio: "ignore", timeout: 5000 });
-                else if (f.name === "write-access") { const tf = path.join(childCwd, ".agi-preflight-test"); fs.writeFileSync(tf, "test"); fs.unlinkSync(tf); }
-                else if (f.name === "disk-space") { const df = cp.execSync(`df -k "${childCwd}" 2>&1 | tail -1`, { encoding: "utf8", timeout: 5000 }); const av = parseInt(df.trim().split(/\s+/)[3], 10); if (Number.isFinite(av) && av < 500000) throw new Error("still low"); }
-                else if (f.name === "provider-auth") {
-                  const { getProviderAuthStatus } = require(path.join(PROJECT_DIR, "dist", "providers", "auth.js"));
-                  let tc; try { tc = JSON.parse(fs.readFileSync(path.join(CWD, ".agent", "config.json"), "utf8")); } catch { tc = { providers: { anthropic: { enabled: true, authMode: "oauth", defaultModel: "claude-opus-4-6" }, openai: { enabled: true, authMode: "oauth", defaultModel: "gpt-5.4" } } }; }
-                  const toCheck = selectedProvider === "both" ? ["anthropic", "openai"] : [selectedProvider];
-                  for (const pid of toCheck) { const st = getProviderAuthStatus(pid, tc.providers?.[pid]); if (!st.ready) throw new Error(`${pid}: ${st.summary}`); }
-                }
-                // Check passed after fix
+                checkFn();
                 sendPreflight("agi.preflight.check", { name: f.name, status: "fixed" });
-                if (original) original.status = "fixed";
               } catch {
                 stillFailing.push(f);
               }
@@ -1102,32 +1083,26 @@ Output ONLY this JSON (no markdown fences, no explanation):
 
             if (stillFailing.length === 0) {
               healed = true;
-              sendPreflight("agi.preflight.healed", {
-                message: `AI successfully fixed ${failures.length} issue(s). Continuing pipeline.`
-              });
+              sendPreflight("agi.preflight.healed", { message: `AI fixed ${failures.length} issue(s). Continuing pipeline.` });
             } else {
-              // Some still failing — show AI's guidance
               sendPreflight("agi.preflight.failed", {
                 message: healPlan.userGuidance || `${stillFailing.length} issue(s) could not be auto-fixed.`,
                 failures: stillFailing.map(f => ({ name: f.name, error: f.error }))
               });
             }
           } else {
-            // AI didn't produce valid fix plan
             sendPreflight("agi.preflight.failed", {
               message: healPlan?.userGuidance || `AI could not generate a fix plan for: ${failures.map(f => f.name).join(", ")}`,
               failures: failures.map(f => ({ name: f.name, error: f.error }))
             });
           }
         } catch (healErr) {
-          // Healing LLM call itself failed
           sendPreflight("agi.preflight.failed", {
             message: `AI healing failed: ${healErr.message || healErr}. Manual intervention needed.`,
             failures: failures.map(f => ({ name: f.name, error: f.error }))
           });
         }
       } else {
-        // No provider available for healing — can't call AI
         sendPreflight("agi.preflight.failed", {
           message: "No AI provider available to diagnose issues. Please fix manually and retry.",
           failures: failures.map(f => ({ name: f.name, error: f.error }))
