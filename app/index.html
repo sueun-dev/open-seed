@@ -3167,6 +3167,102 @@ function renderAgiPreviousRunCard(payload){
   if(agiActivity)agiActivity.appendChild(card);
 }
 
+function renderAgiDiscussionCard(payload){
+  const card=document.createElement('div');
+  card.style.cssText='border:1px solid rgba(168,85,247,.4);background:rgba(168,85,247,.08);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px';
+
+  // Title
+  const title=document.createElement('div');
+  title.style.cssText='font-size:13px;font-weight:700;color:var(--fg)';
+  title.textContent=payload.summary||'Issue needs resolution';
+  card.appendChild(title);
+
+  // Errors
+  if(payload.errors&&payload.errors.length>0){
+    const errDiv=document.createElement('div');
+    errDiv.style.cssText='font-size:11px;color:var(--red);line-height:1.4;max-height:80px;overflow-y:auto';
+    errDiv.textContent=payload.errors.slice(0,5).join('\n');
+    card.appendChild(errDiv);
+  }
+
+  // User input area
+  const inputRow=document.createElement('div');
+  inputRow.style.cssText='display:flex;gap:6px';
+  const input=document.createElement('input');
+  input.type='text';
+  input.placeholder='Type your solution or guidance...';
+  input.style.cssText='flex:1;padding:8px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:var(--fg);font-size:12px;outline:none';
+  const sendBtn=document.createElement('button');
+  sendBtn.textContent='Send';
+  sendBtn.style.cssText='padding:8px 14px;border-radius:6px;border:1px solid rgba(88,166,255,.5);background:rgba(88,166,255,.15);color:var(--accent);cursor:pointer;font-size:12px;font-weight:600';
+  sendBtn.addEventListener('click',async()=>{
+    if(!input.value.trim())return;
+    const msg=input.value.trim();
+    input.value='';
+    agiLog(`You: ${msg}`,'var(--fg)');
+    // Call discussion API in user mode
+    try{
+      const r=await fetch('/api/agi/discuss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic:payload.discussionTopic||payload.summary,context:payload.discussionContext||'',userMessage:msg,mode:'user'})});
+      const reader=r.body.getReader();const dec=new TextDecoder();
+      while(true){const{done,value}=await reader.read();if(done)break;const text=dec.decode(value);
+        for(const line of text.split('\n')){if(!line.startsWith('data: '))continue;const d=line.slice(6).trim();if(d==='[DONE]')continue;
+          try{const ev=JSON.parse(d);if(ev.type==='agi.discussion.message')agiLog(`AI: ${(ev.text||'').slice(0,500)}`,'var(--accent)');}catch{}
+        }
+      }
+    }catch(e){agiLog(`Discussion error: ${e.message}`,'var(--red)');}
+  });
+  inputRow.appendChild(input);
+  inputRow.appendChild(sendBtn);
+  card.appendChild(inputRow);
+
+  // Enter key to send
+  input.addEventListener('keydown',(e)=>{if(e.key==='Enter'){e.preventDefault();sendBtn.click();}});
+
+  // Buttons row
+  const btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:8px;margin-top:4px';
+
+  // AI Debate button
+  const debateBtn=document.createElement('button');
+  debateBtn.style.cssText='flex:1;padding:10px 14px;border-radius:8px;border:1px solid rgba(168,85,247,.5);background:rgba(168,85,247,.15);color:rgb(168,85,247);cursor:pointer;font-size:12px;font-weight:600';
+  debateBtn.innerHTML='<div>AI Debate for Me</div><div style="font-size:10px;margin-top:2px;opacity:.7">AI agents debate to find the best solution</div>';
+  debateBtn.addEventListener('click',async()=>{
+    debateBtn.disabled=true;debateBtn.style.opacity='0.5';
+    agiLog('Starting AI-vs-AI debate...','var(--purple)');
+    try{
+      const r=await fetch('/api/agi/discuss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic:payload.discussionTopic||payload.summary,context:payload.discussionContext||'',mode:'auto'})});
+      const reader=r.body.getReader();const dec=new TextDecoder();
+      while(true){const{done,value}=await reader.read();if(done)break;const text=dec.decode(value);
+        for(const line of text.split('\n')){if(!line.startsWith('data: '))continue;const d=line.slice(6).trim();if(d==='[DONE]')continue;
+          try{const ev=JSON.parse(d);
+            if(ev.type==='agi.discussion.message')agiLog(`${ev.from}: ${(ev.text||'').slice(0,500)}`,'var(--purple)');
+            if(ev.type==='agi.discussion.conclusion'){agiLog('CONCLUSION: '+(ev.text||'').slice(0,500),'var(--green)');
+              // Auto-continue pipeline with the conclusion as guidance
+              const conclusionText=ev.text||'';
+              const originalPrompt=(document.getElementById('agiPrompt').value||'').trim();
+              document.getElementById('agiPrompt').value=originalPrompt+'\n\n[Discussion Conclusion]\n'+conclusionText;
+              card.remove();_agiAwaitingClarification=false;
+              startAgiPipeline(originalPrompt+'\n\n[Discussion Conclusion]\n'+conclusionText);
+            }
+          }catch{}
+        }
+      }
+    }catch(e){agiLog(`Debate error: ${e.message}`,'var(--red)');debateBtn.disabled=false;debateBtn.style.opacity='1';}
+  });
+  btnRow.appendChild(debateBtn);
+
+  // Skip/Continue anyway button
+  const skipBtn=document.createElement('button');
+  skipBtn.style.cssText='padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:var(--fg2);cursor:pointer;font-size:12px';
+  skipBtn.textContent='Skip';
+  skipBtn.addEventListener('click',()=>{card.remove();_agiAwaitingClarification=false;});
+  btnRow.appendChild(skipBtn);
+  card.appendChild(btnRow);
+
+  const agiActivity=document.getElementById('agiActivity');
+  if(agiActivity)agiActivity.appendChild(card);
+}
+
 function renderAgiClarificationCard(payload){
   const card=document.createElement('div');
   card.style.cssText='border:1px solid rgba(88,166,255,.35);background:rgba(88,166,255,.06);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:12px';
@@ -3595,6 +3691,10 @@ async function startAgiV2(){
           else if(ev.type==='agi.pipeline.awaiting_input'){
             _agiAwaitingClarification=true;
             updateAgiDashboard({status:'Needs Input',phase:'clarify'});
+            // If discussion is allowed, show the discussion card
+            if(ev.allowDiscussion){
+              renderAgiDiscussionCard(ev);
+            }
           }
           else if(ev.type==='agi.clarification.requested'){
             _agiAwaitingClarification=true;
