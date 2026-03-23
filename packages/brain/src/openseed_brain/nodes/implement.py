@@ -43,11 +43,12 @@ Plan:
 {plan_text}
 
 Rules:
-- Write EVERY file listed in the plan
+- Write ALL files DIRECTLY in the working directory — do NOT create a subdirectory/subfolder for the project
 - Each file must be COMPLETE and RUNNABLE
 - No placeholders, no TODOs
 - If package.json is needed, create it with all deps
-- Run npm install after creating package.json if needed""",
+- Run npm install after creating package.json if needed
+- src/ subfolder is OK for source files, but package.json/index.html must be at the root""",
         model="sonnet",
         working_dir=state["working_dir"],
         max_turns=15,

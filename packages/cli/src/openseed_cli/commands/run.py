@@ -31,6 +31,11 @@ def run_cmd(task: str, working_dir: str, config: str | None, plan_only: bool, re
 
 
 async def _run(task: str, working_dir: str, config_path: str | None, plan_only: bool, resume: str | None) -> None:
+    # Suppress noisy checkpoint deserialization warnings
+    import warnings
+    import logging
+    warnings.filterwarnings("ignore", message="Deserializing unregistered type")
+    logging.getLogger("langgraph").setLevel(logging.ERROR)
     from openseed_core.config import load_config
     from openseed_core.events import EventBus, Event, EventType
     from openseed_brain import compile_graph, initial_state
@@ -65,8 +70,12 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
 
     event_bus.subscribe(on_event)
 
+    # Ensure working directory exists
+    wd = Path(working_dir).resolve()
+    wd.mkdir(parents=True, exist_ok=True)
+
     # Build and run graph
-    state = initial_state(task=task, working_dir=str(Path(working_dir).resolve()))
+    state = initial_state(task=task, working_dir=str(wd))
 
     # Checkpointer required for astream + state tracking
     checkpoint_dir = str(Path("~/.openseed/checkpoints").expanduser())
