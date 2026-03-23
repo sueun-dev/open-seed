@@ -169,9 +169,10 @@ Issues found by QA:
 Rules:
 - Read the broken files first
 - Fix the ROOT CAUSE, not the symptom
-- Write COMPLETE fixed files
+- Write the COMPLETE file from start to finish — never truncate
 - Do NOT introduce new features — only fix what's broken
-- After fixing, verify by reading the file again"""
+- Keep it simple — a minimal server does not need graceful shutdown or signal handlers
+- After fixing, read the file back to verify it's syntactically valid"""
 
     response = await agent.invoke(
         prompt=prompt,
