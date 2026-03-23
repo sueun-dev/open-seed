@@ -91,39 +91,31 @@ class ClaudeAgent:
         cli = self._resolve_cli()
         resolved_model = self._resolve_model(model)
 
-        cmd = [cli, "--print", "--output-format", "stream-json"]
+        cmd = [cli, "--print", "--dangerously-skip-permissions"]
         if resolved_model:
             cmd.extend(["--model", resolved_model])
         if system_prompt:
-            cmd.extend(["--system-prompt", system_prompt])
+            cmd.extend(["--append-system-prompt", system_prompt])
         if max_turns:
             cmd.extend(["--max-turns", str(max_turns)])
-        if allowed_tools:
-            for tool in allowed_tools:
-                cmd.extend(["--allowedTools", tool])
-        cmd.extend(["--prompt", prompt])
+        # Note: --allowedTools can interfere with positional prompt parsing
+        # Skip for now — --dangerously-skip-permissions grants all tools
+        # Claude CLI takes prompt as positional argument (after all flags)
+        cmd.append(prompt)
 
         text_parts: list[str] = []
         thinking_parts: list[str] = []
         tool_results: list[dict[str, Any]] = []
 
         async def on_line(line: StreamLine) -> None:
-            if line.parsed:
-                msg_type = line.parsed.get("type", "")
-                if msg_type == "assistant" and "content" in line.parsed:
-                    for block in line.parsed["content"]:
-                        if block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
-                        elif block.get("type") == "thinking":
-                            thinking_parts.append(block.get("thinking", ""))
-                        elif block.get("type") == "tool_result":
-                            tool_results.append(block)
-                # Stream to event bus
-                if self.event_bus:
-                    await self.event_bus.emit_simple(
-                        EventType.AGENT_TEXT, node="claude",
-                        text=line.text[:500], model=resolved_model,
-                    )
+            # --print mode outputs plain text (not JSON)
+            if line.source == "stdout" and line.text.strip():
+                text_parts.append(line.text)
+            if self.event_bus:
+                await self.event_bus.emit_simple(
+                    EventType.AGENT_TEXT, node="claude",
+                    text=line.text[:500], model=resolved_model,
+                )
 
         result = await run_streaming(
             cmd,

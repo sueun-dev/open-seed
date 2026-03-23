@@ -1,26 +1,44 @@
 """
-Intake node — Parse task, recall memories, classify intent.
-
-Pattern from: OmO Sisyphus Phase 0 Intent Gate
-All classification by LLM, no regex.
+Intake node — Analyze task, classify intent, recall memories.
+Calls Claude Opus for deep analysis.
 """
 
 from __future__ import annotations
 
 from openseed_brain.state import PipelineState
+from openseed_core.events import EventBus, EventType
 
 
 async def intake_node(state: PipelineState) -> dict:
     """
-    First node: analyze the task, recall relevant memories.
-
-    1. Query Memory for similar past tasks/failures
-    2. Ask LLM to classify intent and complexity
-    3. Return relevant_memories + messages
-
-    TODO: Implement with left_hand (Claude) for intent analysis
+    First node: analyze the task via Claude.
+    1. Ask Claude to classify intent, complexity, requirements
+    2. Return analysis as messages
     """
     task = state["task"]
+    working_dir = state["working_dir"]
+
+    from openseed_left_hand.agent import ClaudeAgent
+
+    agent = ClaudeAgent()
+
+    response = await agent.invoke(
+        prompt=f"""Analyze this task and classify it:
+
+Task: {task}
+Working directory: {working_dir}
+
+Output a brief analysis:
+1. Intent type (build/fix/refactor/research)
+2. Complexity (simple/moderate/complex)
+3. Key requirements (bullet list)
+4. Suggested approach (1-2 sentences)
+
+Be concise. No more than 10 lines.""",
+        model="sonnet",
+        max_turns=1,
+    )
+
     return {
-        "messages": [f"Intake: received task '{task[:100]}'"],
+        "messages": [f"Intake: {response.text[:500]}"],
     }

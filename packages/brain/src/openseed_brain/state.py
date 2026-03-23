@@ -10,9 +10,11 @@ from __future__ import annotations
 from openseed_core.types import (
     AgentProvider,
     Error,
+    FileEntry,
     Finding,
     Implementation,
     Plan,
+    PlanTask,
     PipelineState,
     QAResult,
     DeployResult,
