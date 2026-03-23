@@ -3121,7 +3121,7 @@ If the Structured Analysis section has **Features**, verify each:
         if (aborted) { reject(new Error("Aborted")); return; }
         const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
 
-        const singleStepPrompt = pipelineStep && !/^\[STEP\s+\d+:/.test(prompt)
+        const singleStepPrompt = pipelineStep && !prompt.trimStart().startsWith("[STEP ")
           ? `[STEP ${stepIdx + 1}: ${String(pipelineStep.type || "custom").toUpperCase()}] ${pipelineStep.title}
 
 ${prompt}`
