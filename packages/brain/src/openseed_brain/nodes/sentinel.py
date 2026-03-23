@@ -33,8 +33,17 @@ async def sentinel_check_node(state: PipelineState) -> dict:
     working_dir = state["working_dir"]
     task = state["task"]
 
-    # Collect expected files from plan
+    # Collect expected files from plan — if no plan (skip_planning), scan working_dir
     expected_files = [f.path for f in (plan.file_manifest if plan else [])]
+    if not expected_files:
+        import os
+        try:
+            for f in os.listdir(working_dir):
+                if f.startswith(".") or f == "node_modules" or f == "__pycache__":
+                    continue
+                expected_files.append(f)
+        except OSError:
+            pass
 
     # ── QA PASSED — evidence verification via ExecutionLoop ──
     if qa_result and qa_result.verdict == Verdict.PASS:

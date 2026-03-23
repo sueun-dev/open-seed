@@ -23,13 +23,20 @@ class GitChannel(DeployChannel):
         return "git"
 
     async def check(self) -> bool:
-        """Check git is available and repo is initialized."""
-        result = await run_simple(["git", "status"], timeout_seconds=5)
+        """Check git is available."""
+        result = await run_simple(["git", "--version"], timeout_seconds=5)
         return result.exit_code == 0
 
     async def deploy(self, working_dir: str, message: str = "") -> ChannelResult:
         """Commit all changes and optionally push."""
         commit_msg = message or f"{self.config.commit_prefix} automated deployment"
+
+        # Ensure git repo exists
+        import os
+        if not os.path.isdir(os.path.join(working_dir, ".git")):
+            init = await run_simple(["git", "init"], cwd=working_dir)
+            if init.exit_code != 0:
+                return ChannelResult(channel="git", success=False, message=f"git init failed: {init.stderr}")
 
         # Stage all changes
         stage = await run_simple(["git", "add", "-A"], cwd=working_dir)
