@@ -1,7 +1,6 @@
 """
 Deploy node — Push verified code through deployment channels.
-
-Pattern from: OpenClaw infra/ (git push, npm publish, docker, webhooks)
+REAL implementation — calls openseed_body.
 """
 
 from __future__ import annotations
@@ -10,16 +9,22 @@ from openseed_brain.state import PipelineState, DeployResult
 
 
 async def deploy_node(state: PipelineState) -> dict:
-    """
-    Deploy the verified implementation.
+    """Deploy the verified implementation via configured channels."""
+    working_dir = state["working_dir"]
+    task = state["task"]
 
-    1. Read body config (active channels)
-    2. For each channel: git push, npm publish, docker build, webhook
-    3. Return DeployResult
-
-    TODO: Implement with body package
-    """
-    return {
-        "deploy_result": DeployResult(success=True, channel="git", message="Deployed (placeholder)"),
-        "messages": ["Deploy: code deployed (placeholder)"],
-    }
+    try:
+        from openseed_body.deployer import deploy
+        result = await deploy(
+            working_dir=working_dir,
+            message=f"openseed: {task[:80]}",
+        )
+        return {
+            "deploy_result": result,
+            "messages": [f"Deploy: {result.message}"],
+        }
+    except Exception as e:
+        return {
+            "deploy_result": DeployResult(success=False, channel="error", message=str(e)),
+            "messages": [f"Deploy: error — {e}"],
+        }

@@ -80,7 +80,24 @@ def build_graph() -> StateGraph:
     return graph
 
 
-def compile_graph(**kwargs: Any) -> Any:
-    """Build and compile the graph with optional checkpointer."""
+def compile_graph(checkpoint_dir: str | None = None, **kwargs: Any) -> Any:
+    """
+    Build and compile the graph with optional checkpointer.
+
+    If checkpoint_dir is provided, uses SqliteSaver for crash recovery.
+    Pass thread_id in config to resume: graph.invoke(state, {"configurable": {"thread_id": "run-123"}})
+    """
     graph = build_graph()
+
+    if checkpoint_dir:
+        import os
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        try:
+            from langgraph.checkpoint.sqlite import SqliteSaver
+            db_path = os.path.join(checkpoint_dir, "checkpoints.db")
+            checkpointer = SqliteSaver.from_conn_string(db_path)
+            kwargs["checkpointer"] = checkpointer
+        except ImportError:
+            pass  # SqliteSaver not available — run without checkpointing
+
     return graph.compile(**kwargs)
