@@ -822,13 +822,10 @@ ${contextLines.join("\n")}`;
           return;
         }
       }
-    } else {
-      // No targetDir — create a safe subdirectory so we don't pollute the user's workspace
-      const safeName = `agi-${Date.now().toString(36)}`;
-      childCwd = path.join(CWD, safeName);
-      projName = safeName;
-      fs.mkdirSync(childCwd, { recursive: true });
     }
+    // No targetDir → childCwd stays as CWD (workspace root). This is intentional:
+    // the user chose not to set a target, so build in-place. Previous Run detection
+    // works because the same folder is reused.
 
     // ═══ Previous Run Detection (before SSE starts) ═══
     const prevAgentDir = path.join(childCwd, ".agent");
