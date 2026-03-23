@@ -117,7 +117,7 @@ async def run_streaming(
         await process.wait()
 
     return SubprocessResult(
-        exit_code=process.returncode or -1,
+        exit_code=process.returncode if process.returncode is not None else -1,
         stdout="\n".join(stdout_parts),
         stderr="\n".join(stderr_parts),
         lines=lines,
