@@ -1487,20 +1487,48 @@ Output ONLY valid JSON:
       return { required: false, reason: "", message: "", summary: "", groups: [] };
     }
 
-    // AI generates clarification groups directly. No fallback templates.
-    // Trust AI's structured output completely.
+    // AI generates clarification groups directly. Trust AI's decision.
+    // If AI says required: true, we ALWAYS show clarification — even if groups are malformed.
     function normalizeClarificationRequest(_taskText, analysis) {
       if (!analysis || typeof analysis !== "object") return null;
       const raw = analysis.clarificationRequest && typeof analysis.clarificationRequest === "object"
         ? analysis.clarificationRequest
         : null;
       if (!raw || raw.required !== true) return null;
-      const groups = Array.isArray(raw.groups) ? raw.groups.filter(g => g && typeof g === "object" && Array.isArray(g.options) && g.options.length > 0) : [];
-      if (groups.length === 0) return null;
+
+      // Try to extract groups, but don't fail if they're malformed
+      let groups = [];
+      if (Array.isArray(raw.groups)) {
+        groups = raw.groups.filter(g => g && typeof g === "object").map(g => {
+          // Normalize options — accept various formats AI might produce
+          let options = [];
+          if (Array.isArray(g.options)) options = g.options.filter(o => o && typeof o === "object");
+          else if (Array.isArray(g.items)) options = g.items.filter(o => o && typeof o === "object");
+          else if (Array.isArray(g.choices)) options = g.choices.filter(o => o && typeof o === "object");
+          // Ensure each option has at least a label
+          options = options.map(o => ({
+            id: String(o.id || o.label || o.name || "option").toLowerCase().replace(/ /g, "-"),
+            label: String(o.label || o.name || o.title || o.id || "Option"),
+            detail: String(o.detail || o.description || o.desc || ""),
+            promptFragment: String(o.promptFragment || o.prompt || o.value || o.label || o.name || ""),
+            recommended: o.recommended === true || o.default === true
+          }));
+          if (options.length === 0) return null;
+          return {
+            id: String(g.id || g.label || g.name || "group").toLowerCase().replace(/ /g, "-"),
+            label: String(g.label || g.name || g.title || "Choice"),
+            selectionMode: g.selectionMode === "multi" ? "multi" : "single",
+            options
+          };
+        }).filter(Boolean);
+      }
+
+      // AI said required: true — always return clarification, even with no groups
+      // (UI will show the message/reason so user can still provide input)
       const result = {
         required: true,
-        reason: String(raw.reason || ""),
-        message: String(raw.message || ""),
+        reason: String(raw.reason || raw.message || "Clarification needed"),
+        message: String(raw.message || raw.reason || "Please provide more details"),
         summary: String(raw.summary || ""),
         groups
       };
@@ -2297,6 +2325,22 @@ ${values.map((value) => `- ${value}`).join("\n")}`);
       // If user already answered clarification, don't ask again
       const alreadyClarified = task.toLowerCase().includes("[clarification selections]");
       clarificationRequest = (!alreadyClarified && artifact.clarificationRequest?.required) ? artifact.clarificationRequest : null;
+
+      // Also check rawOutput/summary for clarificationRequest that might not have been captured in the artifact
+      // (engine sometimes wraps planner output in executor format, losing top-level fields)
+      if (!clarificationRequest && !alreadyClarified && result.rawOutput) {
+        try {
+          const rawParsed = extractStructuredJson(result.rawOutput);
+          if (rawParsed?.clarificationRequest?.required === true) {
+            const normalized = normalizeClarificationRequest(task, rawParsed);
+            if (normalized) {
+              clarificationRequest = normalized;
+              artifact.clarificationRequest = normalized;
+              sendAgi("agi.debug", { message: "Recovered clarificationRequest from rawOutput JSON" });
+            }
+          }
+        } catch {}
+      }
 
       // If no clarificationRequest from engine artifact, search session files
       if (!clarificationRequest && !alreadyClarified) {
