@@ -1416,223 +1416,47 @@ Output ONLY this JSON (no markdown fences, no explanation):
     const MAX_VERIFY_FIX_CYCLES = 3;
 
     function taskUsesKorean(text) {
-      return /[가-힣]/.test(text || "");
+      return Array.from(text || "").some(ch => ch.charCodeAt(0) >= 0xAC00 && ch.charCodeAt(0) <= 0xD7A3);
     }
 
     function slugId(value, fallback) {
-      return String(value || fallback || "option")
-        .toLowerCase()
-        .replace(/[^a-z0-9가-힣]+/g, "-")
-        .replace(/^-+|-+$/g, "") || fallback || "option";
-    }
-
-    function buildFallbackClarificationRequest(taskText, analysis) {
-      const isKoreanTask = taskUsesKorean(taskText);
-      const t = (ko, en) => isKoreanTask ? ko : en;
-      const opt = (id, koLabel, enLabel, koDetail, enDetail, koPrompt, enPrompt, recommended = false) => ({
-        id,
-        label: t(koLabel, enLabel),
-        detail: t(koDetail, enDetail),
-        promptFragment: t(koPrompt, enPrompt),
-        recommended
-      });
-      const group = (id, koLabel, enLabel, options) => {
-        const recommendedOption = options.find((option) => option.recommended) || options[0];
-        return {
-          id,
-          label: t(koLabel, enLabel),
-          selectionMode: "single",
-          recommendedOptionId: recommendedOption?.id || `${id}-default`,
-          options
-        };
-      };
-
-      const taskLower = String(taskText || "").toLowerCase();
-      const featureText = (analysis?.features || []).map((feature) => `${feature.name || ""} ${feature.description || ""}`).join(" ").toLowerCase();
-      const looksLikeGame = /게임|game|shooter|platformer|rpg|arcade/.test(taskLower) || /game|player|enemy|level|score/.test(featureText);
-
-      const gameGroups = [
-        group("platform", "플랫폼", "Platform", [
-          opt("browser-2d", "브라우저 2D", "Browser 2D", "설치 없이 바로 플레이 가능한 웹 게임", "A web game that plays instantly in the browser", "플랫폼은 브라우저 기반 2D로 해줘.", "Use a browser-based 2D platform.", true),
-          opt("desktop-2d", "데스크톱 2D", "Desktop 2D", "PC에서 실행하는 설치형 2D 게임", "An installable 2D game for desktop PCs", "플랫폼은 데스크톱 2D로 해줘.", "Target desktop 2D."),
-          opt("mobile-portrait", "모바일 세로형", "Mobile Portrait", "모바일 세로 화면에 맞춘 캐주얼 게임", "A casual mobile game designed for portrait screens", "플랫폼은 모바일 세로형으로 해줘.", "Target portrait mobile."),
-          opt("desktop-3d", "데스크톱 3D", "Desktop 3D", "조작과 렌더링이 더 무거운 3D 게임", "A heavier 3D game for desktop", "플랫폼은 데스크톱 3D로 해줘.", "Target desktop 3D.")
-        ]),
-        group("genre", "장르", "Genre", [
-          opt("topdown-shooter", "탑다운 슈터", "Top-down Shooter", "짧은 세션과 명확한 전투 루프에 적합", "Good for short sessions and a clear combat loop", "장르는 탑다운 슈터로 해줘.", "Make it a top-down shooter.", true),
-          opt("survivor-arena", "서바이버 아레나", "Survivor Arena", "웨이브를 버티며 성장하는 구조", "A survive-the-waves arena loop", "장르는 서바이버 아레나로 해줘.", "Make it a survivor arena game."),
-          opt("side-scroller", "횡스크롤 액션", "Side-scrolling Action", "점프와 사격이 중심인 구조", "A game centered on jumping and shooting", "장르는 횡스크롤 액션으로 해줘.", "Make it a side-scrolling action game."),
-          opt("arcade-casual", "아케이드 캐주얼", "Arcade Casual", "규칙이 단순하고 바로 플레이 가능한 구조", "Simple rules and immediate play", "장르는 아케이드 캐주얼로 해줘.", "Make it an arcade casual game."),
-          opt("puzzle-action", "퍼즐 액션", "Puzzle Action", "전투보다 규칙과 퍼즐 풀이가 더 중요한 구조", "A rules-and-puzzle-first action game", "장르는 퍼즐 액션으로 해줘.", "Make it a puzzle action game.")
-        ]),
-        group("perspective", "시점", "Perspective", [
-          opt("topdown", "탑다운", "Top-down", "전체 전장을 보기 쉬운 시점", "Easy battlefield readability", "시점은 탑다운으로 해줘.", "Use a top-down perspective.", true),
-          opt("sideview", "사이드뷰", "Side View", "플랫폼 액션에 잘 맞는 시점", "Fits platform action well", "시점은 사이드뷰로 해줘.", "Use a side-view perspective."),
-          opt("isometric", "아이소메트릭", "Isometric", "약간 전략적인 느낌을 주는 시점", "Adds a slightly more strategic feel", "시점은 아이소메트릭으로 해줘.", "Use an isometric perspective."),
-          opt("first-person", "1인칭", "First-person", "몰입감은 높지만 MVP 난이도가 높음", "More immersive but harder for an MVP", "시점은 1인칭으로 해줘.", "Use a first-person perspective.")
-        ]),
-        group("play-mode", "플레이 방식", "Play Mode", [
-          opt("single-player", "싱글플레이", "Single-player", "기능을 가장 빠르게 자를 수 있는 방식", "The fastest way to scope a working MVP", "플레이 방식은 싱글플레이로 해줘.", "Make it single-player.", true),
-          opt("local-coop", "로컬 협동", "Local Co-op", "한 기기에서 둘이 함께 플레이", "Two players on one device", "플레이 방식은 로컬 협동으로 해줘.", "Make it local co-op."),
-          opt("online-multiplayer", "온라인 멀티", "Online Multiplayer", "실시간 동기화가 필요한 방식", "Requires real-time synchronization", "플레이 방식은 온라인 멀티로 해줘.", "Make it online multiplayer."),
-          opt("async-score", "비동기 점수 경쟁", "Async Score Competition", "리더보드 중심의 가벼운 경쟁", "Lightweight competition through a leaderboard", "플레이 방식은 비동기 점수 경쟁으로 해줘.", "Make it async score competition.")
-        ]),
-        group("scope", "MVP 범위", "MVP Scope", [
-          opt("one-core-loop", "핵심 루프 1개", "One Core Loop", "이동, 공격, 점수 정도만 있는 최소 MVP", "A minimal MVP with movement, attack, and score", "MVP는 핵심 루프 1개만 있는 최소 버전으로 해줘.", "Keep the MVP to one core loop only.", true),
-          opt("arena-plus-boss", "아레나 + 보스 1개", "Arena + One Boss", "짧은 완결감을 주는 구조", "Adds a short sense of completion", "MVP는 아레나와 보스 1개까지 포함해줘.", "Include one arena and one boss."),
-          opt("stages-and-unlock", "스테이지 + 해금", "Stages + Unlocks", "간단한 진행 요소가 있는 구조", "Adds light progression", "MVP는 스테이지와 간단한 해금 요소까지 포함해줘.", "Include stages and simple unlocks."),
-          opt("meta-progression", "메타 성장 포함", "Meta Progression", "반복 플레이 기반 성장 시스템까지 포함", "Includes repeat-play progression systems", "MVP에 메타 성장까지 포함해줘.", "Include meta progression in the MVP.")
-        ]),
-        group("art-style", "비주얼 스타일", "Visual Style", [
-          opt("minimal-shapes", "미니멀 도형", "Minimal Shapes", "자산 없이 빠르게 구현 가능한 스타일", "Fastest style to ship without art assets", "비주얼은 미니멀 도형 스타일로 해줘.", "Use a minimal-shapes visual style.", true),
-          opt("pixel-placeholder", "픽셀풍 플레이스홀더", "Pixel Placeholder", "임시 픽셀 아트 느낌으로 구현", "A placeholder pixel-art feel", "비주얼은 픽셀풍 플레이스홀더로 해줘.", "Use a placeholder pixel-art style."),
-          opt("neon-arcade", "네온 아케이드", "Neon Arcade", "강한 대비와 효과 위주의 스타일", "A high-contrast effects-driven style", "비주얼은 네온 아케이드 스타일로 해줘.", "Use a neon arcade style."),
-          opt("cute-casual", "귀여운 캐주얼", "Cute Casual", "밝고 가벼운 톤의 스타일", "A bright and light casual tone", "비주얼은 귀여운 캐주얼 스타일로 해줘.", "Use a cute casual style.")
-        ]),
-        group("controls", "조작", "Controls", [
-          opt("keyboard-only", "키보드만", "Keyboard Only", "WASD 또는 방향키 중심 조작", "WASD or arrow-key control", "조작은 키보드만 사용하게 해줘.", "Use keyboard-only controls.", true),
-          opt("keyboard-mouse", "키보드 + 마우스", "Keyboard + Mouse", "이동과 조준을 분리한 슈터형 조작", "Shooter-style movement plus aiming", "조작은 키보드와 마우스를 함께 쓰게 해줘.", "Use keyboard and mouse controls."),
-          opt("gamepad", "게임패드", "Gamepad", "패드 우선 조작", "Gamepad-first control scheme", "조작은 게임패드 기준으로 해줘.", "Use a gamepad-first control scheme."),
-          opt("touch", "터치", "Touch", "모바일 가상 패드 기반 조작", "Touch controls with on-screen inputs", "조작은 터치 기반으로 해줘.", "Use touch controls.")
-        ]),
-        group("stack", "구현 스택", "Implementation Stack", [
-          opt("vanilla-canvas", "바닐라 Canvas", "Vanilla Canvas", "의존성을 줄이고 구조를 단순하게 유지", "Minimal dependencies and simple structure", "기술 스택은 바닐라 Canvas로 해줘.", "Use vanilla Canvas for the stack.", true),
-          opt("phaser", "Phaser", "Phaser", "게임 프레임워크를 활용해 개발 속도를 높임", "Use a game framework to move faster", "기술 스택은 Phaser로 해줘.", "Use Phaser."),
-          opt("pixi", "PixiJS", "PixiJS", "렌더링 중심의 가벼운 엔진", "A lightweight rendering-focused engine", "기술 스택은 PixiJS로 해줘.", "Use PixiJS."),
-          opt("react-canvas", "React + Canvas", "React + Canvas", "UI와 게임 화면을 함께 다루기 쉬움", "Good when UI and the game surface are both important", "기술 스택은 React와 Canvas 조합으로 해줘.", "Use React plus Canvas.")
-        ])
-      ];
-
-      const genericGroups = [
-        group("platform", "플랫폼", "Platform", [
-          opt("web-app", "웹 앱", "Web App", "가장 접근성이 좋은 기본 선택", "The most accessible default", "플랫폼은 웹 앱으로 해줘.", "Make it a web app.", true),
-          opt("mobile-app", "모바일 앱", "Mobile App", "모바일 중심 사용성을 가정", "Assume mobile-first usage", "플랫폼은 모바일 앱으로 해줘.", "Make it a mobile app."),
-          opt("desktop-app", "데스크톱 앱", "Desktop App", "오프라인 또는 파일 접근이 중요한 경우", "Good when offline access or local files matter", "플랫폼은 데스크톱 앱으로 해줘.", "Make it a desktop app."),
-          opt("landing-site", "랜딩 사이트", "Landing Site", "서비스 소개 중심의 사이트", "A marketing-first site", "플랫폼은 랜딩 사이트로 해줘.", "Make it a landing site.")
-        ]),
-        group("surface", "제품 타입", "Product Type", [
-          opt("tool", "도구형", "Tool", "입력과 결과가 분명한 생산성 도구", "A productivity-oriented tool", "제품 타입은 도구형으로 해줘.", "Make it a tool.", true),
-          opt("dashboard", "대시보드", "Dashboard", "데이터 조회와 관리 중심", "Centered on viewing and managing data", "제품 타입은 대시보드형으로 해줘.", "Make it a dashboard."),
-          opt("marketplace", "마켓플레이스", "Marketplace", "목록, 탐색, 거래 흐름 중심", "Centered on listings and transactions", "제품 타입은 마켓플레이스로 해줘.", "Make it a marketplace."),
-          opt("community", "커뮤니티", "Community", "게시글/댓글/프로필이 핵심", "Posts, comments, and profiles are core", "제품 타입은 커뮤니티형으로 해줘.", "Make it a community product.")
-        ]),
-        group("scope", "초기 범위", "Initial Scope", [
-          opt("single-flow", "핵심 흐름 1개", "Single Core Flow", "가장 중요한 흐름만 완성하는 MVP", "An MVP built around one important flow", "초기 범위는 핵심 흐름 1개만 포함해줘.", "Keep the initial scope to one core flow.", true),
-          opt("core-plus-admin", "핵심 + 관리화면", "Core + Admin", "사용자 흐름과 간단한 관리 기능 포함", "Core user flow plus simple admin support", "초기 범위는 핵심 기능과 관리화면까지 포함해줘.", "Include the core flow and a simple admin screen."),
-          opt("multi-role", "다중 역할", "Multiple Roles", "역할별 화면 분리가 필요한 구조", "Separate experiences for different roles", "초기 범위는 역할별 화면까지 포함해줘.", "Include role-specific flows."),
-          opt("full-product", "거의 완제품", "Near Full Product", "초기부터 범위를 넓게 잡는 편", "A broader first release scope", "초기 범위는 완제품에 가깝게 잡아줘.", "Aim closer to a full product from the start.")
-        ]),
-        group("style", "화면 톤", "Visual Tone", [
-          opt("clean-minimal", "클린 미니멀", "Clean Minimal", "가장 무난하고 빠른 기본 방향", "The safest and fastest default direction", "화면 톤은 클린 미니멀로 해줘.", "Use a clean minimal tone.", true),
-          opt("bold-editorial", "볼드 에디토리얼", "Bold Editorial", "강한 타이포와 레이아웃 중심", "Typography and layout-forward", "화면 톤은 볼드 에디토리얼로 해줘.", "Use a bold editorial tone."),
-          opt("playful", "경쾌한 캐주얼", "Playful", "친근하고 가벼운 인상", "Friendly and light", "화면 톤은 경쾌한 캐주얼로 해줘.", "Use a playful tone."),
-          opt("professional", "프로페셔널", "Professional", "업무용 제품에 가까운 인상", "A more work-oriented product tone", "화면 톤은 프로페셔널하게 해줘.", "Use a professional tone.")
-        ]),
-        group("auth-data", "계정/데이터", "Auth & Data", [
-          opt("no-auth-local", "로그인 없이 로컬만", "No Auth, Local Only", "가장 빠른 MVP 방향", "The fastest MVP path", "초기 버전은 로그인 없이 로컬 상태만 사용해줘.", "Use no auth and local state only.", true),
-          opt("email-auth", "이메일 로그인", "Email Auth", "기본적인 계정 시스템 포함", "Include a basic account system", "초기 버전은 이메일 로그인까지 포함해줘.", "Include email auth."),
-          opt("social-auth", "소셜 로그인", "Social Auth", "진입 장벽을 낮추는 방향", "Reduce sign-up friction", "초기 버전은 소셜 로그인 기준으로 해줘.", "Use social auth."),
-          opt("team-data", "팀/공유 데이터", "Team Shared Data", "협업성 있는 구조", "A collaboration-oriented structure", "초기 버전은 팀 공유 데이터가 가능하게 해줘.", "Support team-shared data.")
-        ]),
-        group("implementation-style", "구현 성향", "Implementation Style", [
-          opt("fast-mvp", "빠른 MVP", "Fast MVP", "추상화보다 속도를 우선", "Prioritize speed over abstraction", "구현은 빠른 MVP 위주로 해줘.", "Bias implementation toward a fast MVP.", true),
-          opt("balanced", "균형형", "Balanced", "확장성과 속도의 균형", "Balance speed and extensibility", "구현은 속도와 확장성의 균형을 맞춰줘.", "Balance speed and extensibility."),
-          opt("scalable-foundation", "확장형 기반", "Scalable Foundation", "초기부터 구조를 조금 더 갖춤", "Invest slightly more in initial structure", "구현은 확장성을 조금 더 중시해줘.", "Lean a bit more toward scalability."),
-          opt("prototype-only", "프로토타입 우선", "Prototype First", "일단 보여주는 데 초점", "Optimize for something demoable quickly", "구현은 데모 가능한 프로토타입 위주로 해줘.", "Optimize for a fast prototype.")
-        ])
-      ];
-
-      return {
-        required: true,
-        reason: t(
-          "요청 범위가 넓어서 장르, 플랫폼, 범위를 바로 고정하면 임의 가정이 너무 많이 들어갑니다.",
-          "The request is broad enough that picking genre, platform, and scope without input would add too many assumptions."
-        ),
-        message: t(
-          "아래 옵션 중 원하는 방향만 몇 개 골라주세요. 고르지 않은 항목은 추천 기본값으로 진행합니다.",
-          "Pick the directions you care about below. Anything you skip will fall back to the recommended default."
-        ),
-        summary: t(
-          "조금만 방향을 좁히면 DEBATE와 DESIGN 단계의 품질이 크게 올라갑니다.",
-          "A small amount of direction here will substantially improve the DEBATE and DESIGN steps."
-        ),
-        groups: looksLikeGame ? gameGroups : genericGroups
-      };
-    }
-
-    function normalizeClarificationRequest(taskText, analysis) {
-      if (!analysis || typeof analysis !== "object") {
-        traceJson("Functions", "normalizeClarificationRequest()", { result: null, reason: "analysis_missing" });
-        return null;
+      const raw = String(value || fallback || "option").toLowerCase();
+      let slug = "";
+      for (const ch of raw) {
+        const code = ch.charCodeAt(0);
+        const isAlphaNum = (code >= 0x61 && code <= 0x7A) || (code >= 0x30 && code <= 0x39);
+        const isKorean = code >= 0xAC00 && code <= 0xD7A3;
+        if (isAlphaNum || isKorean) slug += ch;
+        else if (slug.length > 0 && slug[slug.length - 1] !== "-") slug += "-";
       }
-      const fallback = buildFallbackClarificationRequest(taskText, analysis);
+      // Trim leading/trailing dashes
+      while (slug.startsWith("-")) slug = slug.slice(1);
+      while (slug.endsWith("-")) slug = slug.slice(0, -1);
+      return slug || fallback || "option";
+    }
+
+    // buildFallbackClarificationRequest removed — AI generates clarification groups directly.
+    // No hardcoded game/generic option templates. AI decides everything.
+    function buildFallbackClarificationRequest(_taskText, _analysis) {
+      // No hardcoded groups. Return empty — AI ANALYZE generates groups directly.
+      return { required: false, reason: "", message: "", summary: "", groups: [] };
+    }
+
+    // AI generates clarification groups directly. No fallback templates.
+    // Trust AI's structured output completely.
+    function normalizeClarificationRequest(_taskText, analysis) {
+      if (!analysis || typeof analysis !== "object") return null;
       const raw = analysis.clarificationRequest && typeof analysis.clarificationRequest === "object"
         ? analysis.clarificationRequest
         : null;
-      // Let the AI decide — trust its clarificationRequest.required judgment
-      const shouldClarify = raw?.required === true;
-
-      if (!shouldClarify) {
-        traceJson("Functions", "normalizeClarificationRequest()", { result: null, reason: "clarification_not_required" });
-        return null;
-      }
-
-      const fallbackGroups = Array.isArray(fallback.groups) ? fallback.groups : [];
-      const rawGroups = Array.isArray(raw?.groups) ? raw.groups : [];
-      const groupsSource = rawGroups.length >= 3 ? rawGroups : fallbackGroups;
-      const groups = groupsSource.map((group, groupIndex) => {
-        if (!group || typeof group !== "object") return null;
-        const fallbackGroup = fallbackGroups[groupIndex] || fallbackGroups[0];
-        const optionsSource = Array.isArray(group.options) && group.options.length > 0
-          ? group.options
-          : (fallbackGroup?.options || []);
-        const options = optionsSource.map((option, optionIndex) => {
-          if (!option || typeof option !== "object") return null;
-          const fallbackOption = fallbackGroup?.options?.[optionIndex] || fallbackGroup?.options?.[0];
-          const label = typeof option.label === "string" && option.label.trim()
-            ? option.label.trim()
-            : (fallbackOption?.label || `Option ${optionIndex + 1}`);
-          const detail = typeof option.detail === "string" && option.detail.trim()
-            ? option.detail.trim()
-            : (fallbackOption?.detail || "");
-          const promptFragment = typeof option.promptFragment === "string" && option.promptFragment.trim()
-            ? option.promptFragment.trim()
-            : (fallbackOption?.promptFragment || `${label}.`);
-          const id = slugId(option.id || label, `${fallbackGroup?.id || "group"}-${optionIndex + 1}`);
-          return {
-            id,
-            label,
-            detail,
-            promptFragment,
-            recommended: option.recommended === true || fallbackOption?.recommended === true
-          };
-        }).filter(Boolean);
-
-        if (options.length === 0) return null;
-        const recommendedOption = options.find((option) => option.recommended) || options[0];
-        return {
-          id: slugId(group.id || group.label, fallbackGroup?.id || `clarify-${groupIndex + 1}`),
-          label: typeof group.label === "string" && group.label.trim()
-            ? group.label.trim()
-            : (fallbackGroup?.label || `Choice ${groupIndex + 1}`),
-          selectionMode: group.selectionMode === "multi" ? "multi" : "single",
-          recommendedOptionId: typeof group.recommendedOptionId === "string" && group.recommendedOptionId.trim()
-            ? slugId(group.recommendedOptionId, recommendedOption.id)
-            : recommendedOption.id,
-          options
-        };
-      }).filter(Boolean);
-
-      if (groups.length === 0) {
-        traceJson("Functions", "normalizeClarificationRequest()", fallback);
-        return fallback;
-      }
-
+      if (!raw || raw.required !== true) return null;
+      const groups = Array.isArray(raw.groups) ? raw.groups.filter(g => g && typeof g === "object" && Array.isArray(g.options) && g.options.length > 0) : [];
+      if (groups.length === 0) return null;
       const result = {
         required: true,
-        reason: typeof raw?.reason === "string" && raw.reason.trim() ? raw.reason.trim() : fallback.reason,
-        message: typeof raw?.message === "string" && raw.message.trim() ? raw.message.trim() : fallback.message,
-        summary: typeof raw?.summary === "string" && raw.summary.trim() ? raw.summary.trim() : fallback.summary,
+        reason: String(raw.reason || ""),
+        message: String(raw.message || ""),
+        summary: String(raw.summary || ""),
         groups
       };
       traceJson("Functions", "normalizeClarificationRequest()", result);
@@ -2026,62 +1850,11 @@ ${values.map((value) => `- ${value}`).join("\n")}`);
       return [];
     }
 
-    function inferDesignLayer(filePath) {
-      const normalized = String(filePath || "").toLowerCase();
-      if (!normalized) return "shared";
-      if (normalized === "package.json" || normalized.endsWith("lock.json") || normalized.endsWith("lock.yaml")) return "scaffold";
-      if (normalized === "tsconfig.json" || normalized.includes("vite.config") || normalized.includes("vitest.config") || normalized.includes("playwright.config") || normalized.includes("eslint")) return "config";
-      if (normalized.startsWith("tests/") || normalized.startsWith("test/")) return "testing";
-      if (normalized === "readme.md" || normalized.startsWith("docs/")) return "docs";
-      if (normalized.includes("/db/") || normalized.includes("schema") || normalized.includes("migration")) return "database";
-      if (normalized.includes("socket") || normalized.includes("realtime") || normalized.includes("network") || normalized.includes("sync")) return "realtime";
-      if (normalized.includes("server") || normalized.includes("api") || normalized.includes("route") || normalized.includes("service")) return "backend";
-      if (normalized.includes("shared") || normalized.includes("types") || normalized.includes("state")) return "shared";
-      if (normalized.endsWith(".tsx") || normalized.endsWith(".jsx") || normalized.endsWith("index.html") || normalized.endsWith("styles.css") || normalized.includes("component") || normalized.includes("ui") || normalized.includes("game") || normalized.includes("app")) return "frontend";
-      return "shared";
-    }
-
-    function designOwnerForLayer(layer) {
-      switch (layer) {
-        case "scaffold":
-        case "config":
-          return "build-doctor";
-        case "frontend":
-          return "frontend-engineer";
-        case "backend":
-          return "backend-engineer";
-        case "database":
-          return "db-engineer";
-        case "realtime":
-          return "backend-engineer";
-        case "testing":
-          return "test-engineer";
-        case "docs":
-          return "docs-writer";
-        default:
-          return "executor";
-      }
-    }
-
-    function designWaveForLayer(layer) {
-      switch (layer) {
-        case "scaffold":
-        case "config":
-        case "docs":
-          return 1;
-        case "shared":
-        case "frontend":
-        case "backend":
-        case "database":
-          return 2;
-        case "realtime":
-          return 3;
-        case "testing":
-          return 4;
-        default:
-          return 2;
-      }
-    }
+    // AI assigns layer, owner, and wave in design artifact.
+    // These are minimal fallbacks that return neutral defaults — never override AI.
+    function inferDesignLayer(_filePath) { return "shared"; }
+    function designOwnerForLayer(_layer) { return "executor"; }
+    function designWaveForLayer(_layer) { return 1; }
 
 
     function buildDefaultDesignManifest() {
@@ -2477,7 +2250,7 @@ ${values.map((value) => `- ${value}`).join("\n")}`);
       }
 
       // If user already answered clarification, don't ask again
-      const alreadyClarified = /\[Clarification Selections\]/i.test(task);
+      const alreadyClarified = task.toLowerCase().includes("[clarification selections]");
       clarificationRequest = (!alreadyClarified && artifact.clarificationRequest?.required) ? artifact.clarificationRequest : null;
 
       // If no clarificationRequest from engine artifact, search session files
@@ -2507,23 +2280,8 @@ ${values.map((value) => `- ${value}`).join("\n")}`);
         } catch {}
       }
 
-      // AI said clarification is needed (in summary) but structured data wasn't captured
-      if (!clarificationRequest && !alreadyClarified && artifact.clarificationRequired) {
-        const fallback = buildFallbackClarificationRequest(task, artifact);
-        if (fallback && fallback.groups?.length > 0) {
-          clarificationRequest = fallback;
-          artifact.clarificationRequest = fallback;
-          sendAgi("agi.debug", { message: "Built fallback clarificationRequest (clarificationRequired=true)" });
-        }
-      }
-      if (!clarificationRequest && !alreadyClarified && artifact.summary && /too vague|clarification|underspecified|미지정|확인 필요|not enough|unclear|ambiguous/i.test(artifact.summary)) {
-        const fallback = buildFallbackClarificationRequest(task, artifact);
-        if (fallback && fallback.groups?.length > 0) {
-          clarificationRequest = fallback;
-          artifact.clarificationRequest = fallback;
-          sendAgi("agi.debug", { message: "Built fallback clarificationRequest (AI summary indicates vagueness)" });
-        }
-      }
+      // Trust AI's structured output only. No regex keyword scanning of summary text.
+      // If AI didn't set clarificationRequest.required: true explicitly, we don't clarify.
 
       sendAgi("agi.debug", {
         message: "applyAnalyzeArtifact — clarification decision",
@@ -3137,8 +2895,19 @@ The design response must be detailed enough to normalize into a DesignArtifact w
 **Read the DEBATE artifact from Prior Step Results above and follow it exactly.**
 
 ### 1. FILE MANIFEST (MANDATORY)
-List EVERY file to create with its exact purpose. Be exhaustive.
-Format: \`path/to/file.ext\` — One-line description of what it contains
+List EVERY file to create. For EACH file you MUST specify ALL of these:
+- **path**: exact file path (e.g. \`src/server.js\`)
+- **purpose**: one-line description
+- **layer**: one of: scaffold, config, shared, frontend, backend, database, realtime, testing, docs
+- **owner**: the role that should write this file (executor, frontend-engineer, backend-engineer, db-engineer, test-engineer, build-doctor, docs-writer)
+- **wave**: build order number (1 = first, 2 = after wave 1, etc.)
+
+Example:
+\`\`\`
+{ "path": "package.json", "purpose": "Project dependencies and scripts", "layer": "scaffold", "owner": "executor", "wave": 1 }
+{ "path": "src/server.js", "purpose": "Express server with WebSocket", "layer": "backend", "owner": "backend-engineer", "wave": 2 }
+\`\`\`
+YOU decide the layer, owner, and wave for each file based on the project context. Do NOT leave these empty.
 
 ### 2. FILE CONTENTS SKELETON
 For each file, describe the KEY functions/classes/exports it must contain.
@@ -3518,26 +3287,26 @@ ${prompt}`
 
           if (code !== 0) errors.push(`Exit code ${code}`);
 
-          // [FIX #3] Smart error detection — only real errors, not mentions of "error" in code/comments
-          // Only flag actual runtime errors, not mentions in code context
-          const realErrorPatterns = [
-            /^(?:Error|TypeError|SyntaxError|ReferenceError|RangeError|URIError|EvalError):\s/,  // JS error prefix at line start
-            /^\s*at\s+\S+\s+\(/,                     // Stack trace line
-            /FATAL\s*(?:ERROR|EXCEPTION)/i,           // Fatal markers
-            /\bUnhandledPromiseRejection\b/,          // Unhandled promise
-            /\bENOENT\b|\bEACCES\b|\bEPERM\b/,       // OS errors
-            /\bSegmentation fault\b/i,                // Segfault
-            /\bkilled\b.*\bSIGKILL\b/i,              // OOM kill
-            /npm ERR!/,                               // npm actual error
-            /\bpanic:\s/,                             // Go/Rust panic
-            /\bTraceback \(most recent/,              // Python traceback
+          // Error detection — match known error prefixes via string matching, no regex
+          const errorPrefixes = [
+            "Error:", "TypeError:", "SyntaxError:", "ReferenceError:", "RangeError:", "URIError:", "EvalError:",
+            "FATAL ERROR", "FATAL EXCEPTION",
+            "UnhandledPromiseRejection",
+            "ENOENT", "EACCES", "EPERM",
+            "Segmentation fault", "segmentation fault",
+            "npm ERR!",
+            "panic:",
+            "Traceback (most recent",
           ];
           for (const line of stderr.split("\n")) {
             const trimmed = line.trim();
             if (!trimmed) continue;
-            for (const p of realErrorPatterns) {
-              if (p.test(trimmed)) { errors.push(trimmed); break; }
-            }
+            const lower = trimmed.toLowerCase();
+            const isError = errorPrefixes.some(prefix => {
+              const p = prefix.toLowerCase();
+              return lower.startsWith(p) || lower.includes(p);
+            }) || (trimmed.startsWith("    at ") && trimmed.includes("(")); // stack trace
+            if (isError) errors.push(trimmed);
           }
 
           // [FIX #1, #10] Return full stdout as summary AND rawOutput — no truncation
