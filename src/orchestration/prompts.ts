@@ -185,9 +185,12 @@ const TEMPLATES: Record<string, string> = {
     "{{repoSummary}}",
     "",
     "Break the task into specialist-sized subtasks.",
+    "IMPORTANT: Read the task carefully. If it contains a DEBATE artifact or architecture decisions from a prior step, your plan MUST follow those decisions exactly. Do NOT introduce technologies, files, or layers that the DEBATE rejected. If the DEBATE says 'single file, no server, vanilla JS', do NOT create tasks for server setup, database, or TypeScript config.",
     "Include roleHint for every task where the specialist is obvious.",
+    "For BUILD steps: only assign tasks to roles that can write files (executor, frontend-engineer, devops-engineer, backend-engineer, test-engineer). Do NOT create tasks for browser-operator, api-designer, security-auditor, cicd-engineer, git-strategist, db-engineer — they cannot write files and belong in DEBATE/VERIFY steps.",
     "Use roleHint directly for: security, performance, observability, devops, ci/cd, migration, git, pr, api, db, browser, accessibility, cost, model-router, compliance signals.",
-    'Return JSON: {"summary": string, "tasks": [{"id": string, "title": string, "category": "planning"|"research"|"execution"|"frontend"|"review", "roleHint"?: string, "dependsOn"?: string[], "async"?: boolean}]}'
+    "IMPORTANT: If the task is vague or under-specified (e.g. '게임 개발해줘', 'build me an app'), set clarificationRequest.required to true with groups of options for the user to choose from. Do NOT guess — ask the user.",
+    'Return JSON: {"summary": string, "tasks": [...], "clarificationRequest"?: {"required": boolean, "reason": string, "message": string, "summary": string, "groups": [{"id": string, "label": string, "selectionMode": "single"|"multi", "options": [{"id": string, "label": string, "detail": string, "promptFragment": string, "recommended"?: boolean}]}]}}'
   ].join("\n"),
 
   "researcher": [

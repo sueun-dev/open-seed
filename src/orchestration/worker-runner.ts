@@ -113,7 +113,7 @@ export async function runWorkerInline(params: {
       costTracker: params.costTracker,
       rulesEngine: params.rulesEngine,
       hooks: params.hooks,
-      sandbox: params.sandbox,
+      sandbox: undefined, // Disable sandbox in agentic loop — writes must hit real disk so bash/npm can see them
       eventBus: params.eventBus,
       maxTurns: 10
     });
@@ -208,7 +208,8 @@ export async function runWorkerInline(params: {
       usage: {
         inputTokens: response.usage.inputTokens ?? 0,
         outputTokens: response.usage.outputTokens ?? 0
-      }
+      },
+      authMode: response.metadata?.authMode
     });
   }
 

@@ -83,7 +83,7 @@ export function updateHudFromEvent(hud: HudState, eventType: string, payload: Re
       updated.completedTasks++;
       break;
     case "cost.update":
-      updated.costUsd = (payload.totalCostUsd as number) ?? updated.costUsd;
+      updated.costUsd = payload.costAvailable === false ? 0 : ((payload.totalCostUsd as number) ?? updated.costUsd);
       updated.tokensUsed = (payload.totalTokens as number) ?? updated.tokensUsed;
       break;
     case "session.completed":

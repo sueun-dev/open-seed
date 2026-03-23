@@ -93,6 +93,18 @@ export function formatLiveEvent(event: JsonLineEvent): string | null {
       return `${time} review pass`;
     case "review.fail":
       return `${time} review fail`;
+    case "agi.pipeline.start":
+      return `${time} pipeline start ${numberValue(event.payload.totalSteps, 0)} steps`;
+    case "agi.replan":
+      return `${time} pipeline replan x${numberValue(event.payload.replanCount, 0)}`;
+    case "agi.step.start":
+      return `${time} step start ${stringValue(event.payload.stepType)} ${stringValue(event.payload.stepTitle)}`.trim();
+    case "agi.step.complete":
+      return `${time} step complete ${stringValue(event.payload.stepType)} ${stringValue(event.payload.stepTitle)}`.trim();
+    case "agi.step.fail":
+      return `${time} step fail ${stringValue(event.payload.stepType)} ${stringValue(event.payload.stepTitle)}`.trim();
+    case "agi.step.skip":
+      return `${time} step skip ${stringValue(event.payload.stepType)} ${stringValue(event.payload.stepTitle)}`.trim();
     case "session.completed":
       return `${time} session completed ${stringValue(event.payload.status)}`;
     default:

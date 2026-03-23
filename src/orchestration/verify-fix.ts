@@ -42,12 +42,15 @@ export interface VerifyFixState {
   allIssuesEverSeen: string[];
   /** Issues that persisted across all attempts */
   persistentIssues: string[];
-  escalated: boolean;
+  /** Number of times AI switched to a different approach */
+  approachChanges: number;
+  /** Ask the user for help instead of giving up */
+  needsUserHelp: boolean;
 }
 
 // ─── State Management ────────────────────────────────────────────────────────
 
-export function createVerifyFixState(maxIterations = 5): VerifyFixState {
+export function createVerifyFixState(maxIterations = 12): VerifyFixState {
   return {
     iteration: 0,
     maxIterations,
@@ -55,12 +58,13 @@ export function createVerifyFixState(maxIterations = 5): VerifyFixState {
     lastResult: null,
     allIssuesEverSeen: [],
     persistentIssues: [],
-    escalated: false
+    approachChanges: 0,
+    needsUserHelp: false
   };
 }
 
 export function shouldContinueVerifyFix(state: VerifyFixState): boolean {
-  if (state.escalated) return false;
+  if (state.needsUserHelp) return false;
   if (state.iteration >= state.maxIterations) return false;
   if (state.lastResult?.passed) return false;
   return true;
@@ -139,25 +143,41 @@ function addIssue(issues: VerifyIssue[], type: VerifyIssue["type"], message: str
 // ─── State Update ────────────────────────────────────────────────────────────
 
 export function updateVerifyFixState(state: VerifyFixState, result: VerifyResult): VerifyFixState {
-  const newState = { ...state, iteration: state.iteration + 1, lastResult: result };
+  const newState = {
+    ...state,
+    iteration: state.iteration + 1,
+    lastResult: result,
+    seenIssues: new Map(state.seenIssues),
+    persistentIssues: [...state.persistentIssues],
+    allIssuesEverSeen: [...state.allIssuesEverSeen],
+    approachChanges: state.approachChanges,
+    needsUserHelp: state.needsUserHelp,
+  };
 
   for (const issue of result.issues) {
     const count = state.seenIssues.get(issue.id) ?? 0;
     newState.seenIssues.set(issue.id, count + 1);
 
-    if (!state.allIssuesEverSeen.includes(issue.id)) {
+    if (!newState.allIssuesEverSeen.includes(issue.id)) {
       newState.allIssuesEverSeen.push(issue.id);
     }
 
-    // If same issue seen 3+ times, it's persistent
+    // Same issue 3+ times → mark as persistent, trigger approach change
     if (count + 1 >= 3 && !newState.persistentIssues.includes(issue.id)) {
       newState.persistentIssues.push(issue.id);
+      newState.approachChanges++;
     }
   }
 
-  // Escalate if too many persistent issues
-  if (newState.persistentIssues.length >= 3) {
-    newState.escalated = true;
+  // After 2+ approach changes with persistent issues still remaining → ask user for help
+  if (newState.approachChanges >= 2 && newState.persistentIssues.length > 0) {
+    // Check if persistent issues are STILL in the current result
+    const stillPresent = newState.persistentIssues.some(pid =>
+      result.issues.some(i => i.id === pid)
+    );
+    if (stillPresent) {
+      newState.needsUserHelp = true;
+    }
   }
 
   return newState;
@@ -175,19 +195,22 @@ export function buildVerifyFixPrompt(result: VerifyResult, state: VerifyFixState
     lines.push("Issues found:");
     for (const issue of result.issues) {
       const seen = state.seenIssues.get(issue.id) ?? 0;
-      const persistent = seen >= 2 ? " [PERSISTENT — try a different approach]" : "";
+      const persistent = seen >= 2 ? " [PERSISTENT — same approach failed, try something completely different]" : "";
       lines.push(`  [${issue.type}] ${issue.message}${issue.file ? ` in ${issue.file}${issue.line ? `:${issue.line}` : ""}` : ""}${persistent}`);
     }
   }
 
-  if (state.persistentIssues.length > 0) {
-    lines.push("", "WARNING: These issues have persisted across multiple attempts. Try a fundamentally different approach:");
+  if (state.approachChanges >= 1 && state.persistentIssues.length > 0) {
+    lines.push("",
+      "CRITICAL: Previous approaches have all failed on these issues. You MUST try a COMPLETELY DIFFERENT strategy.",
+      "Do NOT repeat the same fix. Rethink the architecture, change the algorithm, or restructure the code.",
+      "Persistent issues:");
     for (const id of state.persistentIssues) {
       lines.push(`  - ${id}`);
     }
   }
 
-  lines.push("", "Fix ALL issues above. Use tools to read the failing files, apply fixes, and run verification again.");
+  lines.push("", "Fix ALL issues above. Use tools to read the failing files, apply fixes, and verify.");
 
   return lines.join("\n");
 }

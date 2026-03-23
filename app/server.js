@@ -13,6 +13,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
@@ -792,7 +793,7 @@ ${contextLines.join("\n")}`;
   // ── AGI Pipeline (server-orchestrated) ──
   if (url.pathname === "/api/agi/run" && req.method === "POST") {
     const body = await readBody(req);
-    const { task, targetDir } = safeJsonParse(body) || {};
+    const { task, targetDir, provider } = safeJsonParse(body) || {};
     if (!task) { res.writeHead(400); res.end("Missing task"); return; }
 
     // Workspace setup — targetDir can be absolute path or relative to CWD
@@ -802,29 +803,77 @@ ${contextLines.join("\n")}`;
       // If absolute path, use directly; otherwise join with CWD
       childCwd = path.isAbsolute(targetDir) ? targetDir : path.join(CWD, targetDir);
       projName = path.basename(childCwd);
-      if (!fs.existsSync(childCwd)) fs.mkdirSync(childCwd, { recursive: true });
-    }
-
-    // Copy config with unlimited timeouts
-    const srcConfig = path.join(CWD, ".agent", "config.json");
-    const dstConfigDir = path.join(childCwd, ".agent");
-    const dstConfig = path.join(dstConfigDir, "config.json");
-    if (fs.existsSync(srcConfig)) {
-      if (!fs.existsSync(dstConfigDir)) fs.mkdirSync(dstConfigDir, { recursive: true });
-      try {
-        const cfg = JSON.parse(fs.readFileSync(srcConfig, "utf8"));
-        for (const p of ["openai", "anthropic", "gemini"]) {
-          if (cfg.providers?.[p]) cfg.providers[p].timeoutMs = 0;
+      if (!fs.existsSync(childCwd)) {
+        try {
+          fs.mkdirSync(childCwd, { recursive: true });
+        } catch (error) {
+          const hint = path.isAbsolute(targetDir)
+            ? `Target folder "${targetDir}" could not be created. If you meant a workspace subfolder, use "${targetDir.replace(/^\/+/, "")}" instead of an absolute path.`
+            : `Target folder "${targetDir}" could not be created inside the workspace.`;
+          throw new Error(`${hint} ${error.message}`);
         }
-        fs.writeFileSync(dstConfig, JSON.stringify(cfg, null, 2), "utf8");
-      } catch { if (fs.existsSync(srcConfig)) fs.copyFileSync(srcConfig, dstConfig); }
+      }
     }
 
-    // Clean leftover .agent/ artifacts from previous AGI runs to prevent confusion
+    // Ensure target directory is a git repo with at least one commit
+    if (!fs.existsSync(path.join(childCwd, ".git"))) {
+      try {
+        const cp = require("child_process");
+        cp.execSync("git init", { cwd: childCwd, stdio: "ignore" });
+        cp.execSync("git commit --allow-empty -m 'init'", { cwd: childCwd, stdio: "ignore", env: { ...process.env, GIT_AUTHOR_NAME: "AGI", GIT_AUTHOR_EMAIL: "agi@local", GIT_COMMITTER_NAME: "AGI", GIT_COMMITTER_EMAIL: "agi@local" } });
+      } catch {}
+    }
+
+    // Clean leftover .agent/ artifacts from previous AGI runs (BEFORE writing config)
     const prevAgentDir = path.join(childCwd, ".agent");
     if (fs.existsSync(prevAgentDir)) {
       try { fs.rmSync(prevAgentDir, { recursive: true, force: true }); } catch {}
     }
+
+    // Build config — start from source config or create default
+    const srcConfig = path.join(CWD, ".agent", "config.json");
+    const dstConfigDir = path.join(childCwd, ".agent");
+    const dstConfig = path.join(dstConfigDir, "config.json");
+    if (!fs.existsSync(dstConfigDir)) fs.mkdirSync(dstConfigDir, { recursive: true });
+
+    let cfg;
+    try { cfg = JSON.parse(fs.readFileSync(srcConfig, "utf8")); } catch {
+      // No source config — build minimal default
+      cfg = {
+        providers: {
+          anthropic: { enabled: true, authMode: "oauth", oauthTokenEnv: "ANTHROPIC_OAUTH_TOKEN", defaultModel: "claude-opus-4-6", timeoutMs: 0, maxRetries: 3 },
+          openai: { enabled: true, authMode: "oauth", oauthTokenEnv: "OPENAI_OAUTH_TOKEN", defaultModel: "gpt-5.4", timeoutMs: 0, maxRetries: 3 },
+          gemini: { enabled: false, authMode: "api_key", defaultModel: "gemini-2.5-pro", timeoutMs: 0, maxRetries: 3 }
+        },
+        routing: { categories: { planning: "openai", research: "openai", execution: "openai", frontend: "openai", review: "openai" } }
+      };
+    }
+
+    // Set unlimited timeouts
+    for (const p of ["openai", "anthropic", "gemini"]) {
+      if (cfg.providers?.[p]) cfg.providers[p].timeoutMs = 0;
+    }
+
+    // Apply provider selection from UI
+    const selectedProvider = provider || "openai";
+    if (selectedProvider === "anthropic") {
+      if (cfg.providers?.anthropic) { cfg.providers.anthropic.enabled = true; cfg.providers.anthropic.authMode = "oauth"; }
+      if (cfg.providers?.openai) cfg.providers.openai.enabled = false;
+      if (cfg.routing?.categories) {
+        for (const cat of Object.keys(cfg.routing.categories)) cfg.routing.categories[cat] = "anthropic";
+      }
+    } else if (selectedProvider === "openai") {
+      if (cfg.providers?.openai) cfg.providers.openai.enabled = true;
+      if (cfg.providers?.anthropic) cfg.providers.anthropic.enabled = false;
+      if (cfg.routing?.categories) {
+        for (const cat of Object.keys(cfg.routing.categories)) cfg.routing.categories[cat] = "openai";
+      }
+    } else if (selectedProvider === "both") {
+      if (cfg.providers?.openai) cfg.providers.openai.enabled = true;
+      if (cfg.providers?.anthropic) { cfg.providers.anthropic.enabled = true; cfg.providers.anthropic.authMode = "oauth"; }
+    }
+
+    fs.writeFileSync(dstConfig, JSON.stringify(cfg, null, 2), "utf8");
 
     // Write AGENTS.md — will be rewritten per step to match step type
     const agentsMd = path.join(childCwd, "AGENTS.md");
@@ -855,7 +904,7 @@ ${contextLines.join("\n")}`;
 6. Check what exists first (glob/ls), then build from there.
 7. If the directory is empty: create everything from scratch.
 8. If files exist: work with them.
-9. Use \`bash\` tool to run npm install, tests, builds — verify your work.
+9. Use \`bash\` only for setup/runtime actions needed to complete the build (for example \`npm install\`). Final verification belongs to the VERIFY phase.
 10. Do NOT keep reading the same file over and over. Read once, then act.
 `, "utf8");
         }
@@ -869,19 +918,69 @@ ${contextLines.join("\n")}`;
       "Connection": "keep-alive"
     });
 
+    const traceRunId = `agi-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const traceDir = path.join(childCwd, ".agent", "traces");
+    const tracePath = path.join(traceDir, `${traceRunId}.md`);
+
+    function ensureTraceDir() {
+      if (!fs.existsSync(traceDir)) fs.mkdirSync(traceDir, { recursive: true });
+    }
+
+    function asTraceString(value) {
+      if (value === undefined || value === null) return "";
+      return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    function markdownFence(language, value) {
+      return `\`\`\`${language}\n${asTraceString(value)}\n\`\`\``;
+    }
+
+    function appendTrace(section, title, body) {
+      try {
+        ensureTraceDir();
+        fs.appendFileSync(tracePath, `\n## ${section}\n### ${title}\n${body}\n`, "utf8");
+      } catch {}
+    }
+
+    function traceJson(section, title, value) {
+      appendTrace(section, title, markdownFence("json", value));
+    }
+
+    function traceText(section, title, value, language = "text") {
+      appendTrace(section, title, markdownFence(language, value));
+    }
+
+    try {
+      ensureTraceDir();
+      fs.writeFileSync(
+        tracePath,
+        `# AGI Run Trace\n\n- Started At: ${new Date().toISOString()}\n- Task: ${task}\n- Working Directory: ${childCwd}\n- Project Dir Label: ${projName}\n`,
+        "utf8"
+      );
+    } catch {}
+
     const sendAgi = (type, data) => {
       try { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); } catch {}
+      try {
+        if (type === "llm") return;
+        if (type === "stdout" || type === "stderr") {
+          traceText("Streams", `${type} @ ${new Date().toISOString()}`, String(data?.text || ""));
+          return;
+        }
+        traceJson("Events", `${type} @ ${new Date().toISOString()}`, data);
+      } catch {}
     };
 
     let aborted = false;
     req.on("close", () => { aborted = true; });
+    traceJson("Run Setup", "request", { task, targetDir: targetDir || null, childCwd, projName });
+    sendAgi("agi.trace.ready", { tracePath });
 
     // Assess complexity
     const words = task.split(/\s+/).length;
     const dirFiles = fs.readdirSync(childCwd).filter(f => !f.startsWith(".") && f !== "node_modules");
     const isFullApp = /full.*app|complete.*project|entire.*system|from.*scratch|만들어|생성|구현|개발해|빌드|게임|앱|사이트|서비스|플랫폼|시스템|웹|서버|클라이언트|온라인|멀티플레이어|shooting|game|server|website|platform/i.test(task);
     const isSimple = !isFullApp && /fix.*bug|rename|add.*comment|update.*version|change.*color|수정|고쳐|바꿔/i.test(task);
-    const needsDebate = /architect|design|pattern|approach|strategy|tradeoff|choose|select|compare|migrate|아키텍처|설계/i.test(task);
     let complexity = "moderate";
     if (isSimple && words < 20) complexity = "simple";
     else if (isFullApp || words > 100 || dirFiles.length === 0) complexity = "complex";
@@ -895,15 +994,11 @@ ${contextLines.join("\n")}`;
     // Always: analyze
     steps.push({ id: mkId("analyze"), type: "analyze", title: "Analyze & Understand", mode: "run", maxTurns: 30, maxRetries: 1, useStrategyBranching: false });
 
-    // Conditional: debate
-    if (needsDebate && complexity !== "simple") {
-      steps.push({ id: mkId("debate"), type: "debate", title: "Multi-Agent Design Debate", mode: "team", maxTurns: 50, maxRetries: 0, useStrategyBranching: false });
-    }
+    // Always: debate
+    steps.push({ id: mkId("debate"), type: "debate", title: "Multi-Agent Design Debate", mode: "team", maxTurns: 50, maxRetries: 0, useStrategyBranching: false });
 
-    // Conditional: design
-    if (complexity !== "simple") {
-      steps.push({ id: mkId("design"), type: "design", title: "Architecture & Design", mode: "run", maxTurns: 40, maxRetries: 1, useStrategyBranching: false });
-    }
+    // Always: design
+    steps.push({ id: mkId("design"), type: "design", title: "Architecture & Design", mode: "run", maxTurns: 40, maxRetries: 1, useStrategyBranching: false });
 
     // Always: build — give it LOTS of turns for complex apps
     const buildTurns = complexity === "complex" ? 500 : complexity === "moderate" ? 300 : 150;
@@ -912,21 +1007,16 @@ ${contextLines.join("\n")}`;
     // Always: verify
     steps.push({ id: mkId("verify"), type: "verify", title: "Verify & Test", mode: "run", maxTurns: 50, maxRetries: 0, useStrategyBranching: false });
 
-    // Fix is dynamically inserted on verify failure
+    // Always: fix
+    steps.push({ id: mkId("fix"), type: "fix", title: "Fix Errors", mode: "run", maxTurns: 100, maxRetries: 3, useStrategyBranching: true });
 
-    // Conditional: improve
-    if (complexity !== "simple") {
-      steps.push({ id: mkId("improve"), type: "improve", title: "Improve & Harden", mode: "team", maxTurns: 80, maxRetries: 1, useStrategyBranching: false });
-    }
-
-    // Always: review
-    steps.push({ id: mkId("review"), type: "review", title: "Final Review", mode: complexity === "simple" ? "run" : "team", maxTurns: 40, maxRetries: 0, useStrategyBranching: false });
-
+    traceJson("Pipeline", "generatedPlan", { complexity, steps });
     sendAgi("agi.pipeline.start", { plan: { steps }, complexity, projectDir: projName, totalSteps: steps.length });
 
     // Build codebase map for context (Aider-style)
     const repoMap = buildRepoMap(childCwd);
     const userProfile = getUserProfile();
+    traceJson("Pipeline", "repoMap", repoMap);
 
     // Track task in user profile
     userProfile.recentTasks = [...(userProfile.recentTasks || []).slice(-20), task];
@@ -941,9 +1031,1134 @@ ${contextLines.join("\n")}`;
       errorLog: [],
       decisions: [],
       totalTokens: 0,
+      analyzeArtifact: null,
+      debateArtifact: null,
+      designArtifact: null,
       repoMap,
       userProfile,
     };
+    let clarificationRequest = null;
+    let verifyFixCycles = 0;
+    const MAX_VERIFY_FIX_CYCLES = 3;
+
+    function taskUsesKorean(text) {
+      return /[가-힣]/.test(text || "");
+    }
+
+    function slugId(value, fallback) {
+      return String(value || fallback || "option")
+        .toLowerCase()
+        .replace(/[^a-z0-9가-힣]+/g, "-")
+        .replace(/^-+|-+$/g, "") || fallback || "option";
+    }
+
+    function buildFallbackClarificationRequest(taskText, analysis) {
+      const isKoreanTask = taskUsesKorean(taskText);
+      const t = (ko, en) => isKoreanTask ? ko : en;
+      const opt = (id, koLabel, enLabel, koDetail, enDetail, koPrompt, enPrompt, recommended = false) => ({
+        id,
+        label: t(koLabel, enLabel),
+        detail: t(koDetail, enDetail),
+        promptFragment: t(koPrompt, enPrompt),
+        recommended
+      });
+      const group = (id, koLabel, enLabel, options) => {
+        const recommendedOption = options.find((option) => option.recommended) || options[0];
+        return {
+          id,
+          label: t(koLabel, enLabel),
+          selectionMode: "single",
+          recommendedOptionId: recommendedOption?.id || `${id}-default`,
+          options
+        };
+      };
+
+      const taskLower = String(taskText || "").toLowerCase();
+      const featureText = (analysis?.features || []).map((feature) => `${feature.name || ""} ${feature.description || ""}`).join(" ").toLowerCase();
+      const looksLikeGame = /게임|game|shooter|platformer|rpg|arcade/.test(taskLower) || /game|player|enemy|level|score/.test(featureText);
+
+      const gameGroups = [
+        group("platform", "플랫폼", "Platform", [
+          opt("browser-2d", "브라우저 2D", "Browser 2D", "설치 없이 바로 플레이 가능한 웹 게임", "A web game that plays instantly in the browser", "플랫폼은 브라우저 기반 2D로 해줘.", "Use a browser-based 2D platform.", true),
+          opt("desktop-2d", "데스크톱 2D", "Desktop 2D", "PC에서 실행하는 설치형 2D 게임", "An installable 2D game for desktop PCs", "플랫폼은 데스크톱 2D로 해줘.", "Target desktop 2D."),
+          opt("mobile-portrait", "모바일 세로형", "Mobile Portrait", "모바일 세로 화면에 맞춘 캐주얼 게임", "A casual mobile game designed for portrait screens", "플랫폼은 모바일 세로형으로 해줘.", "Target portrait mobile."),
+          opt("desktop-3d", "데스크톱 3D", "Desktop 3D", "조작과 렌더링이 더 무거운 3D 게임", "A heavier 3D game for desktop", "플랫폼은 데스크톱 3D로 해줘.", "Target desktop 3D.")
+        ]),
+        group("genre", "장르", "Genre", [
+          opt("topdown-shooter", "탑다운 슈터", "Top-down Shooter", "짧은 세션과 명확한 전투 루프에 적합", "Good for short sessions and a clear combat loop", "장르는 탑다운 슈터로 해줘.", "Make it a top-down shooter.", true),
+          opt("survivor-arena", "서바이버 아레나", "Survivor Arena", "웨이브를 버티며 성장하는 구조", "A survive-the-waves arena loop", "장르는 서바이버 아레나로 해줘.", "Make it a survivor arena game."),
+          opt("side-scroller", "횡스크롤 액션", "Side-scrolling Action", "점프와 사격이 중심인 구조", "A game centered on jumping and shooting", "장르는 횡스크롤 액션으로 해줘.", "Make it a side-scrolling action game."),
+          opt("arcade-casual", "아케이드 캐주얼", "Arcade Casual", "규칙이 단순하고 바로 플레이 가능한 구조", "Simple rules and immediate play", "장르는 아케이드 캐주얼로 해줘.", "Make it an arcade casual game."),
+          opt("puzzle-action", "퍼즐 액션", "Puzzle Action", "전투보다 규칙과 퍼즐 풀이가 더 중요한 구조", "A rules-and-puzzle-first action game", "장르는 퍼즐 액션으로 해줘.", "Make it a puzzle action game.")
+        ]),
+        group("perspective", "시점", "Perspective", [
+          opt("topdown", "탑다운", "Top-down", "전체 전장을 보기 쉬운 시점", "Easy battlefield readability", "시점은 탑다운으로 해줘.", "Use a top-down perspective.", true),
+          opt("sideview", "사이드뷰", "Side View", "플랫폼 액션에 잘 맞는 시점", "Fits platform action well", "시점은 사이드뷰로 해줘.", "Use a side-view perspective."),
+          opt("isometric", "아이소메트릭", "Isometric", "약간 전략적인 느낌을 주는 시점", "Adds a slightly more strategic feel", "시점은 아이소메트릭으로 해줘.", "Use an isometric perspective."),
+          opt("first-person", "1인칭", "First-person", "몰입감은 높지만 MVP 난이도가 높음", "More immersive but harder for an MVP", "시점은 1인칭으로 해줘.", "Use a first-person perspective.")
+        ]),
+        group("play-mode", "플레이 방식", "Play Mode", [
+          opt("single-player", "싱글플레이", "Single-player", "기능을 가장 빠르게 자를 수 있는 방식", "The fastest way to scope a working MVP", "플레이 방식은 싱글플레이로 해줘.", "Make it single-player.", true),
+          opt("local-coop", "로컬 협동", "Local Co-op", "한 기기에서 둘이 함께 플레이", "Two players on one device", "플레이 방식은 로컬 협동으로 해줘.", "Make it local co-op."),
+          opt("online-multiplayer", "온라인 멀티", "Online Multiplayer", "실시간 동기화가 필요한 방식", "Requires real-time synchronization", "플레이 방식은 온라인 멀티로 해줘.", "Make it online multiplayer."),
+          opt("async-score", "비동기 점수 경쟁", "Async Score Competition", "리더보드 중심의 가벼운 경쟁", "Lightweight competition through a leaderboard", "플레이 방식은 비동기 점수 경쟁으로 해줘.", "Make it async score competition.")
+        ]),
+        group("scope", "MVP 범위", "MVP Scope", [
+          opt("one-core-loop", "핵심 루프 1개", "One Core Loop", "이동, 공격, 점수 정도만 있는 최소 MVP", "A minimal MVP with movement, attack, and score", "MVP는 핵심 루프 1개만 있는 최소 버전으로 해줘.", "Keep the MVP to one core loop only.", true),
+          opt("arena-plus-boss", "아레나 + 보스 1개", "Arena + One Boss", "짧은 완결감을 주는 구조", "Adds a short sense of completion", "MVP는 아레나와 보스 1개까지 포함해줘.", "Include one arena and one boss."),
+          opt("stages-and-unlock", "스테이지 + 해금", "Stages + Unlocks", "간단한 진행 요소가 있는 구조", "Adds light progression", "MVP는 스테이지와 간단한 해금 요소까지 포함해줘.", "Include stages and simple unlocks."),
+          opt("meta-progression", "메타 성장 포함", "Meta Progression", "반복 플레이 기반 성장 시스템까지 포함", "Includes repeat-play progression systems", "MVP에 메타 성장까지 포함해줘.", "Include meta progression in the MVP.")
+        ]),
+        group("art-style", "비주얼 스타일", "Visual Style", [
+          opt("minimal-shapes", "미니멀 도형", "Minimal Shapes", "자산 없이 빠르게 구현 가능한 스타일", "Fastest style to ship without art assets", "비주얼은 미니멀 도형 스타일로 해줘.", "Use a minimal-shapes visual style.", true),
+          opt("pixel-placeholder", "픽셀풍 플레이스홀더", "Pixel Placeholder", "임시 픽셀 아트 느낌으로 구현", "A placeholder pixel-art feel", "비주얼은 픽셀풍 플레이스홀더로 해줘.", "Use a placeholder pixel-art style."),
+          opt("neon-arcade", "네온 아케이드", "Neon Arcade", "강한 대비와 효과 위주의 스타일", "A high-contrast effects-driven style", "비주얼은 네온 아케이드 스타일로 해줘.", "Use a neon arcade style."),
+          opt("cute-casual", "귀여운 캐주얼", "Cute Casual", "밝고 가벼운 톤의 스타일", "A bright and light casual tone", "비주얼은 귀여운 캐주얼 스타일로 해줘.", "Use a cute casual style.")
+        ]),
+        group("controls", "조작", "Controls", [
+          opt("keyboard-only", "키보드만", "Keyboard Only", "WASD 또는 방향키 중심 조작", "WASD or arrow-key control", "조작은 키보드만 사용하게 해줘.", "Use keyboard-only controls.", true),
+          opt("keyboard-mouse", "키보드 + 마우스", "Keyboard + Mouse", "이동과 조준을 분리한 슈터형 조작", "Shooter-style movement plus aiming", "조작은 키보드와 마우스를 함께 쓰게 해줘.", "Use keyboard and mouse controls."),
+          opt("gamepad", "게임패드", "Gamepad", "패드 우선 조작", "Gamepad-first control scheme", "조작은 게임패드 기준으로 해줘.", "Use a gamepad-first control scheme."),
+          opt("touch", "터치", "Touch", "모바일 가상 패드 기반 조작", "Touch controls with on-screen inputs", "조작은 터치 기반으로 해줘.", "Use touch controls.")
+        ]),
+        group("stack", "구현 스택", "Implementation Stack", [
+          opt("vanilla-canvas", "바닐라 Canvas", "Vanilla Canvas", "의존성을 줄이고 구조를 단순하게 유지", "Minimal dependencies and simple structure", "기술 스택은 바닐라 Canvas로 해줘.", "Use vanilla Canvas for the stack.", true),
+          opt("phaser", "Phaser", "Phaser", "게임 프레임워크를 활용해 개발 속도를 높임", "Use a game framework to move faster", "기술 스택은 Phaser로 해줘.", "Use Phaser."),
+          opt("pixi", "PixiJS", "PixiJS", "렌더링 중심의 가벼운 엔진", "A lightweight rendering-focused engine", "기술 스택은 PixiJS로 해줘.", "Use PixiJS."),
+          opt("react-canvas", "React + Canvas", "React + Canvas", "UI와 게임 화면을 함께 다루기 쉬움", "Good when UI and the game surface are both important", "기술 스택은 React와 Canvas 조합으로 해줘.", "Use React plus Canvas.")
+        ])
+      ];
+
+      const genericGroups = [
+        group("platform", "플랫폼", "Platform", [
+          opt("web-app", "웹 앱", "Web App", "가장 접근성이 좋은 기본 선택", "The most accessible default", "플랫폼은 웹 앱으로 해줘.", "Make it a web app.", true),
+          opt("mobile-app", "모바일 앱", "Mobile App", "모바일 중심 사용성을 가정", "Assume mobile-first usage", "플랫폼은 모바일 앱으로 해줘.", "Make it a mobile app."),
+          opt("desktop-app", "데스크톱 앱", "Desktop App", "오프라인 또는 파일 접근이 중요한 경우", "Good when offline access or local files matter", "플랫폼은 데스크톱 앱으로 해줘.", "Make it a desktop app."),
+          opt("landing-site", "랜딩 사이트", "Landing Site", "서비스 소개 중심의 사이트", "A marketing-first site", "플랫폼은 랜딩 사이트로 해줘.", "Make it a landing site.")
+        ]),
+        group("surface", "제품 타입", "Product Type", [
+          opt("tool", "도구형", "Tool", "입력과 결과가 분명한 생산성 도구", "A productivity-oriented tool", "제품 타입은 도구형으로 해줘.", "Make it a tool.", true),
+          opt("dashboard", "대시보드", "Dashboard", "데이터 조회와 관리 중심", "Centered on viewing and managing data", "제품 타입은 대시보드형으로 해줘.", "Make it a dashboard."),
+          opt("marketplace", "마켓플레이스", "Marketplace", "목록, 탐색, 거래 흐름 중심", "Centered on listings and transactions", "제품 타입은 마켓플레이스로 해줘.", "Make it a marketplace."),
+          opt("community", "커뮤니티", "Community", "게시글/댓글/프로필이 핵심", "Posts, comments, and profiles are core", "제품 타입은 커뮤니티형으로 해줘.", "Make it a community product.")
+        ]),
+        group("scope", "초기 범위", "Initial Scope", [
+          opt("single-flow", "핵심 흐름 1개", "Single Core Flow", "가장 중요한 흐름만 완성하는 MVP", "An MVP built around one important flow", "초기 범위는 핵심 흐름 1개만 포함해줘.", "Keep the initial scope to one core flow.", true),
+          opt("core-plus-admin", "핵심 + 관리화면", "Core + Admin", "사용자 흐름과 간단한 관리 기능 포함", "Core user flow plus simple admin support", "초기 범위는 핵심 기능과 관리화면까지 포함해줘.", "Include the core flow and a simple admin screen."),
+          opt("multi-role", "다중 역할", "Multiple Roles", "역할별 화면 분리가 필요한 구조", "Separate experiences for different roles", "초기 범위는 역할별 화면까지 포함해줘.", "Include role-specific flows."),
+          opt("full-product", "거의 완제품", "Near Full Product", "초기부터 범위를 넓게 잡는 편", "A broader first release scope", "초기 범위는 완제품에 가깝게 잡아줘.", "Aim closer to a full product from the start.")
+        ]),
+        group("style", "화면 톤", "Visual Tone", [
+          opt("clean-minimal", "클린 미니멀", "Clean Minimal", "가장 무난하고 빠른 기본 방향", "The safest and fastest default direction", "화면 톤은 클린 미니멀로 해줘.", "Use a clean minimal tone.", true),
+          opt("bold-editorial", "볼드 에디토리얼", "Bold Editorial", "강한 타이포와 레이아웃 중심", "Typography and layout-forward", "화면 톤은 볼드 에디토리얼로 해줘.", "Use a bold editorial tone."),
+          opt("playful", "경쾌한 캐주얼", "Playful", "친근하고 가벼운 인상", "Friendly and light", "화면 톤은 경쾌한 캐주얼로 해줘.", "Use a playful tone."),
+          opt("professional", "프로페셔널", "Professional", "업무용 제품에 가까운 인상", "A more work-oriented product tone", "화면 톤은 프로페셔널하게 해줘.", "Use a professional tone.")
+        ]),
+        group("auth-data", "계정/데이터", "Auth & Data", [
+          opt("no-auth-local", "로그인 없이 로컬만", "No Auth, Local Only", "가장 빠른 MVP 방향", "The fastest MVP path", "초기 버전은 로그인 없이 로컬 상태만 사용해줘.", "Use no auth and local state only.", true),
+          opt("email-auth", "이메일 로그인", "Email Auth", "기본적인 계정 시스템 포함", "Include a basic account system", "초기 버전은 이메일 로그인까지 포함해줘.", "Include email auth."),
+          opt("social-auth", "소셜 로그인", "Social Auth", "진입 장벽을 낮추는 방향", "Reduce sign-up friction", "초기 버전은 소셜 로그인 기준으로 해줘.", "Use social auth."),
+          opt("team-data", "팀/공유 데이터", "Team Shared Data", "협업성 있는 구조", "A collaboration-oriented structure", "초기 버전은 팀 공유 데이터가 가능하게 해줘.", "Support team-shared data.")
+        ]),
+        group("implementation-style", "구현 성향", "Implementation Style", [
+          opt("fast-mvp", "빠른 MVP", "Fast MVP", "추상화보다 속도를 우선", "Prioritize speed over abstraction", "구현은 빠른 MVP 위주로 해줘.", "Bias implementation toward a fast MVP.", true),
+          opt("balanced", "균형형", "Balanced", "확장성과 속도의 균형", "Balance speed and extensibility", "구현은 속도와 확장성의 균형을 맞춰줘.", "Balance speed and extensibility."),
+          opt("scalable-foundation", "확장형 기반", "Scalable Foundation", "초기부터 구조를 조금 더 갖춤", "Invest slightly more in initial structure", "구현은 확장성을 조금 더 중시해줘.", "Lean a bit more toward scalability."),
+          opt("prototype-only", "프로토타입 우선", "Prototype First", "일단 보여주는 데 초점", "Optimize for something demoable quickly", "구현은 데모 가능한 프로토타입 위주로 해줘.", "Optimize for a fast prototype.")
+        ])
+      ];
+
+      return {
+        required: true,
+        reason: t(
+          "요청 범위가 넓어서 장르, 플랫폼, 범위를 바로 고정하면 임의 가정이 너무 많이 들어갑니다.",
+          "The request is broad enough that picking genre, platform, and scope without input would add too many assumptions."
+        ),
+        message: t(
+          "아래 옵션 중 원하는 방향만 몇 개 골라주세요. 고르지 않은 항목은 추천 기본값으로 진행합니다.",
+          "Pick the directions you care about below. Anything you skip will fall back to the recommended default."
+        ),
+        summary: t(
+          "조금만 방향을 좁히면 DEBATE와 DESIGN 단계의 품질이 크게 올라갑니다.",
+          "A small amount of direction here will substantially improve the DEBATE and DESIGN steps."
+        ),
+        groups: looksLikeGame ? gameGroups : genericGroups
+      };
+    }
+
+    function normalizeClarificationRequest(taskText, analysis) {
+      if (!analysis || typeof analysis !== "object") {
+        traceJson("Functions", "normalizeClarificationRequest()", { result: null, reason: "analysis_missing" });
+        return null;
+      }
+      const fallback = buildFallbackClarificationRequest(taskText, analysis);
+      const raw = analysis.clarificationRequest && typeof analysis.clarificationRequest === "object"
+        ? analysis.clarificationRequest
+        : null;
+      // Let the AI decide — trust its clarificationRequest.required judgment
+      const shouldClarify = raw?.required === true;
+
+      if (!shouldClarify) {
+        traceJson("Functions", "normalizeClarificationRequest()", { result: null, reason: "clarification_not_required" });
+        return null;
+      }
+
+      const fallbackGroups = Array.isArray(fallback.groups) ? fallback.groups : [];
+      const rawGroups = Array.isArray(raw?.groups) ? raw.groups : [];
+      const groupsSource = rawGroups.length >= 3 ? rawGroups : fallbackGroups;
+      const groups = groupsSource.map((group, groupIndex) => {
+        if (!group || typeof group !== "object") return null;
+        const fallbackGroup = fallbackGroups[groupIndex] || fallbackGroups[0];
+        const optionsSource = Array.isArray(group.options) && group.options.length > 0
+          ? group.options
+          : (fallbackGroup?.options || []);
+        const options = optionsSource.map((option, optionIndex) => {
+          if (!option || typeof option !== "object") return null;
+          const fallbackOption = fallbackGroup?.options?.[optionIndex] || fallbackGroup?.options?.[0];
+          const label = typeof option.label === "string" && option.label.trim()
+            ? option.label.trim()
+            : (fallbackOption?.label || `Option ${optionIndex + 1}`);
+          const detail = typeof option.detail === "string" && option.detail.trim()
+            ? option.detail.trim()
+            : (fallbackOption?.detail || "");
+          const promptFragment = typeof option.promptFragment === "string" && option.promptFragment.trim()
+            ? option.promptFragment.trim()
+            : (fallbackOption?.promptFragment || `${label}.`);
+          const id = slugId(option.id || label, `${fallbackGroup?.id || "group"}-${optionIndex + 1}`);
+          return {
+            id,
+            label,
+            detail,
+            promptFragment,
+            recommended: option.recommended === true || fallbackOption?.recommended === true
+          };
+        }).filter(Boolean);
+
+        if (options.length === 0) return null;
+        const recommendedOption = options.find((option) => option.recommended) || options[0];
+        return {
+          id: slugId(group.id || group.label, fallbackGroup?.id || `clarify-${groupIndex + 1}`),
+          label: typeof group.label === "string" && group.label.trim()
+            ? group.label.trim()
+            : (fallbackGroup?.label || `Choice ${groupIndex + 1}`),
+          selectionMode: group.selectionMode === "multi" ? "multi" : "single",
+          recommendedOptionId: typeof group.recommendedOptionId === "string" && group.recommendedOptionId.trim()
+            ? slugId(group.recommendedOptionId, recommendedOption.id)
+            : recommendedOption.id,
+          options
+        };
+      }).filter(Boolean);
+
+      if (groups.length === 0) {
+        traceJson("Functions", "normalizeClarificationRequest()", fallback);
+        return fallback;
+      }
+
+      const result = {
+        required: true,
+        reason: typeof raw?.reason === "string" && raw.reason.trim() ? raw.reason.trim() : fallback.reason,
+        message: typeof raw?.message === "string" && raw.message.trim() ? raw.message.trim() : fallback.message,
+        summary: typeof raw?.summary === "string" && raw.summary.trim() ? raw.summary.trim() : fallback.summary,
+        groups
+      };
+      traceJson("Functions", "normalizeClarificationRequest()", result);
+      return result;
+    }
+
+    function extractStructuredJson(text) {
+      const source = String(text || "").trim();
+      if (!source) return null;
+
+      const candidates = [source];
+      const fenced = source.match(/```json\s*([\s\S]*?)\s*```/i);
+      if (fenced?.[1]) candidates.push(fenced[1].trim());
+      const firstBrace = source.indexOf("{");
+      const lastBrace = source.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        candidates.push(source.slice(firstBrace, lastBrace + 1).trim());
+      }
+
+      for (const candidate of candidates) {
+        try { return JSON.parse(candidate); } catch {}
+      }
+      return null;
+    }
+
+    function normalizeText(value) {
+      return typeof value === "string" ? value.trim() : "";
+    }
+
+    function normalizeEnum(value, allowed, fallback = "") {
+      const normalized = normalizeText(value);
+      return allowed.includes(normalized) ? normalized : fallback;
+    }
+
+    function normalizeStringArray(values) {
+      return Array.isArray(values)
+        ? values.map((value) => normalizeText(value)).filter(Boolean)
+        : [];
+    }
+
+    function normalizeObjectArray(values, mapper) {
+      return Array.isArray(values)
+        ? values.map((value, index) => mapper(value, index)).filter(Boolean)
+        : [];
+    }
+
+    function normalizeAnalyzeArtifact(taskText, analysis) {
+      const clarification = normalizeClarificationRequest(taskText, analysis) || {
+        required: false,
+        reason: "",
+        message: "",
+        summary: "",
+        groups: []
+      };
+
+      const techStack = analysis?.techStack && typeof analysis.techStack === "object"
+        ? {
+          language: normalizeText(analysis.techStack.language),
+          runtime: normalizeText(analysis.techStack.runtime),
+          framework: normalizeText(analysis.techStack.framework),
+          frontend: normalizeText(analysis.techStack.frontend),
+          realtime: normalizeText(analysis.techStack.realtime),
+          database: normalizeText(analysis.techStack.database),
+          packageManager: normalizeText(analysis.techStack.packageManager),
+          testFramework: normalizeText(analysis.techStack.testFramework),
+          justification: normalizeText(analysis.techStack.justification)
+        }
+        : undefined;
+
+      const artifact = {
+        triage: {
+          level: normalizeEnum(analysis?.triage?.level, ["trivial", "simple", "moderate", "complex"], "moderate"),
+          rationale: normalizeText(analysis?.triage?.rationale)
+        },
+        intent: {
+          type: normalizeText(analysis?.intent?.type),
+          confidence: normalizeEnum(analysis?.intent?.confidence, ["high", "medium", "low"], "medium"),
+          rationale: normalizeText(analysis?.intent?.rationale)
+        },
+        codebaseState: normalizeEnum(analysis?.codebaseState, ["greenfield", "disciplined", "transitional", "legacy"], "greenfield"),
+        techStack,
+        features: normalizeObjectArray(analysis?.features, (feature, index) => {
+          if (!feature || typeof feature !== "object") return null;
+          return {
+            id: normalizeText(feature.id) || `F${index + 1}`,
+            name: normalizeText(feature.name),
+            priority: normalizeEnum(feature.priority, ["must-have", "nice-to-have"], "must-have"),
+            description: normalizeText(feature.description),
+            userStory: normalizeText(feature.userStory)
+          };
+        }),
+        scope: {
+          in: normalizeStringArray(analysis?.scope?.in),
+          out: normalizeStringArray(analysis?.scope?.out),
+          assumptions: normalizeStringArray(analysis?.scope?.assumptions),
+          constraints: normalizeStringArray(analysis?.scope?.constraints)
+        },
+        risks: normalizeObjectArray(analysis?.risks, (risk) => {
+          if (!risk || typeof risk !== "object") return null;
+          return {
+            risk: normalizeText(risk.risk),
+            severity: normalizeEnum(risk.severity, ["high", "medium", "low"], "medium"),
+            likelihood: normalizeEnum(risk.likelihood, ["high", "medium", "low"], "medium"),
+            mitigation: normalizeText(risk.mitigation)
+          };
+        }),
+        premortem: normalizeObjectArray(analysis?.premortem, (item) => {
+          if (!item || typeof item !== "object") return null;
+          return {
+            failureScenario: normalizeText(item.failureScenario),
+            prevention: normalizeText(item.prevention)
+          };
+        }),
+        edgeCases: normalizeObjectArray(analysis?.edgeCases, (edgeCase, index) => {
+          if (!edgeCase || typeof edgeCase !== "object") return null;
+          return {
+            id: normalizeText(edgeCase.id) || `EC${index + 1}`,
+            feature: normalizeText(edgeCase.feature),
+            scenario: normalizeText(edgeCase.scenario),
+            expectedBehavior: normalizeText(edgeCase.expectedBehavior),
+            severity: normalizeEnum(edgeCase.severity, ["critical", "moderate", "minor"], "moderate")
+          };
+        }),
+        acceptanceCriteria: normalizeObjectArray(analysis?.acceptanceCriteria, (criterion, index) => {
+          if (!criterion || typeof criterion !== "object") return null;
+          return {
+            id: normalizeText(criterion.id) || `AC${index + 1}`,
+            criterion: normalizeText(criterion.criterion),
+            command: normalizeText(criterion.command),
+            expectedResult: normalizeText(criterion.expectedResult)
+          };
+        }),
+        directives: {
+          mustDo: normalizeStringArray(analysis?.directives?.mustDo),
+          mustNotDo: normalizeStringArray(analysis?.directives?.mustNotDo),
+          patternsToFollow: normalizeStringArray(analysis?.directives?.patternsToFollow),
+          verificationTools: normalizeStringArray(analysis?.directives?.verificationTools)
+        },
+        slopGuardrails: {
+          scopeInflationRisk: normalizeEnum(analysis?.slopGuardrails?.scopeInflationRisk, ["low", "medium", "high"], "medium"),
+          prematureAbstractionRisk: normalizeEnum(analysis?.slopGuardrails?.prematureAbstractionRisk, ["low", "medium", "high"], "medium"),
+          overValidationRisk: normalizeEnum(analysis?.slopGuardrails?.overValidationRisk, ["low", "medium", "high"], "medium"),
+          docBloatRisk: normalizeEnum(analysis?.slopGuardrails?.docBloatRisk, ["low", "medium", "high"], "medium"),
+          specificWarnings: normalizeStringArray(analysis?.slopGuardrails?.specificWarnings)
+        },
+        gapAnalysis: {
+          implicitRequirements: normalizeStringArray(analysis?.gapAnalysis?.implicitRequirements),
+          unresolvedQuestions: normalizeStringArray(analysis?.gapAnalysis?.unresolvedQuestions),
+          featureDependencies: normalizeStringArray(analysis?.gapAnalysis?.featureDependencies),
+          missingCoverage: normalizeStringArray(analysis?.gapAnalysis?.missingCoverage),
+          predictionCheck: normalizeStringArray(analysis?.gapAnalysis?.predictionCheck)
+        },
+        clarificationRequest: clarification,
+        decisionDrivers: normalizeObjectArray(analysis?.decisionDrivers, (driver, index) => {
+          if (!driver || typeof driver !== "object") return null;
+          return {
+            id: normalizeText(driver.id) || `DD${index + 1}`,
+            principle: normalizeText(driver.principle),
+            rationale: normalizeText(driver.rationale),
+            tradeoff: normalizeText(driver.tradeoff)
+          };
+        }),
+        selfReview: {
+          allFeaturesHaveUserStories: analysis?.selfReview?.allFeaturesHaveUserStories === true,
+          allFeaturesHaveAC: analysis?.selfReview?.allFeaturesHaveAC === true,
+          allACsAreExecutable: analysis?.selfReview?.allACsAreExecutable === true,
+          allRisksHaveMitigation: analysis?.selfReview?.allRisksHaveMitigation === true,
+          techStackJustified: analysis?.selfReview?.techStackJustified === true,
+          scopeOutExplicit: analysis?.selfReview?.scopeOutExplicit === true,
+          issuesFound: normalizeStringArray(analysis?.selfReview?.issuesFound)
+        },
+        complexity: {
+          level: normalizeEnum(analysis?.complexity?.level, ["simple", "moderate", "complex", "very-complex"], "complex"),
+          estimatedFiles: Number.isFinite(Number(analysis?.complexity?.estimatedFiles)) ? Number(analysis.complexity.estimatedFiles) : 0,
+          estimatedLines: Number.isFinite(Number(analysis?.complexity?.estimatedLines)) ? Number(analysis.complexity.estimatedLines) : 0,
+          estimatedBuildWaves: Number.isFinite(Number(analysis?.complexity?.estimatedBuildWaves)) ? Number(analysis.complexity.estimatedBuildWaves) : 0,
+          criticalPath: normalizeText(analysis?.complexity?.criticalPath)
+        }
+      };
+
+      if (artifact.techStack && Object.values(artifact.techStack).every((value) => !value)) {
+        delete artifact.techStack;
+      }
+
+      traceJson("Functions", "normalizeAnalyzeArtifact()", artifact);
+      return artifact;
+    }
+
+    function summarizeAnalyzeArtifact(artifact) {
+      const parts = [];
+      if (artifact.intent?.type) parts.push(`intent=${artifact.intent.type}`);
+      if (artifact.codebaseState) parts.push(`codebase=${artifact.codebaseState}`);
+      if (artifact.features?.length) parts.push(`features=${artifact.features.length}`);
+      if (artifact.acceptanceCriteria?.length) parts.push(`acceptance=${artifact.acceptanceCriteria.length}`);
+      parts.push(artifact.clarificationRequest?.required ? "clarification required" : "ready for downstream planning");
+      return `AnalyzeArtifact generated: ${parts.join(", ")}.`;
+    }
+
+    function renderAnalyzeArtifact(artifact) {
+      const parts = [
+        "## Analyze Artifact",
+        "Use this normalized artifact as the authoritative ANALYZE output. Ignore raw transcripts and tool chatter."
+      ];
+
+      if (artifact.intent?.type) {
+        parts.push(`**Intent**: ${artifact.intent.type} (${artifact.intent.confidence} confidence)
+${artifact.intent.rationale || ""}`.trim());
+      }
+      if (artifact.triage?.level) {
+        parts.push(`**Triage**: ${artifact.triage.level}${artifact.triage.rationale ? ` — ${artifact.triage.rationale}` : ""}`);
+      }
+      if (artifact.codebaseState) {
+        parts.push(`**Codebase State**: ${artifact.codebaseState}`);
+      }
+      if (artifact.techStack) {
+        const tech = artifact.techStack;
+        parts.push(`**Tech Stack**:
+- Language: ${tech.language || "N/A"}
+- Runtime: ${tech.runtime || "N/A"}
+- Framework: ${tech.framework || "N/A"}
+- Frontend: ${tech.frontend || "N/A"}
+- Realtime: ${tech.realtime || "N/A"}
+- Database: ${tech.database || "N/A"}
+- Package Manager: ${tech.packageManager || "N/A"}
+- Test Framework: ${tech.testFramework || "N/A"}${tech.justification ? `
+- Justification: ${tech.justification}` : ""}`);
+      }
+      if (artifact.features?.length) {
+        parts.push(`**Features**:
+${artifact.features.map((feature) => `- [${feature.priority}] ${feature.id}: ${feature.name} — ${feature.description}`).join("\n")}`);
+      }
+      if (artifact.scope) {
+        parts.push(`**Scope**:
+- IN: ${(artifact.scope.in || []).join(", ") || "N/A"}
+- OUT: ${(artifact.scope.out || []).join(", ") || "N/A"}
+- Assumptions: ${(artifact.scope.assumptions || []).join(", ") || "N/A"}
+- Constraints: ${(artifact.scope.constraints || []).join(", ") || "N/A"}`);
+      }
+      if (artifact.risks?.length) {
+        parts.push(`**Risks**:
+${artifact.risks.map((risk) => `- [${risk.severity}/${risk.likelihood}] ${risk.risk} → ${risk.mitigation}`).join("\n")}`);
+      }
+      if (artifact.edgeCases?.length) {
+        parts.push(`**Edge Cases**:
+${artifact.edgeCases.map((edgeCase) => `- ${edgeCase.id} [${edgeCase.severity}] (${edgeCase.feature}): ${edgeCase.scenario} → ${edgeCase.expectedBehavior}`).join("\n")}`);
+      }
+      if (artifact.acceptanceCriteria?.length) {
+        parts.push(`**Acceptance Criteria**:
+${artifact.acceptanceCriteria.map((criterion) => `- ${criterion.id}: ${criterion.criterion} → \`${criterion.command}\` → ${criterion.expectedResult}`).join("\n")}`);
+      }
+      if (artifact.directives?.mustDo?.length) {
+        parts.push(`**Must Do**:
+${artifact.directives.mustDo.map((item) => `- ${item}`).join("\n")}`);
+      }
+      if (artifact.directives?.mustNotDo?.length) {
+        parts.push(`**Must Not Do**:
+${artifact.directives.mustNotDo.map((item) => `- ${item}`).join("\n")}`);
+      }
+      if (artifact.gapAnalysis?.implicitRequirements?.length) {
+        parts.push(`**Implicit Requirements**:
+${artifact.gapAnalysis.implicitRequirements.map((item) => `- ${item}`).join("\n")}`);
+      }
+      if (artifact.gapAnalysis?.featureDependencies?.length) {
+        parts.push(`**Feature Dependencies**:
+${artifact.gapAnalysis.featureDependencies.map((item) => `- ${item}`).join("\n")}`);
+      }
+      if (artifact.decisionDrivers?.length) {
+        parts.push(`**Decision Drivers**:
+${artifact.decisionDrivers.map((driver) => `- ${driver.id}: ${driver.principle} — ${driver.rationale} (tradeoff: ${driver.tradeoff})`).join("\n")}`);
+      }
+      if (artifact.clarificationRequest?.required) {
+        parts.push(`**Clarification Required**:
+- Reason: ${artifact.clarificationRequest.reason}
+- Message: ${artifact.clarificationRequest.message}`);
+      }
+      if (artifact.complexity?.level) {
+        parts.push(`**Complexity**: ${artifact.complexity.level} — ~${artifact.complexity.estimatedFiles} files, ~${artifact.complexity.estimatedLines} lines, ~${artifact.complexity.estimatedBuildWaves} waves
+- Critical path: ${artifact.complexity.criticalPath || "N/A"}`);
+      }
+      parts.push("Structured Data:\n```json\n" + JSON.stringify(artifact, null, 2) + "\n```");
+
+      return parts.join("\n\n");
+    }
+
+    function summarizeDebateArtifact(artifact) {
+      const parts = [];
+      if (artifact.readiness) parts.push(`readiness=${artifact.readiness}`);
+      if (artifact.designFocus?.length) parts.push(`focus=${artifact.designFocus.length}`);
+      if (artifact.risks?.length) parts.push(`risks=${artifact.risks.length}`);
+      if (artifact.openQuestions?.length) parts.push(`questions=${artifact.openQuestions.length}`);
+      return `DebateArtifact generated: ${parts.join(", ") || "normalized"}.`;
+    }
+
+    function normalizeDebateArtifact(taskText, debate, analyzeArtifact) {
+      const summary = normalizeText(debate?.summary) || normalizeText(debate?.recommendedApproach) || normalizeText(taskText);
+      const recommendedApproach = normalizeText(debate?.recommendedApproach) || summary;
+      const designFocus = normalizeStringArray(debate?.designFocus);
+      const risks = normalizeStringArray(debate?.risks);
+      const openQuestions = normalizeStringArray(debate?.openQuestions);
+      const readiness = normalizeEnum(
+        debate?.readiness,
+        ["blocked", "provisional", "ready"],
+        analyzeArtifact?.clarificationRequest?.required ? "blocked" : (risks.length > 0 ? "provisional" : "ready")
+      );
+
+      const artifact = {
+        summary,
+        recommendedApproach,
+        decisionDrivers: normalizeStringArray(debate?.decisionDrivers),
+        alternativesConsidered: normalizeStringArray(debate?.alternativesConsidered),
+        tradeoffs: normalizeStringArray(debate?.tradeoffs),
+        risks,
+        openQuestions,
+        implementationPrinciples: normalizeStringArray(debate?.implementationPrinciples),
+        verificationStrategy: normalizeStringArray(debate?.verificationStrategy),
+        designFocus,
+        readiness
+      };
+      traceJson("Functions", "normalizeDebateArtifact()", artifact);
+      return artifact;
+    }
+
+    function renderDebateArtifact(artifact) {
+      const parts = [
+        "## Debate Artifact",
+        "Use this normalized artifact as the authoritative DEBATE output. Ignore raw debate transcripts and tool chatter.",
+        `Summary: ${artifact.summary}`,
+        `Recommended Approach: ${artifact.recommendedApproach}`,
+        `Readiness: ${artifact.readiness}`
+      ];
+
+      const pushList = (title, values) => {
+        if (!Array.isArray(values) || values.length === 0) return;
+        parts.push(`${title}:
+${values.map((value) => `- ${value}`).join("\n")}`);
+      };
+
+      pushList("Decision Drivers", artifact.decisionDrivers);
+      pushList("Alternatives Considered", artifact.alternativesConsidered);
+      pushList("Tradeoffs", artifact.tradeoffs);
+      pushList("Risks", artifact.risks);
+      pushList("Open Questions", artifact.openQuestions);
+      pushList("Implementation Principles", artifact.implementationPrinciples);
+      pushList("Verification Strategy", artifact.verificationStrategy);
+      pushList("Design Focus", artifact.designFocus);
+      parts.push("Structured Data:\n```json\n" + JSON.stringify(artifact, null, 2) + "\n```");
+
+      return parts.join("\n\n");
+    }
+
+    function applyDebateArtifact(artifact) {
+      ctx.debateArtifact = artifact;
+      if (artifact.recommendedApproach) pushDecision(`Debate recommendation: ${artifact.recommendedApproach}`);
+      for (const item of artifact.implementationPrinciples || []) pushDecision(`Implementation principle: ${item}`);
+      for (const item of artifact.tradeoffs || []) pushDecision(`Tradeoff: ${item}`);
+
+      // DEBATE refines ANALYZE — update ctx.analyzeArtifact with DEBATE conclusions
+      // so downstream steps (DESIGN, BUILD) see the corrected analysis
+      if (ctx.analyzeArtifact) {
+        if (artifact.summary) ctx.analyzeArtifact.summary = artifact.summary;
+        if (artifact.recommendedApproach) ctx.analyzeArtifact.recommendedApproach = artifact.recommendedApproach;
+        // DEBATE's design focus replaces ANALYZE's implicit requirements
+        if (artifact.designFocus?.length) ctx.analyzeArtifact.implicitRequirements = artifact.designFocus;
+        // DEBATE's implementation principles replace ANALYZE's tech options
+        if (artifact.implementationPrinciples?.length) ctx.analyzeArtifact.techOptions = artifact.implementationPrinciples;
+        // Replace ANALYZE's entire techStack with DEBATE's conclusions
+        // DEBATE is the final authority on tech decisions
+        ctx.analyzeArtifact.techStack = {
+          justification: artifact.recommendedApproach || artifact.summary || ""
+        };
+        // Update intent
+        if (artifact.summary) {
+          if (ctx.analyzeArtifact.intent && typeof ctx.analyzeArtifact.intent === "object") {
+            ctx.analyzeArtifact.intent.rationale = artifact.summary;
+          }
+        }
+        sendAgi("agi.debug", { message: "ANALYZE artifact updated with DEBATE conclusions", techStack: ctx.analyzeArtifact.techStack });
+      }
+
+      traceJson("Functions", "applyDebateArtifact()", artifact);
+    }
+
+    function asStringArray(value) {
+      if (Array.isArray(value)) return normalizeStringArray(value);
+      if (typeof value === "string") {
+        return value
+          .split(/\n|[;•]/)
+          .map((item) => normalizeText(item.replace(/^[-*]\s*/, "")))
+          .filter(Boolean);
+      }
+      return [];
+    }
+
+    function inferDesignLayer(filePath) {
+      const normalized = String(filePath || "").toLowerCase();
+      if (!normalized) return "shared";
+      if (normalized === "package.json" || normalized.endsWith("lock.json") || normalized.endsWith("lock.yaml")) return "scaffold";
+      if (normalized === "tsconfig.json" || normalized.includes("vite.config") || normalized.includes("vitest.config") || normalized.includes("playwright.config") || normalized.includes("eslint")) return "config";
+      if (normalized.startsWith("tests/") || normalized.startsWith("test/")) return "testing";
+      if (normalized === "readme.md" || normalized.startsWith("docs/")) return "docs";
+      if (normalized.includes("/db/") || normalized.includes("schema") || normalized.includes("migration")) return "database";
+      if (normalized.includes("socket") || normalized.includes("realtime") || normalized.includes("network") || normalized.includes("sync")) return "realtime";
+      if (normalized.includes("server") || normalized.includes("api") || normalized.includes("route") || normalized.includes("service")) return "backend";
+      if (normalized.includes("shared") || normalized.includes("types") || normalized.includes("state")) return "shared";
+      if (normalized.endsWith(".tsx") || normalized.endsWith(".jsx") || normalized.endsWith("index.html") || normalized.endsWith("styles.css") || normalized.includes("component") || normalized.includes("ui") || normalized.includes("game") || normalized.includes("app")) return "frontend";
+      return "shared";
+    }
+
+    function designOwnerForLayer(layer) {
+      switch (layer) {
+        case "scaffold":
+        case "config":
+          return "build-doctor";
+        case "frontend":
+          return "frontend-engineer";
+        case "backend":
+          return "backend-engineer";
+        case "database":
+          return "db-engineer";
+        case "realtime":
+          return "backend-engineer";
+        case "testing":
+          return "test-engineer";
+        case "docs":
+          return "docs-writer";
+        default:
+          return "executor";
+      }
+    }
+
+    function designWaveForLayer(layer) {
+      switch (layer) {
+        case "scaffold":
+        case "config":
+        case "docs":
+          return 1;
+        case "shared":
+        case "frontend":
+        case "backend":
+        case "database":
+          return 2;
+        case "realtime":
+          return 3;
+        case "testing":
+          return 4;
+        default:
+          return 2;
+      }
+    }
+
+
+    function buildDefaultDesignManifest() {
+      // No hardcoded file structure. AI decides everything.
+      // Returns empty — the AI planner's output is the source of truth.
+      return [];
+    }
+
+    function normalizeDesignFileManifest(value, fallbackManifest) {
+      if (!Array.isArray(value) || value.length === 0) return fallbackManifest;
+      const manifest = value.map((entry) => {
+        if (!entry || typeof entry !== "object") return null;
+        const filePath = normalizeText(entry.path);
+        if (!filePath) return null;
+        const layer = normalizeEnum(entry.layer, ["scaffold", "config", "shared", "frontend", "backend", "database", "realtime", "testing", "docs"], inferDesignLayer(filePath));
+        return {
+          path: filePath,
+          purpose: normalizeText(entry.purpose || entry.description) || "Implementation file",
+          layer,
+          owner: normalizeText(entry.owner) || designOwnerForLayer(layer),
+          wave: Number.isFinite(Number(entry.wave)) && Number(entry.wave) > 0 ? Number(entry.wave) : designWaveForLayer(layer),
+          dependsOn: asStringArray(entry.dependsOn),
+        };
+      }).filter(Boolean);
+      return manifest.length > 0 ? manifest.filter((entry, index, arr) => arr.findIndex((candidate) => candidate.path === entry.path) === index) : fallbackManifest;
+    }
+
+    function deriveDesignWorkstreams(fileManifest, source) {
+      if (Array.isArray(source?.workstreams) && source.workstreams.length > 0) {
+        const workstreams = source.workstreams.map((entry, index) => {
+          if (!entry || typeof entry !== "object") return null;
+          const title = normalizeText(entry.title) || "Workstream " + (index + 1);
+          const id = normalizeText(entry.id) || slugId(title, "ws-" + (index + 1));
+          return {
+            id,
+            title,
+            owner: normalizeText(entry.owner) || "executor",
+            wave: Number.isFinite(Number(entry.wave)) && Number(entry.wave) > 0 ? Number(entry.wave) : 1,
+            focus: normalizeText(entry.focus || entry.summary) || "Implementation workstream",
+            files: asStringArray(entry.files),
+            deliverables: asStringArray(entry.deliverables),
+            dependsOn: asStringArray(entry.dependsOn),
+            testTargets: asStringArray(entry.testTargets),
+          };
+        }).filter(Boolean);
+        if (workstreams.length > 0) return workstreams;
+      }
+
+      const order = ["scaffold", "config", "shared", "frontend", "backend", "database", "realtime", "testing", "docs"];
+      const focusByLayer = {
+        scaffold: "Create the runnable project foundation, scripts, and package metadata.",
+        config: "Lock down compiler, test, and lint configuration before implementation expands.",
+        shared: "Define shared state, domain types, and cross-cutting primitives.",
+        frontend: "Implement the user-facing runtime, UI flow, and interaction layer.",
+        backend: "Implement server-side handlers, business rules, and service orchestration.",
+        database: "Implement schema, storage contracts, and persistence boundaries.",
+        realtime: "Implement synchronization channels and client/server event contracts.",
+        testing: "Implement automated tests that prove the critical flows and guard regressions.",
+        docs: "Document setup, scripts, and operational assumptions for the generated app.",
+      };
+      const dependsOnByLayer = {
+        scaffold: [],
+        config: ["ws-scaffold"],
+        shared: ["ws-scaffold", "ws-config"],
+        frontend: ["ws-scaffold", "ws-config", "ws-shared"],
+        backend: ["ws-scaffold", "ws-config", "ws-shared"],
+        database: ["ws-scaffold", "ws-config", "ws-backend"],
+        realtime: ["ws-frontend", "ws-backend"],
+        testing: ["ws-frontend", "ws-backend", "ws-database", "ws-realtime"],
+        docs: ["ws-scaffold"],
+      };
+      const titleByLayer = {
+        scaffold: "Project Scaffold",
+        config: "Tooling & Config",
+        shared: "Shared Domain Core",
+        frontend: "Frontend Surface",
+        backend: "Backend Services",
+        database: "Database & Persistence",
+        realtime: "Realtime Integration",
+        testing: "Testing & Verification",
+        docs: "Project Documentation",
+      };
+
+      return order
+        .filter((layer) => fileManifest.some((file) => file.layer === layer))
+        .map((layer) => {
+          const files = fileManifest.filter((file) => file.layer === layer);
+          return {
+            id: "ws-" + layer,
+            title: titleByLayer[layer],
+            owner: designOwnerForLayer(layer),
+            wave: Math.min(...files.map((file) => Number(file.wave) || designWaveForLayer(layer))),
+            focus: focusByLayer[layer],
+            files: files.map((file) => file.path),
+            deliverables: files.map((file) => file.path + ": " + file.purpose),
+            dependsOn: dependsOnByLayer[layer].filter((dependencyId) => fileManifest.some((file) => ("ws-" + file.layer) === dependencyId)),
+            testTargets: layer === "testing" ? files.map((file) => file.path) : [],
+          };
+        });
+    }
+
+    function deriveDesignBuildWaves(workstreams, source) {
+      if (Array.isArray(source?.buildWaves) && source.buildWaves.length > 0) {
+        const waves = source.buildWaves.map((entry, index) => {
+          if (!entry || typeof entry !== "object") return null;
+          const workstreamIds = asStringArray(entry.workstreamIds);
+          if (workstreamIds.length === 0) return null;
+          return {
+            wave: Number.isFinite(Number(entry.wave)) && Number(entry.wave) > 0 ? Number(entry.wave) : index + 1,
+            title: normalizeText(entry.title) || "Build Wave " + (index + 1),
+            objective: normalizeText(entry.objective || entry.summary) || "Deliver the assigned workstreams.",
+            workstreamIds,
+          };
+        }).filter(Boolean).sort((left, right) => left.wave - right.wave);
+        if (waves.length > 0) return waves;
+      }
+
+      const grouped = new Map();
+      for (const workstream of workstreams) {
+        const key = Number(workstream.wave) || 1;
+        const current = grouped.get(key) || [];
+        current.push(workstream);
+        grouped.set(key, current);
+      }
+
+      return Array.from(grouped.entries())
+        .sort((left, right) => left[0] - right[0])
+        .map(([wave, entries]) => ({
+          wave,
+          title: entries.map((entry) => entry.title).join(" + "),
+          objective: entries.map((entry) => entry.focus).join(" "),
+          workstreamIds: entries.map((entry) => entry.id),
+        }));
+    }
+
+    function summarizeDesignArtifact(artifact) {
+      const parts = [];
+      if (artifact.readiness) parts.push("readiness=" + artifact.readiness);
+      if (artifact.fileManifest?.length) parts.push("files=" + artifact.fileManifest.length);
+      if (artifact.workstreams?.length) parts.push("workstreams=" + artifact.workstreams.length);
+      if (artifact.buildWaves?.length) parts.push("waves=" + artifact.buildWaves.length);
+      if (artifact.testPlan?.length) parts.push("tests=" + artifact.testPlan.length);
+      return "DesignArtifact generated: " + (parts.join(", ") || "normalized") + ".";
+    }
+
+    function normalizeDesignArtifact(taskText, design, analyzeArtifact, debateArtifact) {
+      const source = design && typeof design === "object" ? design : { summary: String(design || taskText) };
+      const preserveSource = Array.isArray(source.fileManifest) && Array.isArray(source.workstreams) && Array.isArray(source.buildWaves);
+      const fallbackManifest = buildDefaultDesignManifest();
+      const fileManifest = normalizeDesignFileManifest(source.fileManifest, fallbackManifest);
+      const workstreams = deriveDesignWorkstreams(fileManifest, source);
+      const buildWaves = deriveDesignBuildWaves(workstreams, source);
+      const directoryStructure = (preserveSource
+        ? asStringArray(source.directoryStructure).map((entry) => entry.replace(/\/+$/g, ""))
+        : Array.from(new Set([
+          ...asStringArray(source.directoryStructure),
+          ...fileManifest.map((file) => {
+            const parts = file.path.split("/");
+            return parts.length > 1 ? parts.slice(0, -1).join("/") : ".";
+          })
+        ].filter(Boolean)))).filter((entry) => entry !== ".");
+      const architecture = (preserveSource
+        ? asStringArray(source.architecture)
+        : Array.from(new Set([
+          ...asStringArray(source.architecture),
+          ...asStringArray(debateArtifact?.designFocus),
+          ...asStringArray(debateArtifact?.implementationPrinciples),
+          normalizeText(analyzeArtifact?.techStack?.justification),
+        ].filter(Boolean)))).slice(0, 12);
+      const dependencyNotes = (preserveSource
+        ? asStringArray(source.dependencyNotes)
+        : Array.from(new Set([
+          ...asStringArray(source.dependencyNotes),
+          normalizeText(analyzeArtifact?.techStack?.justification),
+          ...asStringArray(analyzeArtifact?.directives?.verificationTools),
+        ].filter(Boolean)))).slice(0, 12);
+      const contracts = (preserveSource
+        ? asStringArray(source.contracts)
+        : Array.from(new Set([
+          ...asStringArray(source.contracts),
+          fileManifest.some((file) => file.layer === "frontend") && fileManifest.some((file) => file.layer === "backend") ? "Client/server contract must stay aligned with the file manifest and typed request boundaries." : "",
+          fileManifest.some((file) => file.layer === "database") ? "Persistence contract must match schema and service assumptions before integration work starts." : "",
+          fileManifest.some((file) => file.layer === "realtime") ? "Realtime event payloads must remain deterministic across server and client handlers." : "",
+        ].filter(Boolean)))).slice(0, 10);
+      const testPlan = (preserveSource
+        ? asStringArray(source.testPlan)
+        : Array.from(new Set([
+          ...asStringArray(source.testPlan),
+          ...fileManifest.filter((file) => file.layer === "testing").map((file) => file.path + ": " + file.purpose),
+          ...asStringArray(debateArtifact?.verificationStrategy),
+          ...normalizeObjectArray(analyzeArtifact?.acceptanceCriteria, (criterion) => criterion?.command ? criterion.command + " -> " + normalizeText(criterion.expectedResult) : null),
+        ].filter(Boolean)))).slice(0, 16);
+      const acceptanceChecks = (preserveSource
+        ? asStringArray(source.acceptanceChecks)
+        : Array.from(new Set([
+          ...asStringArray(source.acceptanceChecks),
+          ...normalizeObjectArray(analyzeArtifact?.acceptanceCriteria, (criterion) => criterion?.command || null),
+          "npm test",
+          "npm run build",
+          fileManifest.some((file) => file.path === "package.json") ? "npm start" : "",
+        ].filter(Boolean)))).slice(0, 12);
+      const executionNotes = (preserveSource
+        ? asStringArray(source.executionNotes)
+        : Array.from(new Set([
+          ...asStringArray(source.executionNotes),
+          ...asStringArray(analyzeArtifact?.directives?.mustDo),
+          ...asStringArray(debateArtifact?.tradeoffs),
+        ].filter(Boolean)))).slice(0, 16);
+      const summary = normalizeText(source.summary) || normalizeText(debateArtifact?.summary) || normalizeText(analyzeArtifact?.intent?.type) || normalizeText(taskText);
+      const readiness = normalizeEnum(source.readiness, ["blocked", "provisional", "ready"], analyzeArtifact?.clarificationRequest?.required ? "blocked" : ((debateArtifact?.risks?.length || 0) > 0 ? "provisional" : "ready"));
+
+      const artifact = {
+        summary,
+        architecture,
+        directoryStructure,
+        fileManifest,
+        workstreams,
+        buildWaves,
+        dependencyNotes,
+        contracts,
+        testPlan,
+        acceptanceChecks,
+        executionNotes,
+        readiness,
+      };
+      traceJson("Functions", "normalizeDesignArtifact()", artifact);
+      return artifact;
+    }
+
+    function renderDesignArtifact(artifact) {
+      const parts = [
+        "## Design Artifact",
+        "Use this normalized artifact as the authoritative DESIGN output. Ignore raw design transcripts and tool chatter.",
+        "Summary: " + artifact.summary,
+        "Readiness: " + artifact.readiness,
+      ];
+
+      const pushList = (title, values) => {
+        if (!Array.isArray(values) || values.length === 0) return;
+        parts.push(title + ":\n" + values.map((value) => "- " + value).join("\n"));
+      };
+
+      pushList("Architecture", artifact.architecture);
+      if (Array.isArray(artifact.directoryStructure) && artifact.directoryStructure.length > 0) {
+        parts.push("Directory Structure:\n" + artifact.directoryStructure.map((value) => "- " + value + "/").join("\n"));
+      }
+      if (Array.isArray(artifact.fileManifest) && artifact.fileManifest.length > 0) {
+        parts.push("File Manifest:\n" + artifact.fileManifest.map((file) => "- " + file.path + " [wave " + file.wave + " / " + file.owner + "] — " + file.purpose).join("\n"));
+      }
+      if (Array.isArray(artifact.workstreams) && artifact.workstreams.length > 0) {
+        parts.push("Workstreams:\n" + artifact.workstreams.map((workstream) => "- " + workstream.id + " [wave " + workstream.wave + " / " + workstream.owner + "] " + workstream.title + " — " + workstream.focus).join("\n"));
+      }
+      if (Array.isArray(artifact.buildWaves) && artifact.buildWaves.length > 0) {
+        parts.push("Build Waves:\n" + artifact.buildWaves.map((wave) => "- Wave " + wave.wave + ": " + wave.title + " — " + wave.objective).join("\n"));
+      }
+      pushList("Dependency Notes", artifact.dependencyNotes);
+      pushList("Contracts", artifact.contracts);
+      pushList("Test Plan", artifact.testPlan);
+      pushList("Acceptance Checks", artifact.acceptanceChecks);
+      pushList("Execution Notes", artifact.executionNotes);
+      parts.push("Structured Data:\n```json\n" + JSON.stringify(artifact, null, 2) + "\n```");
+
+      return parts.join("\n\n");
+    }
+
+    function applyDesignArtifact(artifact) {
+      ctx.designArtifact = artifact;
+      for (const item of artifact.architecture || []) pushDecision("Design architecture: " + item);
+      for (const item of artifact.contracts || []) pushDecision("Design contract: " + item);
+      for (const item of artifact.executionNotes || []) pushDecision("Design note: " + item);
+      traceJson("Functions", "applyDesignArtifact()", artifact);
+    }
+
+    function buildWaveDescription(wave, workstreams, artifact) {
+      const files = Array.from(new Set(workstreams.flatMap((workstream) => workstream.files || [])));
+      const deliverables = Array.from(new Set(workstreams.flatMap((workstream) => workstream.deliverables || [])));
+      const testTargets = Array.from(new Set(workstreams.flatMap((workstream) => workstream.testTargets || [])));
+      const lines = [
+        "Implement build wave " + wave.wave + ": " + wave.title + ".",
+        "Objective: " + wave.objective,
+      ];
+      if (workstreams.length > 0) lines.push("Workstreams:\n" + workstreams.map((workstream) => "- " + workstream.id + " [" + workstream.owner + "] " + workstream.title + " — " + workstream.focus).join("\n"));
+      if (files.length > 0) lines.push("Files to create or complete:\n" + files.map((filePath) => "- " + filePath).join("\n"));
+      if (deliverables.length > 0) lines.push("Deliverables:\n" + deliverables.map((item) => "- " + item).join("\n"));
+      if (testTargets.length > 0) lines.push("Tests to author or update in this wave:\n" + testTargets.map((target) => "- " + target).join("\n"));
+      if (artifact.acceptanceChecks?.length > 0) lines.push("Acceptance checks to keep in view:\n" + artifact.acceptanceChecks.map((check) => "- " + check).join("\n"));
+      return lines.join("\n\n");
+    }
+
+    function expandBuildStepsFromDesignArtifact(artifact, afterIndex) {
+      if (artifact?.readiness === "blocked") {
+        traceJson("Functions", "expandBuildStepsFromDesignArtifact()", { expanded: false, reason: "design_blocked" });
+        return false;
+      }
+      const buildIdx = steps.findIndex((candidate, index) => index > afterIndex && candidate.type === "build" && !String(candidate.title || "").startsWith("Build Wave "));
+      if (buildIdx === -1) {
+        traceJson("Functions", "expandBuildStepsFromDesignArtifact()", { expanded: false, reason: "build_step_not_found" });
+        return false;
+      }
+      const buildStep = steps[buildIdx];
+      const workstreamById = new Map((artifact.workstreams || []).map((workstream) => [workstream.id, workstream]));
+      const waves = Array.isArray(artifact.buildWaves) && artifact.buildWaves.length > 0
+        ? artifact.buildWaves
+        : [{ wave: 1, title: buildStep.title, objective: buildStep.description || buildStep.title, workstreamIds: (artifact.workstreams || []).map((workstream) => workstream.id) }];
+      const expanded = waves.map((wave) => {
+        const waveWorkstreams = (wave.workstreamIds || []).map((id) => workstreamById.get(id)).filter(Boolean);
+        const fileCount = waveWorkstreams.reduce((total, workstream) => total + ((workstream.files || []).length), 0);
+        const maxTurns = Math.min(buildStep.maxTurns || 300, Math.max(80, 40 + fileCount * 5));
+        return {
+          id: buildStep.id + "-wave-" + wave.wave,
+          type: "build",
+          title: "Build Wave " + wave.wave + ": " + wave.title,
+          description: buildWaveDescription(wave, waveWorkstreams, artifact),
+          mode: buildStep.mode,
+          maxTurns,
+          maxRetries: buildStep.maxRetries,
+          useStrategyBranching: buildStep.useStrategyBranching,
+        };
+      });
+      steps.splice(buildIdx, 1, ...expanded);
+      traceJson("Functions", "expandBuildStepsFromDesignArtifact()", {
+        expanded: expanded.length > 0,
+        buildIdx,
+        expandedSteps: expanded
+      });
+      return expanded.length > 0;
+    }
+
+
+    function validateAnalyzeArtifact(artifact) {
+      const missing = [];
+      if (!artifact.intent?.type) missing.push("intent.type");
+      if (!artifact.features?.length) missing.push("features (empty)");
+      if (!artifact.acceptanceCriteria?.length) missing.push("acceptanceCriteria (empty)");
+      if (!artifact.directives) missing.push("directives");
+      if (!artifact.complexity?.level) missing.push("complexity.level");
+      if (typeof artifact.clarificationRequest !== "object") missing.push("clarificationRequest");
+      const triageLevel = artifact.triage?.level || "moderate";
+      if (triageLevel !== "trivial" && triageLevel !== "simple") {
+        if (!artifact.scope) missing.push("scope");
+        if (!artifact.risks?.length) missing.push("risks (empty)");
+        if (!artifact.slopGuardrails) missing.push("slopGuardrails");
+        if (!artifact.gapAnalysis) missing.push("gapAnalysis");
+        if (!artifact.selfReview) missing.push("selfReview");
+        if (!artifact.decisionDrivers?.length) missing.push("decisionDrivers (empty)");
+        if (!artifact.edgeCases?.length) missing.push("edgeCases (empty)");
+      }
+      return { missing, triageLevel };
+    }
+
+    function pushDecision(decision) {
+      const normalized = normalizeText(decision);
+      if (normalized && !ctx.decisions.includes(normalized)) {
+        ctx.decisions.push(normalized);
+      }
+    }
+
+    function applyAnalyzeArtifact(artifact) {
+      ctx.analyzeArtifact = artifact;
+      ctx.analysis = artifact;
+
+      if (artifact.techStack?.justification) pushDecision(`Tech stack: ${artifact.techStack.justification}`);
+      if (artifact.intent?.rationale) pushDecision(`Intent: ${artifact.intent.type} — ${artifact.intent.rationale}`);
+      for (const item of artifact.directives?.mustDo || []) pushDecision(`MUST DO: ${item}`);
+      for (const item of artifact.directives?.mustNotDo || []) pushDecision(`MUST NOT DO: ${item}`);
+      if (artifact.complexity?.level) ctx.analysisComplexity = artifact.complexity.level;
+
+      sendAgi("agi.analysis.parsed", {
+        source: "artifact",
+        triage: artifact.triage,
+        intent: artifact.intent,
+        codebaseState: artifact.codebaseState,
+        techStack: artifact.techStack ? {
+          language: artifact.techStack.language,
+          framework: artifact.techStack.framework,
+          frontend: artifact.techStack.frontend,
+        } : null,
+        featureCount: artifact.features?.length || 0,
+        riskCount: artifact.risks?.length || 0,
+        edgeCaseCount: artifact.edgeCases?.length || 0,
+        complexity: artifact.complexity,
+        slopGuardrails: artifact.slopGuardrails,
+        hasGapAnalysis: !!artifact.gapAnalysis,
+      });
+
+      const validation = validateAnalyzeArtifact(artifact);
+      if (validation.missing.length > 0) {
+        sendAgi("agi.analysis.validation", { status: "incomplete", missing: validation.missing, triageLevel: validation.triageLevel });
+        ctx.analysisValidation = validation;
+      } else {
+        sendAgi("agi.analysis.validation", { status: "complete", triageLevel: validation.triageLevel });
+        ctx.analysisValidation = null;
+      }
+
+      // If user already answered clarification, don't ask again
+      const alreadyClarified = /\[Clarification Selections\]/i.test(task);
+      clarificationRequest = (!alreadyClarified && artifact.clarificationRequest?.required) ? artifact.clarificationRequest : null;
+
+      // If no clarificationRequest from engine artifact, search session files
+      if (!clarificationRequest && !alreadyClarified) {
+        const sessionsDir = path.join(childCwd, ".agent", "sessions");
+        try {
+          if (fs.existsSync(sessionsDir)) {
+            const sessionFiles = fs.readdirSync(sessionsDir)
+              .filter(f => f.endsWith(".json") && !f.endsWith(".jsonl"))
+              .sort((a, b) => {
+                try { return fs.statSync(path.join(sessionsDir, b)).mtimeMs - fs.statSync(path.join(sessionsDir, a)).mtimeMs; } catch { return 0; }
+              });
+            for (const sf of sessionFiles) {
+              try {
+                const sessionData = JSON.parse(fs.readFileSync(path.join(sessionsDir, sf), "utf8"));
+                const plannerTask = sessionData.tasks?.find(t => t.role === "planner" && t.status === "completed");
+                const rawCR = plannerTask?.output?.clarificationRequest;
+                if (rawCR && typeof rawCR === "object" && rawCR.required === true && Array.isArray(rawCR.groups) && rawCR.groups.length > 0) {
+                  clarificationRequest = rawCR;
+                  artifact.clarificationRequest = rawCR;
+                  sendAgi("agi.debug", { message: `Loaded clarificationRequest from session: ${sf}` });
+                  break;
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+
+      // AI said clarification is needed (in summary) but structured data wasn't captured
+      if (!clarificationRequest && !alreadyClarified && artifact.clarificationRequired) {
+        const fallback = buildFallbackClarificationRequest(task, artifact);
+        if (fallback && fallback.groups?.length > 0) {
+          clarificationRequest = fallback;
+          artifact.clarificationRequest = fallback;
+          sendAgi("agi.debug", { message: "Built fallback clarificationRequest (clarificationRequired=true)" });
+        }
+      }
+      if (!clarificationRequest && !alreadyClarified && artifact.summary && /too vague|clarification|underspecified|미지정|확인 필요|not enough|unclear|ambiguous/i.test(artifact.summary)) {
+        const fallback = buildFallbackClarificationRequest(task, artifact);
+        if (fallback && fallback.groups?.length > 0) {
+          clarificationRequest = fallback;
+          artifact.clarificationRequest = fallback;
+          sendAgi("agi.debug", { message: "Built fallback clarificationRequest (AI summary indicates vagueness)" });
+        }
+      }
+
+      sendAgi("agi.debug", {
+        message: "applyAnalyzeArtifact — clarification decision",
+        clarificationRequest_set: !!clarificationRequest,
+        clarificationRequired: artifact.clarificationRequired,
+        hasClarificationRequestObject: !!artifact.clarificationRequest?.required,
+      });
+      traceJson("Functions", "applyAnalyzeArtifact()", artifact);
+    }
 
     // Build step prompt with full inter-step memory
     function buildStepPrompt(step) {
@@ -951,25 +2166,54 @@ ${contextLines.join("\n")}`;
       sections.push(`# AGI Pipeline — ${step.title}`);
       sections.push(`## Original Task (NEVER FORGET THIS)\n**"${task}"**\nEverything you do must serve this task. If you find yourself writing design documents instead of application code, STOP and refocus on the task.`);
 
+      const analysisArtifact = step.type !== "analyze"
+        ? (ctx.analyzeArtifact || (ctx.analysis ? normalizeAnalyzeArtifact(task, ctx.analysis) : null))
+        : null;
+      const debateArtifact = step.type !== "analyze" && step.type !== "debate"
+        ? ctx.debateArtifact
+        : null;
+      const designArtifact = step.type !== "analyze" && step.type !== "debate" && step.type !== "design"
+        ? ctx.designArtifact
+        : null;
+
       // [FIX #2, #4] Inter-step memory: ALL prior results with FULL content — no truncation
       if (ctx.stepResults.length > 0) {
         sections.push(`## Prior Step Results (${ctx.stepResults.length} completed)`);
         for (const r of ctx.stepResults) {
           const icon = r.status === "completed" ? "PASS" : r.status === "failed" ? "FAIL" : "SKIP";
-          // Full summary — no truncation
-          sections.push(`### [${icon}] ${r.type.toUpperCase()}\n${r.summary || ""}`);
-          if (r.changes && r.changes.length) sections.push(`Files changed:\n${r.changes.map(c => `- ${c}`).join("\n")}`);
-          if (r.errors && r.errors.length) sections.push(`Errors:\n${r.errors.map(e => `- ${e}`).join("\n")}`);
-          // [FIX #6] Include tool results with full output for context
+          if (r.type === "analyze" && analysisArtifact && step.type !== "analyze") {
+            sections.push(`### [${icon}] ANALYZE
+AnalyzeArtifact generated. The normalized artifact below is the authoritative ANALYZE output.`);
+            continue;
+          }
+          if (r.type === "debate" && debateArtifact && step.type !== "debate") {
+            sections.push(`### [${icon}] DEBATE
+DebateArtifact generated. The normalized artifact below is the authoritative DEBATE output.`);
+            continue;
+          }
+          if (r.type === "design" && designArtifact && step.type !== "design") {
+            sections.push(`### [${icon}] DESIGN
+DesignArtifact generated. The normalized artifact below is the authoritative DESIGN output.`);
+            continue;
+          }
+          sections.push(`### [${icon}] ${r.type.toUpperCase()}
+${r.summary || ""}`);
+          if (r.changes && r.changes.length) sections.push(`Files changed:
+${r.changes.map(c => `- ${c}`).join("\n")}`);
+          if (r.errors && r.errors.length) sections.push(`Errors:
+${r.errors.map(e => `- ${e}`).join("\n")}`);
           if (r.toolResults && r.toolResults.length > 0) {
             const toolSummary = r.toolResults.map(t => {
               let s = `- [${t.ok ? "OK" : "FAIL"}] ${t.name}`;
               if (t.output?.path) s += `: ${t.output.path}`;
-              if (t.fullStdout) s += `\n  stdout: ${t.fullStdout}`;
-              if (t.fullStderr) s += `\n  stderr: ${t.fullStderr}`;
+              if (t.fullStdout) s += `
+  stdout: ${t.fullStdout}`;
+              if (t.fullStderr) s += `
+  stderr: ${t.fullStderr}`;
               return s;
             }).join("\n");
-            sections.push(`Tool Results:\n${toolSummary}`);
+            sections.push(`Tool Results:
+${toolSummary}`);
           }
         }
       }
@@ -981,69 +2225,22 @@ ${contextLines.join("\n")}`;
       const unresolved = ctx.errorLog.filter(e => !e.resolved);
       if (unresolved.length) sections.push(`## Unresolved Errors\n${unresolved.map(e => `- [${e.category}] ${e.error}`).join("\n")}`);
 
-      // Inject structured analysis for downstream steps (design, build, verify)
-      if (ctx.analysis && step.type !== "analyze") {
-        const a = ctx.analysis;
-        const parts = [`## Structured Analysis (from ANALYZE step)`];
-
-        if (a.intent) {
-          parts.push(`**Intent**: ${a.intent.type} (${a.intent.confidence} confidence)\n${a.intent.rationale}`);
-        }
-        if (a.codebaseState) {
-          parts.push(`**Codebase State**: ${a.codebaseState}`);
-        }
-        if (a.techStack) {
-          const ts = a.techStack;
-          parts.push(`**Tech Stack**:\n- Language: ${ts.language}\n- Runtime: ${ts.runtime}\n- Framework: ${ts.framework}\n- Frontend: ${ts.frontend || "N/A"}\n- Realtime: ${ts.realtime || "N/A"}\n- Database: ${ts.database || "N/A"}\n- Package Manager: ${ts.packageManager}\n- Test Framework: ${ts.testFramework || "N/A"}\n- Justification: ${ts.justification}`);
-        }
-        if (a.features && a.features.length) {
-          parts.push(`**Features** (${a.features.length}):\n${a.features.map(f => `- [${f.priority}] ${f.id}: ${f.name} — ${f.description}`).join("\n")}`);
-        }
-        if (a.scope) {
-          parts.push(`**Scope**:\n- IN: ${(a.scope.in || []).join(", ")}\n- OUT: ${(a.scope.out || []).join(", ")}\n- Assumptions: ${(a.scope.assumptions || []).join(", ")}`);
-        }
-        if (a.risks && a.risks.length) {
-          parts.push(`**Risks**:\n${a.risks.map(r => `- [${r.severity}] ${r.risk} → Mitigation: ${r.mitigation}`).join("\n")}`);
-        }
-        if (a.acceptanceCriteria && a.acceptanceCriteria.length) {
-          parts.push(`**Acceptance Criteria**:\n${a.acceptanceCriteria.map(ac => `- ${ac.id}: ${ac.criterion} → \`${ac.command}\` → Expected: ${ac.expectedResult}`).join("\n")}`);
-        }
-        if (a.directives) {
-          if (a.directives.mustDo?.length) parts.push(`**MUST DO**:\n${a.directives.mustDo.map(d => `- ${d}`).join("\n")}`);
-          if (a.directives.mustNotDo?.length) parts.push(`**MUST NOT DO**:\n${a.directives.mustNotDo.map(d => `- ${d}`).join("\n")}`);
-        }
-        if (a.edgeCases && a.edgeCases.length) {
-          parts.push(`**Edge Cases**:\n${a.edgeCases.map(ec => `- ${ec.id} [${ec.severity}] (${ec.feature}): ${ec.scenario} → ${ec.expectedBehavior}`).join("\n")}`);
-        }
-        if (a.slopGuardrails) {
-          const sg = a.slopGuardrails;
-          const warnings = [];
-          if (sg.scopeInflationRisk !== "low") warnings.push(`Scope inflation: ${sg.scopeInflationRisk}`);
-          if (sg.prematureAbstractionRisk !== "low") warnings.push(`Premature abstraction: ${sg.prematureAbstractionRisk}`);
-          if (sg.overValidationRisk !== "low") warnings.push(`Over-validation: ${sg.overValidationRisk}`);
-          if (sg.docBloatRisk !== "low") warnings.push(`Doc bloat: ${sg.docBloatRisk}`);
-          if (warnings.length) parts.push(`**AI-Slop Guardrails** (WATCH OUT):\n${warnings.map(w => `- ⚠ ${w}`).join("\n")}${sg.specificWarnings?.length ? "\n" + sg.specificWarnings.map(w => `- ${w}`).join("\n") : ""}`);
-        }
-        if (a.gapAnalysis) {
-          const ga = a.gapAnalysis;
-          if (ga.implicitRequirements?.length) parts.push(`**Implicit Requirements** (discovered by gap analysis):\n${ga.implicitRequirements.map(r => `- ${r}`).join("\n")}`);
-          if (ga.featureDependencies?.length) parts.push(`**Feature Dependencies**:\n${ga.featureDependencies.map(d => `- ${d}`).join("\n")}`);
-        }
-        if (a.decisionDrivers && a.decisionDrivers.length) {
-          parts.push(`**Decision Drivers** (FOLLOW THESE):\n${a.decisionDrivers.map(dd => `- ${dd.id}: ${dd.principle} — ${dd.rationale} (tradeoff: ${dd.tradeoff})`).join("\n")}`);
-        }
-        if (a.complexity) {
-          parts.push(`**Complexity**: ${a.complexity.level} — ~${a.complexity.estimatedFiles} files, ~${a.complexity.estimatedLines} lines\n- Critical path: ${a.complexity.criticalPath}`);
-        }
-        if (a.triage) {
-          parts.push(`**Triage**: ${a.triage.level} — ${a.triage.rationale}`);
-        }
-
-        sections.push(parts.join("\n\n"));
+      // After DEBATE completes, ANALYZE artifact is updated with DEBATE conclusions.
+      // For DESIGN/BUILD steps, only show ANALYZE if DEBATE hasn't happened yet.
+      // If DEBATE exists, ANALYZE is already incorporated into it — no need to show both.
+      if (analysisArtifact && !debateArtifact) {
+        sections.push(renderAnalyzeArtifact(analysisArtifact));
+      }
+      if (debateArtifact) {
+        sections.push(renderDebateArtifact(debateArtifact));
+      }
+      if (designArtifact) {
+        sections.push(renderDesignArtifact(designArtifact));
       }
 
       // Step-type instructions
       sections.push(`## Your Task: ${step.title}`);
+      if (step.description) sections.push(step.description);
       sections.push(getStepInstructions(step.type));
 
       // Codebase context (Aider-style repo understanding)
@@ -1099,7 +2296,9 @@ Only use: read, glob, grep, bash (for inspection only), repo_map, lsp_diagnostic
 If you write any file in this step, it will corrupt the pipeline. Analysis/design output goes in your TEXT response only.`);
       }
 
-      return sections.join("\n\n");
+      const promptText = sections.join("\n\n");
+      traceText("Prompts", `${step.type}:${step.title}`, promptText, "markdown");
+      return promptText;
     }
 
     function getStepInstructions(type) {
@@ -1276,6 +2475,31 @@ Before outputting, do a final self-check:
 List any gaps found and how you resolved them in the "gapAnalysis" JSON field.
 Also compare your pre-commitment predictions (Step 0.5) against your actual findings.
 
+### Step 11.5: USER CLARIFICATION OPTIONS (CRITICAL — DO NOT SKIP)
+You MUST decide whether to ask the user for clarification before proceeding.
+
+**Set \`clarificationRequest.required\` to TRUE when ANY of these apply:**
+- The task is vague or under-specified (e.g., "게임 개발해줘", "build me an app", "make a website")
+- You had to make major assumptions about genre, style, features, or architecture
+- Multiple reasonable interpretations exist and the user hasn't indicated which one
+- The project scope is broad enough that different users would expect very different outcomes
+- You filled in more than 2 significant product decisions yourself (game type, visual style, core mechanic, etc.)
+
+**Set \`clarificationRequest.required\` to FALSE only when:**
+- The user gave a specific, detailed request (e.g., "Build a Snake game with HTML5 Canvas, dark theme, 640x640 grid")
+- There is essentially one reasonable interpretation of the task
+- Your assumptions are all minor and unlikely to disappoint the user
+
+When in doubt, SET IT TO TRUE. It is far better to ask one quick question than to build the wrong thing.
+
+Rules for the clarification UI:
+- Match the user's language (Korean task → Korean options)
+- Ask for concrete product-shaping choices, not open-ended essays
+- Prefer button-friendly options
+- Give MANY useful options: at least 5 groups, each with 3-5 options, when clarification is required
+- Put the recommended default first or mark it as recommended
+- If clarification is NOT needed, set \`clarificationRequest.required\` to false and \`groups\` to []
+
 ### Step 12: DECISION DRIVERS (MODERATE+)
 Identify the top 3 decision drivers that should guide the BUILD step.
 These are the principles that, if violated, would make the project fail.
@@ -1318,9 +2542,7 @@ This JSON will be parsed by the pipeline. Follow this schema EXACTLY:
 {
   "triage": {
     "level": "trivial | simple | moderate | complex",
-    "rationale": "Why this complexity level",
-    "skipDesignStep": false,
-    "skipDebateStep": false
+    "rationale": "Why this complexity level"
   },
   "intent": {
     "type": "greenfield-build | feature-add | bug-fix | refactoring | migration | architecture | research",
@@ -1405,6 +2627,29 @@ This JSON will be parsed by the pipeline. Follow this schema EXACTLY:
     "missingCoverage": ["Any features without acceptance criteria or risk mitigation"],
     "predictionCheck": ["Prediction: X → Reality: Y (matched/surprised)"]
   },
+  "clarificationRequest": {
+    "required": false,
+    "reason": "Why the user should clarify before debate/build continue",
+    "message": "Short message asking the user to choose a direction",
+    "summary": "Short note about how this will shape the next stages",
+    "groups": [
+      {
+        "id": "platform",
+        "label": "Platform",
+        "selectionMode": "single | multi",
+        "recommendedOptionId": "browser-2d",
+        "options": [
+          {
+            "id": "browser-2d",
+            "label": "Browser 2D",
+            "detail": "Why this is a good default",
+            "promptFragment": "Use a browser-based 2D game approach.",
+            "recommended": true
+          }
+        ]
+      }
+    ]
+  },
   "decisionDrivers": [
     {
       "id": "DD1",
@@ -1441,6 +2686,7 @@ IMPORTANT:
 - risks must have at least 2 entries
 - slopGuardrails is MANDATORY for all tasks
 - gapAnalysis is MANDATORY — even if empty, show you checked
+- clarificationRequest is MANDATORY — use \`required: false\` with empty groups when no clarification is needed
 - selfReview is MANDATORY — run the checklist, fix issues before outputting
 - decisionDrivers must have at least 2 entries for moderate+ tasks
 - For trivial/simple triage: edgeCases, premortem, risks, decisionDrivers arrays may be empty
@@ -1468,6 +2714,8 @@ For each option:
 After comparing, recommend the BEST approach with specific justification.
 If the analysis already chose a tech stack, evaluate whether that choice is optimal or suggest alternatives.
 
+**Your final recommendation must be internally consistent.** If you recommend "no ES modules", do not also recommend an option titled "ES Modules Multi-File". Pick ONE approach and commit to it. The DESIGN and BUILD steps will follow your recommendation literally.
+
 **DO NOT use write tools. Analysis only.**`,
 
         design: `## RULES FOR THIS STEP
@@ -1475,11 +2723,17 @@ If the analysis already chose a tech stack, evaluate whether that choice is opti
 - If you use any write tool in this step, the pipeline will fail.
 
 ## WHAT TO DO
-The ANALYZE step has already classified the intent, selected the tech stack, extracted requirements, and identified risks.
-Your job is to turn that analysis into a CONCRETE, BUILD-READY implementation plan.
+Your job is to turn the DEBATE artifact into a CONCRETE, BUILD-READY implementation plan.
 
-**Read the analysis from Prior Step Results above.** Look for the JSON block — it contains:
-- intent, techStack, features, scope, risks, acceptanceCriteria, directives
+The DEBATE artifact is your ONLY upstream authority. It contains the final decisions on:
+- Tech stack and architecture
+- File structure and count
+- Dependencies (or lack thereof)
+- Implementation approach
+
+The design response must be detailed enough to normalize into a DesignArtifact with fileManifest, workstreams, buildWaves, testPlan, and acceptanceChecks.
+
+**Read the DEBATE artifact from Prior Step Results above and follow it exactly.**
 
 ### 1. FILE MANIFEST (MANDATORY)
 List EVERY file to create with its exact purpose. Be exhaustive.
@@ -1512,6 +2766,10 @@ Group files into parallel execution waves:
 - Wave 3 (integration): WebSocket wiring, state sync
 - Wave 4 (polish): error handling, edge cases
 
+### 6.5. TEST PLAN (MANDATORY)
+List the exact tests to create under tests/ and what each one proves.
+Every critical feature path must map to at least one automated test file.
+
 ### 7. RESPECT ANALYSIS DIRECTIVES
 The analysis step provided MUST DO and MUST NOT DO directives.
 INCORPORATE THEM into your design. Do not contradict the analysis.
@@ -1520,6 +2778,33 @@ Be EXTREMELY specific. The BUILD step will follow this plan literally.
 OUTPUT FORMAT: structured text plan. NO files created.`,
 
         build: `## CRITICAL: YOU ARE THE BUILDER. WRITE ACTUAL CODE.
+
+### WORKING DIRECTORY
+Your working directory is: \`${childCwd}\`
+**NEVER use /home/user, /home/user/repo, or any other path.** All file operations and bash commands run in the working directory above. Use relative paths for write tool, and if you need absolute paths in bash, use the path above.
+
+### DELEGATION RULES
+Only delegate to roles that can WRITE FILES: executor, frontend-engineer, devops-engineer, backend-engineer, test-engineer, db-engineer.
+Do NOT delegate to browser-operator, api-designer, security-auditor, cicd-engineer in BUILD — they cannot write files and will just waste time. Browser verification belongs to the VERIFY step.
+
+### FILE FORMAT RULES
+- **JSON files (package.json, tsconfig.json, etc.) must be VALID JSON.** No comments (// or /* */), no trailing commas. JSON does not support comments.
+- Write COMPLETE file content — no "..." ellipsis, no placeholders, no TODOs.
+- Each file must work immediately after being written.
+
+### FILE OWNERSHIP (CRITICAL)
+Each file must be written by exactly ONE delegate. Do NOT have multiple delegates write the same file.
+- Assign each file in the design plan to a specific delegate.
+- If a delegate needs to know what another file contains, use the read tool — do NOT rewrite it.
+- package.json should be written by ONE delegate only (usually devops-engineer).
+- The main application code (game.js, app.js, etc.) should be written by ONE delegate (usually frontend-engineer or executor).
+
+### TEST-CODE CONSISTENCY (CRITICAL)
+Tests and application code MUST be consistent:
+- If index.html has \`<canvas id="gameCanvas">\`, tests must use \`canvas#gameCanvas\` — NOT a different id.
+- If index.html is the entry point, Playwright config must serve it correctly.
+- After writing ALL files, ONE delegate should verify consistency: read the test file AND the application file, check that selectors/IDs/imports match.
+- The delegate writing tests should READ the application code first, then write tests that match the actual DOM structure.
 
 ### WHAT "BUILD" MEANS
 - Write REAL, RUNNABLE APPLICATION CODE.
@@ -1542,13 +2827,16 @@ app.listen(3000, () => console.log('Server running on port 3000'));
 \`\`\`
 
 ### PROCESS
-1. Read the design plan from the prior step results above.
+1. Treat the DesignArtifact above as the authoritative build plan.
 2. Create package.json FIRST with all dependencies and a working "start" script.
-3. Run \`bash: npm install\` to install dependencies.
-4. Write EVERY file listed in the design plan with COMPLETE, WORKING code.
-5. Each file must be FULL — no placeholders, no TODOs, no "...".
-6. After writing all files, run \`bash: npm start\` or equivalent to verify it works.
-7. DO NOT STOP until every planned file is written and the app starts.
+3. Run \`bash: cd ${childCwd} && npm install\` to install dependencies.
+4. Write EVERY application file listed in the DesignArtifact with COMPLETE, WORKING code.
+5. **The main entry point (index.html for web apps) is the MOST IMPORTANT file. Create it FIRST after package.json.**
+6. Write EVERY tests/ file listed in the DesignArtifact and implement real assertions, not placeholders.
+7. Each file must be FULL — no placeholders, no TODOs, no "...".
+8. DO NOT run test, build, lint, or startup verification commands in BUILD. Those belong to the VERIFY phase.
+9. DO NOT STOP until every planned file is written and dependency installation is complete.
+10. Before finishing, run \`bash: ls -la ${childCwd}\` to confirm all planned files exist.
 
 ### EFFICIENCY RULES
 - Read each file AT MOST ONCE. Do not re-read files you already know the contents of.
@@ -1556,6 +2844,10 @@ app.listen(3000, () => console.log('Server running on port 3000'));
 - If npm install fails, check package.json for typos and fix immediately.`,
 
         verify: `## VERIFY THAT THE APPLICATION WORKS
+
+### WORKING DIRECTORY
+Your working directory is: \`${childCwd}\`
+**NEVER use /home/user, /Users/username, or any other path.** Use the path above for all bash commands.
 
 ### STEP 1: BASIC VERIFICATION
 1. Run \`bash: ls -la\` to see all files
@@ -1601,15 +2893,29 @@ Check the Structured Analysis for **AI-Slop Guardrails** (if present).
 - Are there boilerplate JSDoc/comments on every trivial function? (doc bloat)
 If slop detected → report as [SLOP] with specific examples.
 
+### STEP 7: FINAL VERDICT
+After all checks, run this command to report your verdict:
+- If ALL checks pass: \`bash: echo "VERIFY_VERDICT:PASS"\`
+- If ANY critical check fails: \`bash: echo "VERIFY_VERDICT:FAIL" && exit 1\`
+
+**A missing core deliverable (e.g., no index.html for a web game) is ALWAYS a critical failure, even if npm test passes.**
+
 Report ALL errors with file paths and line numbers. Do NOT fix anything — just report.`,
 
-        fix: `Fix ALL reported errors from the verify step.
+        fix: `Fix ONLY the actionable failures reported by the verify step.
+
+### WORKING DIRECTORY
+Your working directory is: \`${childCwd}\`
+**NEVER use /home/user, /Users/username, or any other path.** Use the path above for all bash commands.
+
+### RULES
 1. Read each broken file
 2. Identify the root cause (not just the symptom)
-3. Write the COMPLETE corrected file (not just a patch)
-4. Run the verification again to confirm the fix works
-5. If npm install failed: fix package.json and re-run
-6. If the app won't start: check entry point, imports, syntax`,
+3. Write the COMPLETE corrected file using the write tool (not just a patch)
+4. If files are missing, CREATE them using the write tool — this is the most common fix
+5. If npm install failed, run: \`cd ${childCwd} && npm install\`
+6. Do NOT run verification commands in FIX. VERIFY is a separate phase.
+7. **YOU MUST USE TOOLS.** Read files with the read tool, write fixes with the write tool. If you don't call any tools, the FIX step will fail.`,
 
         improve: `Optimize what exists WITHOUT rewriting from scratch:
 - Security: input validation, XSS prevention, SQL injection prevention
@@ -1664,14 +2970,21 @@ If the Structured Analysis section has **Features**, verify each:
 
     // Execute one step via the engine CLI
     // blockedTools: optional array of tool names to block at engine level
-    async function executeStep(prompt, mode, maxTurns, blockedTools) {
+    async function executeStep(prompt, mode, maxTurns, blockedTools, pipelineStep) {
       return new Promise((resolve, reject) => {
         if (aborted) { reject(new Error("Aborted")); return; }
         const agentCli = path.join(PROJECT_DIR, "dist", "cli.js");
 
+        const singleStepPrompt = pipelineStep && !/^\[STEP\s+\d+:/.test(prompt)
+          ? `[STEP ${stepIdx + 1}: ${String(pipelineStep.type || "custom").toUpperCase()}] ${pipelineStep.title}
+
+${prompt}`
+          : prompt;
+        traceText("Functions", `executeStep() input [${pipelineStep?.type || "custom"}]`, singleStepPrompt, "markdown");
+
         // [FIX #7] Pass prompt via temp file instead of CLI arg to avoid OS arg length limits
         const tmpPromptFile = path.join(os.tmpdir(), `agi-prompt-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
-        fs.writeFileSync(tmpPromptFile, prompt, "utf-8");
+        fs.writeFileSync(tmpPromptFile, singleStepPrompt, "utf-8");
 
         // CLI expects: node cli.js run "<task>" — pass placeholder, real prompt via env file
         // Ensure node's directory is in PATH so bash tool can find node/npm/npx
@@ -1704,6 +3017,7 @@ If the Structured Analysis section has **Features**, verify each:
         let llmText = ""; // [FIX] Capture LLM text output from provider.stream
         let taskCompletedTexts = []; // [FIX] Capture worker/task completion summaries
         let reviewSummary = ""; // [FIX] Capture review summary
+        let preludeArtifact = null; // Capture AGI prelude artifact (analyze/debate/design)
         let changes = [], errors = [], toolResults = [];
 
         child.stdout.on("data", (chunk) => {
@@ -1745,6 +3059,10 @@ If the Structured Analysis section has **Features**, verify each:
               // [FIX] Capture review summaries
               if ((parsed.eventType === "review.fail" || parsed.eventType === "review.pass") && parsed.payload?.review?.summary) {
                 reviewSummary = parsed.payload.review.summary;
+              }
+              // Capture AGI prelude artifacts emitted by engine
+              if (parsed.eventType === "agi.prelude.artifact" && parsed.payload?.artifact) {
+                preludeArtifact = { type: parsed.payload.type, artifact: parsed.payload.artifact };
               }
               // [FIX #6] Track tool results — capture full output, no truncation
               if (parsed.eventType === "tool.completed") {
@@ -1822,7 +3140,24 @@ If the Structured Analysis section has **Features**, verify each:
           }
 
           // [FIX #1, #10] Return full stdout as summary AND rawOutput — no truncation
-          resolve({ summary, changes, toolResults, tokensUsed: 0, errors, rawOutput: stdout });
+          const resultPayload = { summary, changes, toolResults, tokensUsed: 0, errors, rawOutput: stdout, stderr, exitCode: code };
+          // Attach prelude artifact if captured from engine events
+          if (preludeArtifact) {
+            if (preludeArtifact.type === "analyze") resultPayload.analysisArtifact = preludeArtifact.artifact;
+            if (preludeArtifact.type === "debate") resultPayload.debateArtifact = preludeArtifact.artifact;
+            if (preludeArtifact.type === "design") resultPayload.designArtifact = preludeArtifact.artifact;
+          }
+          traceJson("Functions", `executeStep() result [${pipelineStep?.type || "custom"}]`, {
+            summary,
+            changes,
+            toolResults,
+            tokensUsed: 0,
+            errors,
+            exitCode: code
+          });
+          traceText("Raw Outputs", `executeStep() rawOutput [${pipelineStep?.type || "custom"}]`, stdout || "(empty)", "text");
+          if (stderr.trim()) traceText("Raw Outputs", `executeStep() stderr [${pipelineStep?.type || "custom"}]`, stderr, "text");
+          resolve(resultPayload);
         });
 
         child.on("error", (err) => {
@@ -1838,7 +3173,67 @@ If the Structured Analysis section has **Features**, verify each:
       });
     }
 
+    async function executeAnalyzeStep(prompt) {
+      if (aborted) throw new Error("Aborted");
+      traceText("Functions", "executeAnalyzeStep() input", prompt, "markdown");
+      const { ProviderRegistry } = require(path.join(PROJECT_DIR, "dist", "providers", "registry.js"));
+      const { loadConfig } = require(path.join(PROJECT_DIR, "dist", "core", "config.js"));
+      const config = await loadConfig(childCwd);
+      const registry = new ProviderRegistry();
+      let streamedText = "";
+
+      const analyzeProvider = config.routing?.categories?.planning || "anthropic";
+      sendAgi("agi.debug", { message: `ANALYZE provider resolved: ${analyzeProvider}`, config: { routing: config.routing, anthropicEnabled: config.providers?.anthropic?.enabled, openaiEnabled: config.providers?.openai?.enabled } });
+      const response = await registry.invokeWithFailover(config, analyzeProvider, {
+        role: "planner",
+        category: "planning",
+        systemPrompt: "You are the ANALYZE stage for the AGI pipeline. Return exactly one valid JSON object matching the requested schema. Do not wrap the JSON in markdown fences. Do not add commentary before or after the JSON.",
+        prompt,
+        responseFormat: "json"
+      }, {
+        onTextDelta: async (chunk, providerId) => {
+          if (typeof chunk === "string" && chunk.length > 0) {
+            streamedText += chunk;
+            sendAgi("llm", { text: chunk, provider: providerId });
+          }
+        }
+      });
+
+      const rawText = (response.text || streamedText || "").trim();
+      const parsed = extractStructuredJson(rawText);
+      const tokensUsed = Number(response.usage?.inputTokens || 0) + Number(response.usage?.outputTokens || 0);
+      if (!parsed) {
+        const failureResult = {
+          summary: rawText || "Structured ANALYZE response was empty.",
+          rawOutput: rawText,
+          changes: [],
+          toolResults: [],
+          tokensUsed,
+          errors: ["Failed to parse structured ANALYZE JSON."],
+          analysisArtifact: null
+        };
+        traceJson("Functions", "executeAnalyzeStep() result", failureResult);
+        traceText("Raw Outputs", "executeAnalyzeStep() rawOutput", rawText || "(empty)", "json");
+        return failureResult;
+      }
+
+      const artifact = normalizeAnalyzeArtifact(task, parsed);
+      const successResult = {
+        summary: summarizeAnalyzeArtifact(artifact),
+        rawOutput: JSON.stringify(artifact, null, 2),
+        changes: [],
+        toolResults: [],
+        tokensUsed,
+        errors: [],
+        analysisArtifact: artifact
+      };
+      traceJson("Functions", "executeAnalyzeStep() result", successResult);
+      traceText("Raw Outputs", "executeAnalyzeStep() rawOutput", successResult.rawOutput, "json");
+      return successResult;
+    }
+
     // Run the pipeline
+    const pipelineStartedAt = Date.now();
     let stepIdx = 0;
     let replanCount = 0;
     const MAX_REPLANS = 10;
@@ -1851,12 +3246,26 @@ If the Structured Analysis section has **Features**, verify each:
 
       const step = steps[stepIdx];
 
+      // Skip FIX step if VERIFY already passed — nothing to fix
+      if (step.type === "fix") {
+        const lastVerifyResult = ctx.stepResults.filter(r => r.type === "verify").pop();
+        if (lastVerifyResult && lastVerifyResult.status === "completed") {
+          sendAgi("agi.debug", { message: "Skipping FIX — VERIFY already passed" });
+          sendAgi("agi.step.complete", { stepId: step.id, stepType: step.type, stepTitle: step.title, status: "completed", summary: "Skipped — VERIFY passed.", totalSteps: steps.length, completedSteps: ctx.stepResults.filter(r => r.status === "completed").length + 1, filesCreated: ctx.allFiles.length });
+          ctx.stepResults.push({ stepId: step.id, type: step.type, status: "completed", summary: "Skipped — VERIFY passed.", changes: [], toolResults: [], durationMs: 0, tokensUsed: 0, errors: [] });
+          stepIdx++;
+          continue;
+        }
+      }
+
       // [FIX] Write step-specific AGENTS.md before each step
       writeStepAgentsMd(step.type);
 
       // [FIX] Block write tools at engine level for analysis steps
-      const isAnalysisStep = ["analyze", "design", "debate"].includes(step.type);
-      const blockedTools = isAnalysisStep ? ["write", "apply_patch", "multi_patch"] : [];
+      // analyze step needs write for .agi/analysis.json (AGI_ALLOWED_WRITE_PATHS handles this)
+      const isAnalysisStep = ["design", "debate"].includes(step.type);
+      const blockedTools = isAnalysisStep ? ["write", "apply_patch", "multi_patch"]
+        : step.type === "analyze" ? ["apply_patch", "multi_patch"] : [];
 
       const prompt = buildStepPrompt(step);
 
@@ -1875,12 +3284,14 @@ If the Structured Analysis section has **Features**, verify each:
             ? `${prompt}\n\n[RETRY ${attempts}/${maxRetries+1}] Previous attempt failed. Try a different approach.\n\n## Previous Attempt Errors\n${(result?.errors || []).map(e => `- ${e}`).join("\n") || "unknown"}\n\n## Previous Attempt Output\n${result?.summary || "(no output)"}`
             : prompt;
 
-          const output = await executeStep(retryPrompt, step.mode, step.maxTurns, blockedTools);
+          // All steps use executeStep (CLI subprocess) — it runs the full engine
+          // with proper auth, planner/researcher roles, and produces rich artifacts.
+          const output = await executeStep(retryPrompt, step.mode, step.maxTurns, blockedTools, step);
 
           result = {
             stepId: step.id,
             type: step.type,
-            status: (output.errors.length === 0 || step.type === "verify") ? "completed" : "failed",
+            status: output.errors.length === 0 ? "completed" : "failed",
             // [FIX #1, #10] Full summary and rawOutput — no truncation
             summary: output.summary,
             rawOutput: output.rawOutput,
@@ -1889,23 +3300,28 @@ If the Structured Analysis section has **Features**, verify each:
             durationMs: Date.now() - start,
             tokensUsed: output.tokensUsed,
             errors: output.errors,
+            analysisArtifact: output.analysisArtifact || null,
+            debateArtifact: output.debateArtifact || null,
+            designArtifact: output.designArtifact || null,
           };
-
-          if (step.type === "verify") result.status = "completed";
           if (result.status === "completed") break;
         } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          const errStack = e instanceof Error ? e.stack : undefined;
+          sendAgi("agi.step.error", { stepId: step.id, stepType: step.type, error: errMsg, stack: errStack });
           result = {
             stepId: step.id, type: step.type, status: "failed",
-            summary: `Step failed: ${e.message}`, changes: [], toolResults: [],
-            durationMs: Date.now() - start, tokensUsed: 0, errors: [e.message],
+            summary: `Step failed: ${errMsg}`, changes: [], toolResults: [],
+            durationMs: Date.now() - start, tokensUsed: 0, errors: [errMsg],
           };
-          ctx.errorLog.push({ stepId: step.id, error: e.message, category: "runtime", resolved: false });
+          ctx.errorLog.push({ stepId: step.id, error: errMsg, category: "runtime", resolved: false });
         }
       }
 
       // Record result
       if (result) {
         ctx.stepResults.push(result);
+        traceJson("Step Results", `${step.type}:${step.title}`, result);
         ctx.totalTokens += result.tokensUsed;
         for (const c of (result.changes || [])) {
           const clean = c.replace(/^(created|modified|updated|deleted)\s+/i, "").trim();
@@ -1919,166 +3335,141 @@ If the Structured Analysis section has **Features**, verify each:
           }
         }
 
-        // Parse structured analysis JSON from analyze step
         if (step.type === "analyze" && result.status === "completed") {
-          const summary = result.summary || "";
-          // Extract JSON block from ```json ... ``` fences
-          const jsonMatch = summary.match(/```json\s*\n([\s\S]*?)\n\s*```/);
-          if (jsonMatch) {
-            try {
-              const analysis = JSON.parse(jsonMatch[1]);
-              ctx.analysis = analysis;
-
-              // Extract decisions from structured data
-              if (analysis.techStack?.justification) {
-                ctx.decisions.push(`Tech stack: ${analysis.techStack.justification}`);
-              }
-              if (analysis.intent?.rationale) {
-                ctx.decisions.push(`Intent: ${analysis.intent.type} — ${analysis.intent.rationale}`);
-              }
-              if (analysis.directives?.mustDo) {
-                for (const d of analysis.directives.mustDo) {
-                  ctx.decisions.push(`MUST DO: ${d}`);
-                }
-              }
-              if (analysis.directives?.mustNotDo) {
-                for (const d of analysis.directives.mustNotDo) {
-                  ctx.decisions.push(`MUST NOT DO: ${d}`);
-                }
-              }
-
-              // Override pipeline complexity from analysis
-              if (analysis.complexity?.level) {
-                ctx.analysisComplexity = analysis.complexity.level;
-              }
-
-              // Triage-based step skipping: remove design/debate for trivial/simple tasks
-              if (analysis.triage) {
-                const triage = analysis.triage;
-                if (triage.skipDesignStep || triage.level === "trivial") {
-                  const designIdx = steps.findIndex(s => s.type === "design" && stepIdx < steps.indexOf(s));
-                  if (designIdx > -1) {
-                    sendAgi("agi.step.skip", { stepType: "design", reason: `Triage: ${triage.level} — ${triage.rationale}` });
-                    steps.splice(designIdx, 1);
+          // Try multiple sources for the analysis artifact:
+          // 1. Already parsed from output
+          // 2. .agi/analysis.json file (written by the engine per prompt instructions)
+          // 3. Extract JSON from rawOutput/summary text
+          const parsedFromOutput = result.analysisArtifact
+            || (() => {
+              // Source 1: Read from CLI session file — the engine stores the planner output here
+              const sessionsDir = path.join(childCwd, ".agent", "sessions");
+              try {
+                if (fs.existsSync(sessionsDir)) {
+                  const sessionFiles = fs.readdirSync(sessionsDir).filter(f => f.endsWith(".json") && !f.endsWith(".jsonl"));
+                  // Get the most recent session file
+                  const sorted = sessionFiles.sort((a, b) => {
+                    try { return fs.statSync(path.join(sessionsDir, b)).mtimeMs - fs.statSync(path.join(sessionsDir, a)).mtimeMs; } catch { return 0; }
+                  });
+                  for (const sf of sorted) {
+                    try {
+                      const sessionData = JSON.parse(fs.readFileSync(path.join(sessionsDir, sf), "utf8"));
+                      const plannerTask = sessionData.tasks?.find(t => t.role === "planner" && t.status === "completed");
+                      if (plannerTask?.output && typeof plannerTask.output === "object" && plannerTask.output.clarificationRequest !== undefined) {
+                        sendAgi("agi.debug", { message: `Loaded analysis from session file: ${sf}` });
+                        return normalizeAnalyzeArtifact(task, plannerTask.output);
+                      }
+                    } catch {}
                   }
                 }
-                if (triage.skipDebateStep || triage.level === "trivial" || triage.level === "simple") {
-                  const debateIdx = steps.findIndex(s => s.type === "debate" && stepIdx < steps.indexOf(s));
-                  if (debateIdx > -1) {
-                    sendAgi("agi.step.skip", { stepType: "debate", reason: `Triage: ${triage.level} — ${triage.rationale}` });
-                    steps.splice(debateIdx, 1);
-                  }
-                }
+              } catch (e) {
+                sendAgi("agi.debug", { message: `Session file read failed: ${e.message}` });
               }
+              // Source 2: .agi/analysis.json file
+              const analysisFilePath = path.join(childCwd, ".agi", "analysis.json");
+              try {
+                if (fs.existsSync(analysisFilePath)) {
+                  const fileContent = fs.readFileSync(analysisFilePath, "utf8");
+                  const fileParsed = JSON.parse(fileContent);
+                  sendAgi("agi.debug", { message: "Loaded analysis from .agi/analysis.json" });
+                  return normalizeAnalyzeArtifact(task, fileParsed);
+                }
+              } catch (e) {
+                sendAgi("agi.debug", { message: `.agi/analysis.json read failed: ${e.message}` });
+              }
+              // Source 3: extract JSON from text output
+              const parsed = extractStructuredJson(result.rawOutput || result.summary || "");
+              return parsed ? normalizeAnalyzeArtifact(task, parsed) : null;
+            })();
 
-              sendAgi("agi.analysis.parsed", {
-                triage: analysis.triage,
-                intent: analysis.intent,
-                codebaseState: analysis.codebaseState,
-                techStack: analysis.techStack ? {
-                  language: analysis.techStack.language,
-                  framework: analysis.techStack.framework,
-                  frontend: analysis.techStack.frontend,
-                } : null,
-                featureCount: analysis.features?.length || 0,
-                riskCount: analysis.risks?.length || 0,
-                edgeCaseCount: analysis.edgeCases?.length || 0,
-                complexity: analysis.complexity,
-                slopGuardrails: analysis.slopGuardrails,
-                hasGapAnalysis: !!analysis.gapAnalysis,
+          if (!parsedFromOutput) {
+            result.status = "failed";
+            result.summary = "AnalyzeArtifact generation failed.";
+            result.errors = [...new Set([...(result.errors || []), "AnalyzeArtifact generation failed."])];
+            sendAgi("agi.analysis.parseError", { error: "AnalyzeArtifact generation failed." });
+          } else {
+            result.analysisArtifact = parsedFromOutput;
+            result.summary = summarizeAnalyzeArtifact(parsedFromOutput);
+            result.rawOutput = JSON.stringify(parsedFromOutput, null, 2);
+            sendAgi("agi.debug", {
+              message: "ANALYZE artifact parsed",
+              clarificationRequest: parsedFromOutput.clarificationRequest,
+              clarificationRequired_raw: parsedFromOutput.clarificationRequest?.required,
+              intent: parsedFromOutput.intent,
+              codebaseState: parsedFromOutput.codebaseState,
+              featureCount: parsedFromOutput.features?.length || 0,
+            });
+            applyAnalyzeArtifact(parsedFromOutput);
+          }
+        }
+
+        if (step.type === "debate" && result.status === "completed") {
+          const parsedFromOutput = result.debateArtifact
+            || (() => {
+              const parsed = extractStructuredJson(result.rawOutput || result.summary || "");
+              if (parsed) return normalizeDebateArtifact(task, parsed, ctx.analyzeArtifact);
+              return normalizeDebateArtifact(task, { summary: result.summary }, ctx.analyzeArtifact);
+            })();
+
+          if (!parsedFromOutput) {
+            result.status = "failed";
+            result.summary = "DebateArtifact generation failed.";
+            result.errors = [...new Set([...(result.errors || []), "DebateArtifact generation failed."])];
+            sendAgi("agi.debate.parseError", { error: "DebateArtifact generation failed." });
+          } else {
+            result.debateArtifact = parsedFromOutput;
+            result.summary = summarizeDebateArtifact(parsedFromOutput);
+            result.rawOutput = JSON.stringify(parsedFromOutput, null, 2);
+            applyDebateArtifact(parsedFromOutput);
+            if (parsedFromOutput.readiness === "blocked" && !aborted) {
+              sendAgi("agi.pipeline.awaiting_input", {
+                stepId: step.id,
+                stepType: step.type,
+                nextStep: "design",
+                reason: "debate_blocked",
+                summary: parsedFromOutput.summary,
+                openQuestions: parsedFromOutput.openQuestions || []
               });
-            } catch (e) {
-              // JSON parse failed — fall back to regex extraction
-              sendAgi("agi.analysis.parseError", { error: e.message });
+              res.write("data: [DONE]\n\n");
+              res.end();
+              return;
             }
           }
+        }
 
-          // Fallback 1: File-based analysis output (OmO pattern — most reliable)
-          if (!ctx.analysis) {
-            try {
-              const analysisFile = path.join(childCwd, ".agi", "analysis.json");
-              if (fs.existsSync(analysisFile)) {
-                const fileContent = fs.readFileSync(analysisFile, "utf8");
-                const analysis = JSON.parse(fileContent);
-                ctx.analysis = analysis;
-                sendAgi("agi.analysis.parsed", {
-                  source: "file",
-                  triage: analysis.triage,
-                  intent: analysis.intent,
-                  codebaseState: analysis.codebaseState,
-                  featureCount: analysis.features?.length || 0,
-                  riskCount: analysis.risks?.length || 0,
-                  edgeCaseCount: analysis.edgeCases?.length || 0,
-                  complexity: analysis.complexity,
-                  slopGuardrails: analysis.slopGuardrails,
-                  hasGapAnalysis: !!analysis.gapAnalysis,
-                });
-                // Extract decisions from file-based analysis
-                if (analysis.techStack?.justification) ctx.decisions.push(`Tech stack: ${analysis.techStack.justification}`);
-                if (analysis.intent?.rationale) ctx.decisions.push(`Intent: ${analysis.intent.type} — ${analysis.intent.rationale}`);
-                if (analysis.directives?.mustDo) for (const d of analysis.directives.mustDo) ctx.decisions.push(`MUST DO: ${d}`);
-                if (analysis.directives?.mustNotDo) for (const d of analysis.directives.mustNotDo) ctx.decisions.push(`MUST NOT DO: ${d}`);
-                if (analysis.complexity?.level) ctx.analysisComplexity = analysis.complexity.level;
-                // Triage-based step skipping
-                if (analysis.triage) {
-                  const triage = analysis.triage;
-                  if (triage.skipDesignStep || triage.level === "trivial") {
-                    const idx = steps.findIndex(s => s.type === "design" && stepIdx < steps.indexOf(s));
-                    if (idx > -1) { sendAgi("agi.step.skip", { stepType: "design", reason: `Triage: ${triage.level}` }); steps.splice(idx, 1); }
-                  }
-                  if (triage.skipDebateStep || triage.level === "trivial" || triage.level === "simple") {
-                    const idx = steps.findIndex(s => s.type === "debate" && stepIdx < steps.indexOf(s));
-                    if (idx > -1) { sendAgi("agi.step.skip", { stepType: "debate", reason: `Triage: ${triage.level}` }); steps.splice(idx, 1); }
-                  }
-                }
-              }
-            } catch (e) {
-              sendAgi("agi.analysis.fileError", { error: e.message });
-            }
-          }
+        if (step.type === "design" && result.status === "completed") {
+          // Use AI output directly — no regex, no hardcoded overrides
+          const sourceForDesign = result.designArtifact
+            || extractStructuredJson(result.rawOutput || result.summary || "")
+            || { summary: result.summary };
+          const parsedFromOutput = normalizeDesignArtifact(task, sourceForDesign, ctx.analyzeArtifact, ctx.debateArtifact);
 
-          // Fallback 2: regex-based decision extraction if no JSON found
-          if (!ctx.analysis) {
-            const decisionPatterns = [
-              /(?:decision|chose|selected|will use|architecture|approach|strategy|recommendation|concluded|determined|opted for|going with|picked|prefer|using)[:.\-—]\s*([^\n]+)/gi,
-              /(?:we (?:will|should|need to|must|decided to|chose to))\s+([^\n]+)/gi,
-              /(?:the (?:best|recommended|chosen|selected|optimal) (?:approach|solution|strategy|architecture|pattern|framework|tool|library) (?:is|was|will be))\s+([^\n]+)/gi,
-            ];
-            for (const pattern of decisionPatterns) {
-              const matches = (summary).matchAll(pattern);
-              for (const m of matches) {
-                const decision = m[0];
-                if (!ctx.decisions.includes(decision)) ctx.decisions.push(decision);
-              }
+          if (!parsedFromOutput) {
+            result.status = "failed";
+            result.summary = "DesignArtifact generation failed.";
+            result.errors = [...new Set([...(result.errors || []), "DesignArtifact generation failed."])];
+            sendAgi("agi.design.parseError", { error: "DesignArtifact generation failed." });
+          } else {
+            result.designArtifact = parsedFromOutput;
+            result.summary = summarizeDesignArtifact(parsedFromOutput);
+            result.rawOutput = JSON.stringify(parsedFromOutput, null, 2);
+            applyDesignArtifact(parsedFromOutput);
+            if (parsedFromOutput.readiness === "blocked" && !aborted) {
+              sendAgi("agi.pipeline.awaiting_input", {
+                stepId: step.id,
+                stepType: step.type,
+                nextStep: "build",
+                reason: "design_blocked",
+                summary: parsedFromOutput.summary,
+                testPlan: parsedFromOutput.testPlan || []
+              });
+              res.write("data: [DONE]\n\n");
+              res.end();
+              return;
             }
-          }
-
-          // Schema validation (MetaGPT pattern): check required fields, log warnings
-          if (ctx.analysis) {
-            const a = ctx.analysis;
-            const missing = [];
-            if (!a.intent?.type) missing.push("intent.type");
-            if (!a.features?.length) missing.push("features (empty)");
-            if (!a.acceptanceCriteria?.length) missing.push("acceptanceCriteria (empty)");
-            if (!a.directives) missing.push("directives");
-            if (!a.complexity?.level) missing.push("complexity.level");
-            // Moderate+ tasks require more fields
-            const triageLevel = a.triage?.level || "moderate";
-            if (triageLevel !== "trivial" && triageLevel !== "simple") {
-              if (!a.scope) missing.push("scope");
-              if (!a.risks?.length) missing.push("risks (empty)");
-              if (!a.slopGuardrails) missing.push("slopGuardrails");
-              if (!a.gapAnalysis) missing.push("gapAnalysis");
-              if (!a.selfReview) missing.push("selfReview");
-              if (!a.decisionDrivers?.length) missing.push("decisionDrivers (empty)");
-              if (!a.edgeCases?.length) missing.push("edgeCases (empty)");
-            }
-            if (missing.length > 0) {
-              sendAgi("agi.analysis.validation", { status: "incomplete", missing, triageLevel });
-              // Store validation result for potential retry
-              ctx.analysisValidation = { missing, triageLevel };
-            } else {
-              sendAgi("agi.analysis.validation", { status: "complete", triageLevel });
+            if (expandBuildStepsFromDesignArtifact(parsedFromOutput, stepIdx)) {
+              replanCount += 1;
+              sendAgi("agi.replan", { plan: { steps }, replanCount, totalSteps: steps.length });
             }
           }
         }
@@ -2108,479 +3499,105 @@ If the Structured Analysis section has **Features**, verify each:
           completedSteps: ctx.stepResults.filter(r => r.status === "completed").length,
           filesCreated: ctx.allFiles.length,
         });
+        traceJson("Step State", `${step.type}:${step.title}`, {
+          status: result.status,
+          errors: result.errors,
+          allFiles: ctx.allFiles,
+          decisions: ctx.decisions,
+          totalTokens: ctx.totalTokens
+        });
 
-        // REPLAN: verify failed → insert fix + re-verify
-        if (result.type === "verify" && result.errors.length > 0) {
-          const nextStep = steps[stepIdx + 1];
-          if (!nextStep || nextStep.type !== "fix") {
-            const fixId = mkId("fix");
-            const reVerifyId = mkId("reverify");
-            steps.splice(stepIdx + 1, 0,
-              { id: fixId, type: "fix", title: "Fix Errors (auto)", mode: "run", maxTurns: 100, maxRetries: 3, useStrategyBranching: true },
-              { id: reVerifyId, type: "verify", title: "Re-verify (auto)", mode: "run", maxTurns: 50, maxRetries: 0, useStrategyBranching: false }
-            );
-            replanCount++;
-            sendAgi("agi.replan", { reason: "Verify found errors — inserting fix + re-verify", replanCount, totalSteps: steps.length, insertedSteps: ["fix", "re-verify"] });
+        if (step.type === "analyze" && result.status !== "completed") {
+          sendAgi("agi.pipeline.fail", { error: result.errors?.[0] || "AnalyzeArtifact generation failed." });
+          break;
+        }
+        if (step.type === "debate" && result.status !== "completed") {
+          sendAgi("agi.pipeline.fail", { error: result.errors?.[0] || "DebateArtifact generation failed." });
+          break;
+        }
+        if (step.type === "design" && result.status !== "completed") {
+          sendAgi("agi.pipeline.fail", { error: result.errors?.[0] || "DesignArtifact generation failed." });
+          break;
+        }
+        if (step.type === "build" && result.status !== "completed") {
+          sendAgi("agi.pipeline.fail", { error: result.errors?.[0] || "Build step failed." });
+          break;
+        }
+        // VERIFY failure → continue to FIX step (don't stop the pipeline)
+        // FIX failure → continue to next step (VERIFY will run again if pipeline has more iterations)
+        // Only ask user for help if we've exhausted all FIX retries
+        if (step.type === "verify" && result.status !== "completed") {
+          // Check if there's a FIX step ahead — if so, let pipeline continue
+          const hasFixStep = steps.slice(stepIdx + 1).some(s => s.type === "fix");
+          if (hasFixStep) {
+            sendAgi("agi.debug", { message: "VERIFY failed — continuing to FIX step" });
+            // Don't break — let pipeline advance to FIX
+          } else {
+            sendAgi("agi.pipeline.fail", { error: result.errors?.[0] || "Verification failed and no FIX step available." });
+            break;
           }
         }
-
-        // REPLAN: fix failed too many times → rebuild with different strategy
-        if (result.type === "fix" && result.status === "failed") {
-          const fixCount = ctx.stepResults.filter(r => r.type === "fix").length;
-          if (fixCount >= 2) {
-            const rebuildId = mkId("rebuild");
-            steps.splice(stepIdx + 1, 0,
-              { id: rebuildId, type: "build", title: "Rebuild (alt strategy)", mode: "team", maxTurns: 200, maxRetries: 1, useStrategyBranching: true }
-            );
-            replanCount++;
-            sendAgi("agi.replan", { reason: `Fix failed ${fixCount} times — trying alternative build`, replanCount, totalSteps: steps.length, insertedSteps: ["rebuild"] });
+        if (step.type === "fix" && result.status !== "completed") {
+          // FIX failed — ask user for help
+          sendAgi("agi.pipeline.awaiting_input", {
+            stepId: step.id,
+            stepType: step.type,
+            nextStep: "verify",
+            reason: "needs_user_help",
+            summary: `FIX step could not resolve all issues. Please help or provide guidance.`,
+            errors: result.errors || [],
+          });
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        // FIX completed → go back to VERIFY ONLY if the previous VERIFY failed
+        if (step.type === "fix" && result.status === "completed") {
+          const lastVerifyResult = ctx.stepResults.filter(r => r.type === "verify").pop();
+          if (lastVerifyResult && lastVerifyResult.status !== "completed") {
+            verifyFixCycles++;
+            if (verifyFixCycles < MAX_VERIFY_FIX_CYCLES) {
+              const verifyIdx = steps.findIndex((s, i) => i < stepIdx && s.type === "verify");
+              if (verifyIdx >= 0) {
+                sendAgi("agi.debug", { message: `FIX completed, VERIFY was failing — re-running VERIFY (cycle ${verifyFixCycles}/${MAX_VERIFY_FIX_CYCLES})` });
+                stepIdx = verifyIdx - 1;
+              }
+            } else {
+              sendAgi("agi.debug", { message: `Max VERIFY-FIX cycles (${MAX_VERIFY_FIX_CYCLES}) reached` });
+            }
           }
+          // If last VERIFY passed, don't loop back — we're done
         }
 
-        // REPLAN: review failed → fix + re-review
-        if (result.type === "review" && result.status === "failed") {
-          const reviewFails = ctx.stepResults.filter(r => r.type === "review" && r.status === "failed").length;
-          if (reviewFails < 3) {
-            const fixId = mkId("reviewfix");
-            const reReviewId = mkId("rereview");
-            steps.splice(stepIdx + 1, 0,
-              { id: fixId, type: "fix", title: "Fix Review Issues", mode: "run", maxTurns: 80, maxRetries: 2, useStrategyBranching: false },
-              { id: reReviewId, type: "review", title: "Re-review", mode: "run", maxTurns: 40, maxRetries: 0, useStrategyBranching: false }
-            );
-            replanCount++;
-            sendAgi("agi.replan", { reason: "Review failed — inserting fix + re-review", replanCount, totalSteps: steps.length });
-          }
+
+        if (step.type === "analyze" && result.status === "completed" && clarificationRequest && !aborted) {
+          const nextPlanningStep = steps.slice(stepIdx + 1).find((candidate) => candidate.type !== "analyze")?.type || "design";
+          traceJson("Clarification", "clarificationRequest", clarificationRequest);
+          sendAgi("agi.clarification.requested", {
+            stepId: step.id,
+            stepType: step.type,
+            stepTitle: step.title,
+            originalTask: task,
+            reason: clarificationRequest.reason,
+            message: clarificationRequest.message,
+            summary: clarificationRequest.summary,
+            groups: clarificationRequest.groups,
+            targetStep: nextPlanningStep
+          });
+          sendAgi("agi.pipeline.awaiting_input", {
+            stepId: step.id,
+            stepType: step.type,
+            nextStep: nextPlanningStep,
+            reason: "clarification_required"
+          });
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
         }
+
       }
 
       stepIdx++;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // AUTORESEARCH: Self-optimizing loop after pipeline completes
-    // Based on Karpathy's autoresearch methodology:
-    //   1. Generate binary evals from the task
-    //   2. Score current output
-    //   3. If score < 100%, identify weakest step
-    //   4. Mutate that step's prompt
-    //   5. Re-run from that step
-    //   6. Score again — keep mutation if improved, discard if not
-    //   7. Repeat until score ceiling or max iterations
-    // ═══════════════════════════════════════════════════════════════
-
-    const AUTORESEARCH_MAX_ITERATIONS = 5;
-    const AUTORESEARCH_DIR = path.join(childCwd, ".agent", "autoresearch");
-
-    // Generate binary evals from the task automatically
-    function generateBinaryEvals(taskText, projectDir) {
-      const evals = [];
-      const files = (() => { try { return fs.readdirSync(projectDir).filter(f => !f.startsWith(".") && f !== "node_modules"); } catch { return []; } })();
-      const allFilesDeep = (() => {
-        try {
-          const result = [];
-          const walk = (dir, prefix) => {
-            for (const f of fs.readdirSync(dir)) {
-              if (f.startsWith(".") || f === "node_modules") continue;
-              const full = path.join(dir, f);
-              const rel = prefix ? `${prefix}/${f}` : f;
-              const stat = fs.statSync(full);
-              if (stat.isFile()) result.push(rel);
-              else if (stat.isDirectory() && result.length < 200) walk(full, rel);
-            }
-          };
-          walk(projectDir, "");
-          return result;
-        } catch { return []; }
-      })();
-
-      // EVAL 1: Were actual files created (not just AGENTS.md)?
-      const realFiles = files.filter(f => f !== "AGENTS.md" && f !== "package-lock.json");
-      evals.push({
-        name: "files_created",
-        question: "Were real project files created?",
-        pass: realFiles.length >= 2,
-        details: `${realFiles.length} real files: ${realFiles.join(", ")}`
-      });
-
-      // EVAL 2: Does package.json exist with start script?
-      const pkgPath = path.join(projectDir, "package.json");
-      let hasStartScript = false;
-      if (fs.existsSync(pkgPath)) {
-        try {
-          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-          hasStartScript = !!(pkg.scripts && pkg.scripts.start);
-        } catch {}
-      }
-      evals.push({
-        name: "package_json_start",
-        question: "Does package.json exist with a start script?",
-        pass: hasStartScript,
-        details: hasStartScript ? "start script found" : "missing package.json or start script"
-      });
-
-      // EVAL 3: Are files actual code (not architecture documents)?
-      let hasRealCode = false;
-      const codePatterns = [
-        /require\s*\(/,  /import\s+/,  /function\s+\w+/,  /class\s+\w+/,
-        /app\.(get|post|listen|use)\s*\(/,  /createElement|render|useState/,
-        /canvas|getContext|requestAnimationFrame/,  /socket|WebSocket|io\(/,
-        /<html|<body|<canvas|<div/,  /addEventListener/,  /console\.log/,
-        /express\(|http\.create|net\.create/,  /def\s+\w+|class\s+\w+:/,
-      ];
-      for (const f of allFilesDeep.slice(0, 30)) {
-        try {
-          const content = fs.readFileSync(path.join(projectDir, f), "utf8");
-          if (codePatterns.some(p => p.test(content))) { hasRealCode = true; break; }
-        } catch {}
-      }
-      evals.push({
-        name: "real_code_exists",
-        question: "Do files contain actual executable code (not just design docs)?",
-        pass: hasRealCode,
-        details: hasRealCode ? "real code found" : "only config/design files detected"
-      });
-
-      // EVAL 4: No architecture-document-only output
-      let hasArchDocOnly = false;
-      const archDocPatterns = [
-        /module\.exports\s*=\s*\{[\s\S]*?architecture/,
-        /module\.exports\s*=\s*\{[\s\S]*?project\s*:/,
-        /exports?\s*=\s*\{[\s\S]*?implementationPlan/,
-      ];
-      const srcFiles = allFilesDeep.filter(f => /\.(js|ts|mjs)$/.test(f) && !f.includes("test") && !f.includes("node_modules"));
-      if (srcFiles.length > 0 && srcFiles.length <= 3) {
-        for (const f of srcFiles) {
-          try {
-            const content = fs.readFileSync(path.join(projectDir, f), "utf8");
-            if (archDocPatterns.some(p => p.test(content)) && !codePatterns.slice(4).some(p => p.test(content))) {
-              hasArchDocOnly = true;
-            }
-          } catch {}
-        }
-      }
-      evals.push({
-        name: "not_arch_doc_only",
-        question: "Is the output NOT just architecture documents?",
-        pass: !hasArchDocOnly,
-        details: hasArchDocOnly ? "FAIL: output is just architecture export documents" : "output contains real application code"
-      });
-
-      // EVAL 5: Task-specific keyword matching
-      const taskLower = taskText.toLowerCase();
-      const taskKeywords = [];
-      if (/게임|game|shooting|슈팅/.test(taskLower)) taskKeywords.push("canvas", "game", "loop", "render", "player");
-      if (/서버|server|api|백엔드/.test(taskLower)) taskKeywords.push("listen", "port", "express", "http", "app.get");
-      if (/웹|web|사이트|site|html/.test(taskLower)) taskKeywords.push("html", "body", "script", "css");
-      if (/채팅|chat|메신저|messenger/.test(taskLower)) taskKeywords.push("socket", "message", "send", "receive");
-      if (/온라인|online|멀티|multi/.test(taskLower)) taskKeywords.push("socket", "WebSocket", "io", "connection");
-
-      if (taskKeywords.length > 0) {
-        let matchedKeywords = 0;
-        const allContent = allFilesDeep.slice(0, 30).map(f => {
-          try { return fs.readFileSync(path.join(projectDir, f), "utf8"); } catch { return ""; }
-        }).join("\n");
-        for (const kw of taskKeywords) {
-          if (allContent.toLowerCase().includes(kw.toLowerCase())) matchedKeywords++;
-        }
-        const keywordPassRate = taskKeywords.length > 0 ? matchedKeywords / taskKeywords.length : 1;
-        evals.push({
-          name: "task_keywords_match",
-          question: `Does the code contain task-relevant keywords? (${taskKeywords.join(", ")})`,
-          pass: keywordPassRate >= 0.4,
-          details: `${matchedKeywords}/${taskKeywords.length} keywords found (${(keywordPassRate * 100).toFixed(0)}%)`
-        });
-      }
-
-      // EVAL 6: Multiple source files (not just 1-2 files for a full app)
-      if (isFullApp) {
-        const srcCount = allFilesDeep.filter(f => /\.(js|ts|html|css|py|jsx|tsx)$/.test(f)).length;
-        evals.push({
-          name: "sufficient_files",
-          question: "Are there enough source files for a full application?",
-          pass: srcCount >= 4,
-          details: `${srcCount} source files found`
-        });
-      }
-
-      return evals;
-    }
-
-    // Score output against evals
-    function scoreEvals(evals) {
-      const passed = evals.filter(e => e.pass).length;
-      return {
-        score: passed,
-        maxScore: evals.length,
-        passRate: evals.length > 0 ? (passed / evals.length * 100) : 100,
-        failures: evals.filter(e => !e.pass),
-        passes: evals.filter(e => e.pass),
-        evals,
-      };
-    }
-
-    // Identify which step caused the failures
-    function identifyWeakStep(failures, stepResults) {
-      // Priority: build > design > analyze
-      const failNames = failures.map(f => f.name);
-
-      if (failNames.includes("real_code_exists") || failNames.includes("not_arch_doc_only") || failNames.includes("task_keywords_match") || failNames.includes("sufficient_files")) {
-        return "build"; // BUILD didn't produce real code
-      }
-      if (failNames.includes("package_json_start")) {
-        return "build"; // BUILD didn't set up package.json properly
-      }
-      if (failNames.includes("files_created")) {
-        // Check if design was clear enough
-        const designResult = stepResults.find(r => r.type === "design");
-        if (!designResult || !designResult.summary || designResult.summary.length < 200) {
-          return "design"; // Design was too vague
-        }
-        return "build"; // Design was ok but build didn't execute
-      }
-      return "build"; // Default: BUILD is most likely the problem
-    }
-
-    // Generate a mutated prompt for the weak step
-    function generateMutation(weakStep, failures, iteration, previousMutations) {
-      const failDescriptions = failures.map(f => `- [FAIL] ${f.question}: ${f.details}`).join("\n");
-
-      const mutationStrategies = [
-        // Iteration 1: Be more explicit about what to build
-        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration})
-The previous attempt FAILED these checks:
-${failDescriptions}
-
-YOU MUST FIX THESE FAILURES. Specifically:
-- If "real code" failed: You are writing DESIGN DOCUMENTS instead of APPLICATION CODE. Write ACTUAL server/client code.
-- If "task keywords" failed: Your code doesn't implement what was asked. Re-read the original task.
-- If "architecture doc only" failed: STOP exporting JSON objects. Write executable code with app.listen(), game loops, etc.
-- If "files created" failed: You didn't write enough files. Use the write tool for EVERY file.
-- If "package.json start" failed: Create package.json with a "start" script that runs the app.`,
-
-        // Iteration 2: Give concrete file list
-        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration}) — EXPLICIT FILE LIST
-Previous ${iteration - 1} attempts all failed. The output was NOT what was requested.
-
-FAILED CHECKS:
-${failDescriptions}
-
-YOU MUST CREATE THESE EXACT FILES (adapt to the task):
-1. package.json — with dependencies and "start" script
-2. server.js or index.js — main entry point that RUNS something
-3. public/index.html — if web app, the HTML page
-4. public/game.js or public/app.js — client-side code
-5. Any additional files needed for the task
-
-EACH FILE MUST CONTAIN 50+ LINES OF REAL CODE. Not exports, not JSON, not comments.`,
-
-        // Iteration 3: Completely different approach
-        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration}) — ALTERNATIVE STRATEGY
-${iteration - 1} previous attempts have all failed. CHANGE YOUR APPROACH COMPLETELY.
-
-FAILED CHECKS:
-${failDescriptions}
-
-INSTEAD OF YOUR PREVIOUS APPROACH, TRY THIS:
-1. Do NOT read any existing files first. Start fresh.
-2. Write package.json with express, socket.io, and a "start" script.
-3. Write a working Express server (server.js) with static file serving.
-4. Write the client HTML with embedded JavaScript.
-5. Run npm install && npm start to verify.
-6. If the task involves networking: add WebSocket/Socket.IO.
-7. If the task involves graphics: add HTML5 Canvas with game loop.`,
-
-        // Iteration 4: Minimal viable product
-        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration}) — MINIMUM VIABLE PRODUCT
-ALL previous attempts failed. Build the SIMPLEST possible version that passes all checks.
-
-FAILED CHECKS:
-${failDescriptions}
-
-BUILD THE ABSOLUTE MINIMUM:
-1. ONE server file that serves ONE HTML page
-2. The HTML page must do SOMETHING related to the task
-3. package.json with "start": "node server.js"
-4. npm install must work
-5. npm start must work
-DO NOT over-architect. Build the smallest thing that works.`,
-
-        // Iteration 5: Last resort — ultra explicit
-        `\n\n## AUTORESEARCH MUTATION (attempt ${iteration}) — FINAL ATTEMPT
-This is the LAST attempt. Every previous attempt has failed.
-
-FAILED CHECKS:
-${failDescriptions}
-
-WRITE EXACTLY THIS STRUCTURE:
-- package.json: {"name":"app","scripts":{"start":"node server.js"},"dependencies":{"express":"^4"}}
-- server.js: Express server serving public/ folder on port 3000
-- public/index.html: Full HTML page with the application
-- public/style.css: Styling
-- public/app.js: Client-side JavaScript
-
-DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
-      ];
-
-      const strategyIdx = Math.min(iteration - 1, mutationStrategies.length - 1);
-      return mutationStrategies[strategyIdx];
-    }
-
-    // Save autoresearch results
-    function saveAutoresearchLog(data) {
-      try {
-        if (!fs.existsSync(AUTORESEARCH_DIR)) fs.mkdirSync(AUTORESEARCH_DIR, { recursive: true });
-        const logPath = path.join(AUTORESEARCH_DIR, "results.json");
-        fs.writeFileSync(logPath, JSON.stringify(data, null, 2), "utf8");
-      } catch {}
-    }
-
-    // ── AUTORESEARCH LOOP ──
-    if (!aborted && complexity !== "simple") {
-      const pipelineStartTime = Date.now();
-      const autoresearchLog = {
-        task,
-        startedAt: new Date().toISOString(),
-        baseline: null,
-        experiments: [],
-        bestScore: 0,
-        status: "running",
-      };
-
-      // Score baseline (current pipeline output)
-      const baselineEvals = generateBinaryEvals(task, childCwd);
-      const baselineScore = scoreEvals(baselineEvals);
-
-      autoresearchLog.baseline = {
-        score: baselineScore.score,
-        maxScore: baselineScore.maxScore,
-        passRate: baselineScore.passRate,
-        evals: baselineScore.evals.map(e => ({ name: e.name, pass: e.pass, details: e.details })),
-      };
-      autoresearchLog.bestScore = baselineScore.passRate;
-
-      sendAgi("agi.autoresearch.start", {
-        baselineScore: baselineScore.score,
-        maxScore: baselineScore.maxScore,
-        passRate: baselineScore.passRate,
-        evals: baselineScore.evals.map(e => ({ name: e.name, pass: e.pass, question: e.question, details: e.details })),
-      });
-
-      // Only enter autoresearch loop if score < 100%
-      if (baselineScore.passRate < 100 && !aborted) {
-        let currentScore = baselineScore;
-        let iteration = 0;
-        const promptMutations = {};
-        let consecutivePerfect = 0;
-
-        while (currentScore.passRate < 100 && iteration < AUTORESEARCH_MAX_ITERATIONS && !aborted) {
-          iteration++;
-
-          // Identify which step to fix
-          const weakStep = identifyWeakStep(currentScore.failures, ctx.stepResults);
-          const mutation = generateMutation(weakStep, currentScore.failures, iteration, promptMutations);
-          promptMutations[weakStep] = mutation;
-
-          sendAgi("agi.autoresearch.iteration", {
-            iteration,
-            maxIterations: AUTORESEARCH_MAX_ITERATIONS,
-            weakStep,
-            failureCount: currentScore.failures.length,
-            failures: currentScore.failures.map(f => f.name),
-            mutation: `Attempt ${iteration}: targeting ${weakStep} step`,
-          });
-
-          // Re-run the weak step with mutated prompt
-          const mutatedStep = steps.find(s => s.type === weakStep) || steps.find(s => s.type === "build");
-          if (!mutatedStep) break;
-
-          const mutatedPrompt = buildStepPrompt(mutatedStep) + mutation;
-
-          try {
-            const output = await executeStep(mutatedPrompt, mutatedStep.mode, mutatedStep.maxTurns);
-
-            // Wait for writes to be applied, then re-score
-            const newEvals = generateBinaryEvals(task, childCwd);
-            const newScore = scoreEvals(newEvals);
-
-            const experiment = {
-              iteration,
-              weakStep,
-              score: newScore.score,
-              maxScore: newScore.maxScore,
-              passRate: newScore.passRate,
-              previousPassRate: currentScore.passRate,
-              status: newScore.passRate > currentScore.passRate ? "keep" : "discard",
-              evals: newScore.evals.map(e => ({ name: e.name, pass: e.pass, details: e.details })),
-            };
-            autoresearchLog.experiments.push(experiment);
-
-            sendAgi("agi.autoresearch.result", {
-              iteration,
-              score: newScore.score,
-              maxScore: newScore.maxScore,
-              passRate: newScore.passRate,
-              previousPassRate: currentScore.passRate,
-              status: experiment.status,
-              improved: newScore.passRate > currentScore.passRate,
-              evals: newScore.evals.map(e => ({ name: e.name, pass: e.pass, details: e.details })),
-            });
-
-            if (newScore.passRate > currentScore.passRate) {
-              // KEEP — score improved
-              currentScore = newScore;
-              autoresearchLog.bestScore = newScore.passRate;
-
-              // Update step result in ctx
-              const existingIdx = ctx.stepResults.findIndex(r => r.type === weakStep);
-              if (existingIdx >= 0) {
-                ctx.stepResults[existingIdx] = {
-                  ...ctx.stepResults[existingIdx],
-                  summary: output.summary,
-                  changes: [...(ctx.stepResults[existingIdx].changes || []), ...(output.changes || [])],
-                  status: "completed",
-                  errors: output.errors,
-                };
-              }
-
-              if (newScore.passRate >= 100) {
-                consecutivePerfect++;
-                if (consecutivePerfect >= 1) break; // Perfect score — done
-              }
-            } else {
-              // DISCARD — no improvement, will try different mutation next iteration
-            }
-          } catch (e) {
-            autoresearchLog.experiments.push({
-              iteration, weakStep, score: 0, maxScore: currentScore.maxScore,
-              passRate: currentScore.passRate, status: "error", error: e.message,
-            });
-            sendAgi("agi.autoresearch.error", { iteration, error: e.message });
-          }
-        }
-
-        autoresearchLog.status = currentScore.passRate >= 100 ? "optimized" : "max_iterations";
-        autoresearchLog.finalScore = currentScore.passRate;
-        autoresearchLog.totalIterations = iteration;
-
-        sendAgi("agi.autoresearch.complete", {
-          baselinePassRate: baselineScore.passRate,
-          finalPassRate: currentScore.passRate,
-          improvement: currentScore.passRate - baselineScore.passRate,
-          iterations: iteration,
-          status: autoresearchLog.status,
-        });
-      } else {
-        autoresearchLog.status = "perfect_baseline";
-        sendAgi("agi.autoresearch.complete", {
-          baselinePassRate: baselineScore.passRate,
-          finalPassRate: baselineScore.passRate,
-          improvement: 0,
-          iterations: 0,
-          status: "perfect_baseline",
-        });
-      }
-
-      saveAutoresearchLog(autoresearchLog);
     }
 
     // ═══ Pipeline complete ═══
@@ -2597,8 +3614,20 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
       totalTokens: ctx.totalTokens,
       projectDir: projName,
       replanCount,
-      durationMs: Date.now() - Date.now(), // will be calculated client-side
+      durationMs: Date.now() - pipelineStartedAt,
       summary: `${completed}/${ctx.stepResults.length} steps completed, ${ctx.allFiles.length} files created`,
+    });
+    traceJson("Pipeline", "complete", {
+      success,
+      totalSteps: steps.length,
+      completedSteps: completed,
+      failedSteps: failed,
+      filesCreated: ctx.allFiles.length,
+      totalTokens: ctx.totalTokens,
+      projectDir: projName,
+      replanCount,
+      durationMs: Date.now() - pipelineStartedAt,
+      tracePath
     });
 
     res.write("data: [DONE]\n\n");
@@ -3100,6 +4129,41 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
     return;
   }
 
+  // ── Resolve dropped folder name via Spotlight (system-wide search) ──
+  if (url.pathname === "/api/resolve-drop-folder" && req.method === "POST") {
+    const body = await readBody(req);
+    const { name } = safeJsonParse(body) || {};
+    if (!name) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "name required" })); return; }
+    try {
+      const { execSync } = require("child_process");
+      // Use mdfind (Spotlight) to find directories with this exact name
+      const cmd = `mdfind "kMDItemFSName == '${name.replace(/'/g, "\\'")}' && kMDItemContentType == 'public.folder'" 2>/dev/null | head -20`;
+      const output = execSync(cmd, { encoding: "utf8", timeout: 5000 }).trim();
+      const candidates = output.split("\n").filter(p => p && p.startsWith("/") && !p.includes("/node_modules/") && !p.includes("/.git/"));
+      if (candidates.length === 0) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `Folder "${name}" not found on this system` }));
+        return;
+      }
+      // Sort: prefer paths outside CWD, prefer shorter paths, prefer recently modified
+      const scored = candidates.map(p => {
+        let score = 0;
+        if (p.startsWith(CWD)) score -= 10; // deprioritize CWD-internal matches
+        if (p.includes("node_modules") || p.includes(".git") || p.includes("Library")) score -= 5;
+        // Prefer common project locations
+        if (p.includes("/Developer/") || p.includes("/Projects/") || p.includes("/Desktop/") || p.includes("/Documents/")) score += 3;
+        try { const stat = fs.statSync(p); score += Math.min(5, Math.floor((Date.now() - stat.mtimeMs) / -86400000) + 5); } catch {}
+        return { path: p, score };
+      }).sort((a, b) => b.score - a.score);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ candidates: scored.map(s => s.path) }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
   // ── Browse folders API ──
   if (url.pathname === "/api/browse-folders" && req.method === "GET") {
     const rel = url.searchParams?.get("path") || "";
@@ -3115,6 +4179,27 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
         .sort((a, b) => a.name.localeCompare(b.name));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ current: path.relative(CWD, target) || ".", dirs }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // ── Browse filesystem folders (absolute paths, for AGI target selection) ──
+  if (url.pathname === "/api/browse-folders-abs" && req.method === "GET") {
+    const reqPath = url.searchParams?.get("path") || "/";
+    const target = path.resolve(reqPath);
+    try {
+      const entries = fs.readdirSync(target, { withFileTypes: true });
+      const ignoreDirs = ["node_modules","dist",".git","build","coverage",".next",".agent","$Recycle.Bin","System Volume Information"];
+      const dirs = entries
+        .filter(e => e.isDirectory() && !e.name.startsWith('.') && !ignoreDirs.includes(e.name))
+        .map(e => ({ name: e.name, path: path.join(target, e.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const parent = target === "/" ? null : path.dirname(target);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ current: target, parent, dirs }));
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e.message }));
@@ -3155,9 +4240,14 @@ DO NOT DEVIATE FROM THIS STRUCTURE. Write the files NOW.`,
       if (!auth) throw new Error("OpenAI not authenticated — connect via Settings > Providers");
       const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${auth.token}` };
       if (auth.accountId) headers["ChatGPT-Account-Id"] = auth.accountId;
-      const r = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model: "gpt-4o", max_tokens: maxTokens, messages }) });
+      // Use Codex OAuth endpoint (free with ChatGPT subscription) — never api.openai.com
+      const codexUrl = "https://chatgpt.com/backend-api/codex/responses";
+      const r = await fetch(codexUrl, { method: "POST", headers, body: JSON.stringify({ model: "gpt-4o", instructions: messages.find(m => m.role === "system")?.content || "", input: messages.filter(m => m.role !== "system").map(m => ({ role: m.role, content: m.content })), max_output_tokens: maxTokens }) });
       const d = await r.json(); if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
-      return d.choices?.[0]?.message?.content || "";
+      // Codex responses format: output array with message items
+      const output = d.output || [];
+      const text = output.filter(o => o.type === "message").map(o => (o.content || []).filter(c => c.type === "output_text").map(c => c.text).join("")).join("");
+      return text || d.choices?.[0]?.message?.content || "";
     }
   }
   // Helper: read code files from a directory

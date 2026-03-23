@@ -1,4 +1,5 @@
 import { attachLiveSessionOutput } from "./live-session.js";
+import { runDefaultPipeline } from "./default-pipeline.js";
 import { runEngine } from "../orchestration/engine.js";
 import { readFileSync } from "node:fs";
 
@@ -11,21 +12,27 @@ export async function runRunCommand(task: string): Promise<void> {
   let follower: Awaited<ReturnType<typeof attachLiveSessionOutput>> | undefined;
 
   try {
-    const result = await runEngine({
-      cwd,
-      task,
-      mode: "run",
-      async onSessionReady(sessionId) {
-        try {
-          follower = await attachLiveSessionOutput(cwd, sessionId);
-        } catch {
-          // Live output is non-critical — engine continues without it
+    const isSingleStepTask = /^\[STEP\s+\d+:/.test(task);
+    const result = isSingleStepTask
+      ? await runEngine({ cwd, task, mode: "run" })
+      : await runDefaultPipeline({
+        cwd,
+        task,
+        mode: "run",
+        async onSessionReady(sessionId) {
+          try {
+            follower = await attachLiveSessionOutput(cwd, sessionId);
+          } catch {
+            // Live output is non-critical — engine continues without it
+          }
         }
-      }
-    });
+      });
     await follower?.stop();
     console.log(`Status: ${result.session.status}`);
     console.log(`Review: ${result.review.summary}`);
+    if (result.session.status !== "completed" || result.review.verdict !== "pass") {
+      process.exitCode = 1;
+    }
   } catch (error) {
     await follower?.stop();
     const msg = error instanceof Error ? error.message : String(error);

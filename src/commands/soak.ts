@@ -5,7 +5,7 @@ import type { ProviderId } from "../core/types.js";
 import { runSoakHarness } from "../soak/harness.js";
 
 export async function runSoakCommand(
-  providerList = "openai,anthropic,gemini",
+  providerList = "openai",
   roundsValue = "2",
   prompt?: string
 ): Promise<void> {
@@ -49,9 +49,9 @@ export async function runSoakCommand(
 }
 
 function parseProviders(providerList: string): Array<Exclude<ProviderId, "mock">> {
-  const allowed = new Set<Exclude<ProviderId, "mock">>(["openai", "anthropic", "gemini"]);
-  return providerList
+  const providers = providerList
     .split(",")
     .map((value) => value.trim())
-    .filter((value): value is Exclude<ProviderId, "mock"> => allowed.has(value as Exclude<ProviderId, "mock">));
+    .filter((value): value is Exclude<ProviderId, "mock"> => value === "openai");
+  return providers.length > 0 ? providers : ["openai"];
 }

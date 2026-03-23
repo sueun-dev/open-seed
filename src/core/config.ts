@@ -11,7 +11,7 @@ import { ensureDir, fileExists } from "./utils.js";
  * Philosophy: EVERYTHING is ON by default. Users disable what they don't need.
  * Matches oh-my-openagent's "install and forget" approach.
  *
- * - All 3 providers enabled (auto-detect credentials)
+ * - OpenAI only, via OAuth
  * - All 40 roles active
  * - All tools enabled (browser, LSP, hashEdit, repoMap, AST grep, web search)
  * - Safety in auto mode (OMO auto-approves everything except git push)
@@ -42,7 +42,7 @@ export function createDefaultConfig(): AgentConfig {
         maxRetries: 3
       },
       gemini: {
-        enabled: true,
+        enabled: false,
         apiKeyEnv: "GEMINI_API_KEY",
         authMode: "api_key",
         oauthTokenEnv: "GEMINI_OAUTH_TOKEN",
@@ -53,10 +53,10 @@ export function createDefaultConfig(): AgentConfig {
     },
     routing: {
       categories: {
-        planning: "anthropic",
-        research: "anthropic",
+        planning: "openai",
+        research: "openai",
         execution: "openai",
-        frontend: "anthropic",
+        frontend: "openai",
         review: "openai"
       }
     },
@@ -100,7 +100,7 @@ export function createDefaultConfig(): AgentConfig {
       parallelReadMax: 8
     },
     team: {
-      maxWorkers: 5,
+      maxWorkers: 16,
       preferTmux: true
     },
     sessions: {
@@ -161,7 +161,7 @@ export function createDefaultConfig(): AgentConfig {
       minDurationMs: 30000
     },
     websearchProvider: "exa",
-    backgroundConcurrency: 5,
+    backgroundConcurrency: 12,
     prompts: {},
     rules: [
       // Built-in safety rules — OMO's tool guards
@@ -257,23 +257,19 @@ export async function loadConfig(cwd: string): Promise<AgentConfig> {
     rules: parsed.rules ?? defaultConfig.rules
   };
 
+  // Respect provider selection from config — only enforce defaults when nothing is explicitly configured
+  enforceProviderDefaults(merged);
+
   // Environment variable overrides for model selection (from UI model picker)
   const envProvider = process.env.OPENSEED_PROVIDER;
   const envModel = process.env.OPENSEED_MODEL;
-  if (envProvider && envModel) {
-    const validProviders = ["openai", "anthropic", "gemini"] as const;
-    if (validProviders.includes(envProvider as typeof validProviders[number])) {
-      const p = envProvider as typeof validProviders[number];
-      merged.routing.categories = {
-        planning: p,
-        research: p,
-        execution: p,
-        frontend: p,
-        review: p
-      };
-      if (merged.providers[p]) {
-        merged.providers[p].defaultModel = envModel;
-      }
+  if (envProvider === "anthropic") {
+    merged.providers.anthropic.enabled = true;
+    merged.providers.anthropic.authMode = "oauth";
+    if (envModel) merged.providers.anthropic.defaultModel = envModel;
+  } else if (!envProvider || envProvider === "openai") {
+    if (envModel) {
+      merged.providers.openai.defaultModel = envModel;
     }
   }
 
@@ -286,4 +282,45 @@ export async function writeDefaultConfig(cwd: string): Promise<string> {
   await ensureDir(path.dirname(configPath));
   await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf8");
   return configPath;
+}
+
+function enforceProviderDefaults(config: AgentConfig): void {
+  // If anthropic is explicitly enabled in config, respect it
+  const anthropicEnabled = config.providers.anthropic.enabled;
+  const openaiEnabled = config.providers.openai.enabled;
+
+  // Ensure OAuth mode for both providers
+  if (openaiEnabled) {
+    config.providers.openai.authMode = "oauth";
+    config.providers.openai.oauthTokenEnv = config.providers.openai.oauthTokenEnv || "OPENAI_OAUTH_TOKEN";
+    config.providers.openai.defaultModel = config.providers.openai.defaultModel || "gpt-5.4";
+  }
+  if (anthropicEnabled) {
+    config.providers.anthropic.authMode = "oauth";
+    config.providers.anthropic.oauthTokenEnv = config.providers.anthropic.oauthTokenEnv || "ANTHROPIC_OAUTH_TOKEN";
+    config.providers.anthropic.defaultModel = config.providers.anthropic.defaultModel || "claude-opus-4-6";
+  }
+
+  // If neither is explicitly configured, default to openai
+  if (!anthropicEnabled && !openaiEnabled) {
+    config.providers.openai.enabled = true;
+    config.providers.openai.authMode = "oauth";
+    config.providers.openai.oauthTokenEnv = "OPENAI_OAUTH_TOKEN";
+    config.providers.openai.defaultModel = "gpt-5.4";
+  }
+
+  // Set routing based on which provider is enabled
+  const primary: "openai" | "anthropic" = anthropicEnabled && !openaiEnabled ? "anthropic" : "openai";
+  // Only override routing if it hasn't been explicitly set to something meaningful
+  if (!config.routing.categories || Object.values(config.routing.categories).every(v => v === "openai")) {
+    config.routing.categories = {
+      planning: primary,
+      research: primary,
+      execution: primary,
+      frontend: primary,
+      review: primary
+    };
+  }
+
+  config.providers.gemini.enabled = false;
 }

@@ -109,7 +109,7 @@ program.command("doctor").description("Run local environment checks").action(run
 program
   .command("ask")
   .description("Ask a specific provider for advice (non-interactive)")
-  .argument("<provider>", "Provider: openai, anthropic, gemini")
+  .argument("<provider>", "Provider: openai")
   .argument("<question>", "Question to ask")
   .action(async (provider: string, question: string) => {
     const { loadConfig } = await import("./core/config.js");
@@ -139,7 +139,7 @@ program
 program
   .command("soak")
   .description("Run a parallel provider streaming soak test")
-  .option("--providers <providers>", "Comma-separated provider list", "openai,anthropic,gemini")
+  .option("--providers <providers>", "Comma-separated provider list", "openai")
   .option("--rounds <count>", "Number of rounds per provider", "2")
   .option("--prompt <prompt>", "Override the soak prompt")
   .action(async (options: { providers: string; rounds: string; prompt?: string }) => {

@@ -112,9 +112,14 @@ export function wireEventBusToStream(bus: AgentEventBus, writer: StreamWriter): 
   });
 
   bus.on("cost.update", async (event) => {
+    const costAvailable = event.payload.costAvailable !== false;
+    const totalTokens = event.payload.totalTokens as number;
+    const totalCostUsd = event.payload.totalCostUsd as number;
     writer({
       kind: "cost",
-      text: `$${(event.payload.totalCostUsd as number).toFixed(4)} (${event.payload.totalTokens} tokens)`,
+      text: costAvailable
+        ? `$${totalCostUsd.toFixed(4)} (${totalTokens} tokens)`
+        : `${totalTokens} tokens (OAuth; cost hidden)`,
       data: event.payload,
       at: event.at
     });
@@ -159,9 +164,13 @@ export function wireEventBusToStream(bus: AgentEventBus, writer: StreamWriter): 
   });
 
   bus.on("session.completed", async (event) => {
+    const costs = (event.payload.costs as any) ?? {};
+    const text = costs.hasBillableCost === false
+      ? `Session ${event.payload.status}: OAuth cost hidden`
+      : `Session ${event.payload.status}: cost $${(costs.totalEstimatedCostUsd ?? 0).toFixed(4)}`;
     writer({
       kind: "complete",
-      text: `Session ${event.payload.status}: cost $${((event.payload.costs as any)?.totalEstimatedCostUsd ?? 0).toFixed(4)}`,
+      text,
       data: event.payload,
       at: event.at
     });

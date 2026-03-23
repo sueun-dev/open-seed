@@ -38,9 +38,10 @@ export class LocalWorkerManager {
   }
 
   assertWithinLimit(current: number): void {
-    // Allow generous headroom — enforcer loop creates many tasks across rounds
-    if (current >= this.maxWorkers * 3) {
-      throw new Error(`Worker limit exceeded: ${current} >= ${this.maxWorkers}`);
+    // Allow generous headroom — background delegates and retry paths can overlap briefly.
+    const hardLimit = Math.max(this.maxWorkers * 4, 64);
+    if (current >= hardLimit) {
+      throw new Error(`Worker limit exceeded: ${current} >= ${hardLimit}`);
     }
   }
 

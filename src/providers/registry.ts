@@ -3,7 +3,7 @@ import { AnthropicProviderAdapter } from "./anthropic.js";
 import { GeminiProviderAdapter } from "./gemini.js";
 import { MockProviderAdapter } from "./mock.js";
 import { OpenAIProviderAdapter } from "./openai.js";
-import { selectProviderForRole } from "../routing/policy.js";
+import { getPinnedProvider, selectProviderForRole } from "../routing/policy.js";
 
 export class ProviderRegistry {
   private readonly adapters: Record<ProviderId, ProviderAdapter>;
@@ -26,8 +26,13 @@ export class ProviderRegistry {
     const providerId = selectProviderForRole(config, role);
     const adapter = this.get(providerId);
     const providerConfig = providerId === "mock" ? undefined : config.providers[providerId];
-    if (adapter.isConfigured(providerConfig)) {
+    if (this.isProviderUsable(config, providerId)) {
       return { providerId, adapter, usedMockFallback: false };
+    }
+
+    const pinnedProvider = getPinnedProvider(config);
+    if (pinnedProvider && providerId === pinnedProvider) {
+      throw new Error(`Pinned provider ${providerId} is not configured for role ${role.id}. Configure that provider instead of falling back to another one.`);
     }
 
     // Try other configured providers before giving up
@@ -49,6 +54,11 @@ export class ProviderRegistry {
     request: ProviderRequest,
     options?: ProviderInvokeOptions
   ): Promise<ProviderResponse> {
+    const pinnedProvider = getPinnedProvider(config);
+    if (pinnedProvider && preferredProviderId !== pinnedProvider && preferredProviderId !== "mock") {
+      throw new Error(`Provider ${preferredProviderId} is disabled; only ${pinnedProvider} is allowed.`);
+    }
+
     const order = this.getInvocationOrder(config, preferredProviderId);
     const errors: string[] = [];
 
@@ -73,8 +83,13 @@ export class ProviderRegistry {
   }
 
   private getInvocationOrder(config: AgentConfig, preferredProviderId: ProviderId): ProviderId[] {
+    const pinnedProvider = getPinnedProvider(config);
+    if (pinnedProvider && preferredProviderId === pinnedProvider) {
+      return [preferredProviderId];
+    }
+
     const configuredProviders = (["anthropic", "openai", "gemini"] as const)
-      .filter((providerId) => this.get(providerId).isConfigured(config.providers[providerId]));
+      .filter((providerId) => this.isProviderUsable(config, providerId));
 
     // If no real providers configured and tests explicitly passed mock, allow it
     if (configuredProviders.length === 0 && preferredProviderId === "mock") {
@@ -87,5 +102,16 @@ export class ProviderRegistry {
     ].filter(id => id !== "mock" || configuredProviders.length === 0);
 
     return Array.from(new Set(ordered));
+  }
+
+  private isProviderUsable(config: AgentConfig, providerId: Exclude<ProviderId, "mock"> | "mock"): boolean {
+    if (providerId === "mock") {
+      return true;
+    }
+    const providerConfig = config.providers[providerId];
+    if (!providerConfig?.enabled) {
+      return false;
+    }
+    return this.get(providerId).isConfigured(providerConfig);
   }
 }

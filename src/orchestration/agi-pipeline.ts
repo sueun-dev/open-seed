@@ -14,17 +14,23 @@
  * - Devika: Specialized sub-agents, real-time state emission
  * - Cline: Git-based checkpoints, approval flow, context truncation
  *
- * Key differences from old 6-step pipeline:
+ * Key differences from older pipelines:
  * 1. Inter-step shared memory (SharedContext) — every step sees all prior results
- * 2. Dynamic step planning — planner decides steps based on task, not hardcoded
- * 3. Conditional routing — failed verify loops back to build, not forward
+ * 2. Dynamic build-wave expansion from the DesignArtifact while keeping the top-level phases fixed
+ * 3. Fixed six-phase routing — ANALYZE → DEBATE → DESIGN → BUILD → VERIFY → FIX
  * 4. No turn limit — agentic loop runs until done (maxTurns: 200)
  * 5. All subsystems wired — debate, strategy branching, confidence, HITL, dep-graph
- * 6. Auto-recovery — step failures trigger self-heal → strategy branch → escalate
+ * 6. Artifact handoff — downstream steps consume normalized upstream artifacts, not raw transcripts
  */
 
 import type { AgentEventBus } from "../core/event-bus.js";
 import type { RunEngineOptions, RunEngineResult } from "./engine.js";
+import type { AnalyzeArtifact } from "./analyze-artifact.js";
+import { extractAnalyzeArtifactFromText, renderAnalyzeArtifact } from "./analyze-artifact.js";
+import type { DebateArtifact } from "./debate-artifact.js";
+import { extractDebateArtifactFromText, renderDebateArtifact } from "./debate-artifact.js";
+import type { DesignArtifact, DesignBuildWave, DesignWorkstream } from "./design-artifact.js";
+import { extractDesignArtifactFromText, renderDesignArtifact } from "./design-artifact.js";
 
 // ─── Shared Context (Inter-Step Memory) ──────────────────────────────────────
 
@@ -51,6 +57,12 @@ export interface SharedContext {
   totalCostUsd: number;
   /** Start timestamp */
   startedAt: number;
+  /** Normalized output from the ANALYZE step */
+  analyzeArtifact?: AnalyzeArtifact;
+  /** Normalized output from the DEBATE step */
+  debateArtifact?: DebateArtifact;
+  /** Normalized output from the DESIGN step */
+  designArtifact?: DesignArtifact;
   /** Debate results (if any) */
   debateResult?: import("./debate-mode.js").DebateResult;
   /** Strategy branching results (if any) */
@@ -78,7 +90,7 @@ export interface ErrorEntry {
 
 export type StepType =
   | "analyze"    // Understand intent, assess codebase
-  | "debate"     // Multi-agent design debate (conditional)
+  | "debate"     // Multi-agent design debate
   | "design"     // Architecture + file plan
   | "build"      // Write all code
   | "verify"     // Run tests, type-check, lint
@@ -126,6 +138,12 @@ export interface StepResult {
   errors: string[];
   /** Raw output from engine */
   rawOutput?: string;
+  /** Normalized output from the ANALYZE step */
+  analysisArtifact?: AnalyzeArtifact;
+  /** Normalized output from the DEBATE step */
+  debateArtifact?: DebateArtifact;
+  /** Normalized output from the DESIGN step */
+  designArtifact?: DesignArtifact;
 }
 
 // ─── Plan ────────────────────────────────────────────────────────────────────
@@ -143,8 +161,7 @@ export interface AgiPlan {
 // ─── Planner: Generates Steps Based on Task ──────────────────────────────────
 
 /**
- * Analyze the task and generate an optimal step sequence.
- * This replaces the hardcoded 6-step pipeline.
+ * Generate the fixed six-phase AGI pipeline.
  */
 export function generatePlan(task: string, assessment: {
   complexity: "simple" | "moderate" | "complex" | "massive";
@@ -172,37 +189,35 @@ export function generatePlan(task: string, assessment: {
     useStrategyBranching: false,
   });
 
-  // ── Step 2: DEBATE (conditional — only for complex architectural decisions) ──
-  if (assessment.needsDebate && assessment.complexity !== "simple") {
-    steps.push({
-      id: makeId("debate"),
-      type: "debate",
-      title: "Multi-Agent Design Debate",
-      description: "Specialists debate architecture, technology choices, and tradeoffs",
-      mode: "team",
-      maxTurns: 50,
-      dependsOn: [steps[steps.length - 1].id],
-      priority: 90,
-      maxRetries: 0,
-      useStrategyBranching: false,
-    });
-  }
+  // ── Step 2: DEBATE (default) ──
+  steps.push({
+    id: makeId("debate"),
+    type: "debate",
+    title: "Multi-Agent Design Debate",
+    description: assessment.needsDebate
+      ? "Specialists debate architecture, technology choices, and tradeoffs"
+      : "Stress-test the implementation approach, edge cases, and tradeoffs before coding",
+    mode: "team",
+    maxTurns: 50,
+    dependsOn: [steps[steps.length - 1].id],
+    priority: 90,
+    maxRetries: 0,
+    useStrategyBranching: false,
+  });
 
-  // ── Step 3: DESIGN (skip for simple tasks) ──
-  if (assessment.complexity !== "simple") {
-    steps.push({
-      id: makeId("design"),
-      type: "design",
-      title: "Architecture & Design",
-      description: "Create detailed implementation plan with file structure, API design, component breakdown",
-      mode: "run",
-      maxTurns: 40,
-      dependsOn: [steps[steps.length - 1].id],
-      priority: 80,
-      maxRetries: 1,
-      useStrategyBranching: false,
-    });
-  }
+  // ── Step 3: DESIGN (default) ──
+  steps.push({
+    id: makeId("design"),
+    type: "design",
+    title: "Architecture & Design",
+    description: "Create detailed implementation plan with file structure, API design, component breakdown",
+    mode: "run",
+    maxTurns: 40,
+    dependsOn: [steps[steps.length - 1].id],
+    priority: 80,
+    maxRetries: 1,
+    useStrategyBranching: false,
+  });
 
   // ── Step 4: BUILD (always — the core step) ──
   const buildStep: AgiStep = {
@@ -213,6 +228,9 @@ export function generatePlan(task: string, assessment: {
     mode: "team",
     maxTurns: 200, // Unlimited for complex builds
     dependsOn: [steps[steps.length - 1].id],
+    condition: (ctx) => !ctx.analyzeArtifact?.clarificationRequired
+      && ctx.debateArtifact?.readiness !== "blocked"
+      && ctx.designArtifact?.readiness !== "blocked",
     priority: 70,
     maxRetries: 2,
     useStrategyBranching: true, // Try different approaches if first fails
@@ -234,58 +252,18 @@ export function generatePlan(task: string, assessment: {
   };
   steps.push(verifyStep);
 
-  // ── Step 6: FIX (conditional — only if verify found errors) ──
-  const fixStep: AgiStep = {
+  // ── Step 6: FIX (always, but may become a no-op if VERIFY found nothing) ──
+  steps.push({
     id: makeId("fix"),
     type: "fix",
     title: "Fix Errors",
-    description: "Fix all errors found during verification. Re-verify after each fix.",
+    description: "Address verification findings with targeted code changes. If VERIFY found nothing actionable, confirm that no fixes were required.",
     mode: "run",
     maxTurns: 100,
     dependsOn: [verifyStep.id],
-    condition: (ctx) => {
-      // Only run if verify found errors
-      const verifyResult = ctx.stepResults.find(r => r.type === "verify");
-      return verifyResult ? verifyResult.errors.length > 0 || verifyResult.status === "failed" : false;
-    },
     priority: 55,
     maxRetries: 3,
     useStrategyBranching: true,
-  };
-  steps.push(fixStep);
-
-  // ── Step 7: IMPROVE (skip for simple tasks) ──
-  if (assessment.complexity !== "simple") {
-    steps.push({
-      id: makeId("improve"),
-      type: "improve",
-      title: "Improve & Harden",
-      description: "Security audit, performance optimization, add missing tests, documentation",
-      mode: "team",
-      maxTurns: 80,
-      dependsOn: [fixStep.id],
-      condition: (ctx) => {
-        // Skip if we're already over budget
-        return ctx.totalTokens < 500_000;
-      },
-      priority: 40,
-      maxRetries: 1,
-      useStrategyBranching: false,
-    });
-  }
-
-  // ── Step 8: REVIEW (always) ──
-  steps.push({
-    id: makeId("review"),
-    type: "review",
-    title: "Final Review",
-    description: "Comprehensive quality review: correctness, security, performance, accessibility",
-    mode: assessment.complexity === "simple" ? "run" : "team",
-    maxTurns: 40,
-    dependsOn: [steps[steps.length - 1].id],
-    priority: 30,
-    maxRetries: 0,
-    useStrategyBranching: false,
   });
 
   return {
@@ -318,6 +296,9 @@ export function assessComplexity(task: string): "simple" | "moderate" | "complex
  */
 export function buildStepPrompt(step: AgiStep, ctx: SharedContext): string {
   const sections: string[] = [];
+  const analysisArtifact = step.type !== "analyze" ? ctx.analyzeArtifact : undefined;
+  const debateArtifact = step.type !== "analyze" && step.type !== "debate" ? ctx.debateArtifact : undefined;
+  const designArtifact = step.type !== "analyze" && step.type !== "debate" && step.type !== "design" ? ctx.designArtifact : undefined;
 
   // 1. Task header
   sections.push(`# AGI Pipeline — ${step.title}`);
@@ -328,8 +309,19 @@ export function buildStepPrompt(step: AgiStep, ctx: SharedContext): string {
     sections.push(`## Prior Step Results (${ctx.stepResults.length} completed)`);
     for (const result of ctx.stepResults) {
       const statusIcon = result.status === "completed" ? "PASS" : result.status === "failed" ? "FAIL" : "SKIP";
-      sections.push(`### [${statusIcon}] ${result.type.toUpperCase()}`);
-      sections.push(result.summary.slice(0, 2000));
+      if (result.type === "analyze" && analysisArtifact && step.type !== "analyze") {
+        sections.push(`### [${statusIcon}] ANALYZE`);
+        sections.push("AnalyzeArtifact generated. Use the normalized artifact below as the authoritative ANALYZE output.");
+      } else if (result.type === "debate" && debateArtifact && step.type !== "debate") {
+        sections.push(`### [${statusIcon}] DEBATE`);
+        sections.push("DebateArtifact generated. Use the normalized artifact below as the authoritative DEBATE output.");
+      } else if (result.type === "design" && designArtifact && step.type !== "design") {
+        sections.push(`### [${statusIcon}] DESIGN`);
+        sections.push("DesignArtifact generated. Use the normalized artifact below as the authoritative DESIGN output.");
+      } else {
+        sections.push(`### [${statusIcon}] ${result.type.toUpperCase()}`);
+        sections.push(getStepResultContext(result));
+      }
       if (result.changes.length > 0) {
         sections.push(`Files: ${result.changes.join(", ")}`);
       }
@@ -363,18 +355,41 @@ export function buildStepPrompt(step: AgiStep, ctx: SharedContext): string {
     sections.push(`## Unresolved Errors\n${unresolvedErrors.map(e => `- [${e.category}] ${e.error}`).join("\n")}`);
   }
 
-  // 7. Step-specific instructions
+  // 7. Normalized analyze context
+  if (analysisArtifact) {
+    sections.push(renderAnalyzeArtifact(analysisArtifact));
+  }
+
+  // 8. Normalized debate context
+  if (debateArtifact) {
+    sections.push(renderDebateArtifact(debateArtifact));
+  }
+
+  // 9. Normalized design context
+  if (designArtifact) {
+    sections.push(renderDesignArtifact(designArtifact));
+  }
+
+  // 10. Step-specific instructions
   sections.push(`## Your Task: ${step.title}\n${step.description}`);
 
-  // 8. Step-type specific instructions
+  // 11. Step-type specific instructions
   sections.push(getStepTypeInstructions(step.type, ctx));
 
-  // 9. Project structure rules (for new projects)
+  // 12. Project structure rules (for new projects)
   if (ctx.allFiles.size === 0 && (step.type === "build" || step.type === "design")) {
     sections.push(SCAFFOLD_INSTRUCTIONS);
   }
 
   return sections.join("\n\n");
+}
+
+function getStepResultContext(result: StepResult): string {
+  const rawOutput = result.rawOutput?.trim();
+  if (rawOutput) {
+    return rawOutput;
+  }
+  return result.summary;
 }
 
 function getStepTypeInstructions(type: StepType, ctx: SharedContext): string {
@@ -397,6 +412,8 @@ Respond with your analysis. Include:
     case "debate":
       return `## Instructions
 This is a multi-agent design debate. Multiple specialists will argue their positions.
+Treat the Analyze Artifact as the only authoritative ANALYZE output.
+Do not reconstruct or speculate from missing raw transcripts.
 Focus on architecture decisions, technology tradeoffs, and design patterns.
 Present your position with clear reasoning, risks, and alternatives.`;
 
@@ -409,7 +426,13 @@ Create a detailed implementation plan:
 4. Component breakdown (modules, classes, functions)
 5. Data model (types, interfaces, schemas)
 6. Task ordering (what to build first)
+7. Workstream decomposition (scaffold, frontend, backend, database, realtime, testing, docs as needed)
+8. Build waves (which workstreams can run together and which must wait)
+9. Test plan (which test files prove each critical path)
 
+Treat AnalyzeArtifact and DebateArtifact as the authoritative upstream outputs.
+Do not reconstruct design direction from missing raw debate transcripts.
+Design output must be rich enough to produce a DesignArtifact with file manifest, workstreams, build waves, and test plan.
 Be specific. List exact file paths and their purposes.`;
 
     case "build":
@@ -419,8 +442,12 @@ IMPLEMENT EVERYTHING. Write ALL code files with COMPLETE content.
 - Every file must be fully functional
 - Use ALL available tools — especially 'write' for creating files
 - Write complete implementations, not stubs
+- Treat the DesignArtifact as the authoritative build plan
+- Create the tests/ files and test code described in the DesignArtifact workstreams and test plan
 - If a design was provided, follow it exactly
 - Create ${ctx.allFiles.size === 0 ? "a complete project structure" : "all remaining files"}
+- DO NOT run typecheck, lint, test, or build verification inside BUILD
+- DO NOT perform final review inside BUILD; VERIFY and REVIEW are separate stages
 
 DO NOT STOP until every planned file is written.`;
 
@@ -434,6 +461,7 @@ Run ALL verification checks:
 5. Check for missing dependencies
 
 Report ALL errors precisely. Include file paths and line numbers.
+Do NOT write or edit files in VERIFY.
 Do NOT fix errors yourself — just report them.`;
 
     case "fix":
@@ -443,10 +471,10 @@ For each error:
 1. Read the file
 2. Understand the root cause
 3. Apply the minimal fix
-4. Verify the fix works
+4. Update the code or tests that are actually broken
 
-After fixing, run verification again to confirm.
-Keep fixing until all errors are resolved or you've exhausted retries.`;
+Do NOT run verification commands inside FIX.
+The next VERIFY step will confirm whether the fixes worked.`;
 
     case "improve":
       return `## Instructions
@@ -470,7 +498,8 @@ Final quality review. Check EVERY aspect:
 6. Testing — adequate coverage?
 
 Provide a verdict: "pass" or "fail" with specific reasons.
-If fail, list exactly what needs to be fixed.`;
+If fail, list exactly what needs to be fixed.
+Do NOT edit files or execute build/fix work in REVIEW.`;
 
     case "deploy":
       return `## Instructions
@@ -498,6 +527,97 @@ This is a STANDALONE project. Create a complete, runnable structure:
 The project must be runnable with: npm install && npm start
 Do NOT reference files outside this project directory.`;
 
+function buildWaveDescription(wave: DesignBuildWave, workstreams: DesignWorkstream[], artifact: DesignArtifact): string {
+  const files = Array.from(new Set(workstreams.flatMap((workstream) => workstream.files)));
+  const deliverables = Array.from(new Set(workstreams.flatMap((workstream) => workstream.deliverables)));
+  const testTargets = Array.from(new Set(workstreams.flatMap((workstream) => workstream.testTargets)));
+  const lines: string[] = [
+    `Implement build wave ${wave.wave}: ${wave.title}.`,
+    `Objective: ${wave.objective}`,
+  ];
+
+  if (workstreams.length > 0) {
+    lines.push(`Workstreams:
+${workstreams.map((workstream) => `- ${workstream.id} [${workstream.owner}] ${workstream.title} — ${workstream.focus}`).join("\n")}`);
+  }
+  if (files.length > 0) {
+    lines.push(`Files to create or complete:
+${files.map((filePath) => `- ${filePath}`).join("\n")}`);
+  }
+  if (deliverables.length > 0) {
+    lines.push(`Deliverables:
+${deliverables.map((item) => `- ${item}`).join("\n")}`);
+  }
+  if (testTargets.length > 0) {
+    lines.push(`Tests to author or update in this wave:
+${testTargets.map((target) => `- ${target}`).join("\n")}`);
+  }
+  if (artifact.acceptanceChecks.length > 0) {
+    lines.push(`Acceptance checks to keep in view:
+${artifact.acceptanceChecks.map((check) => `- ${check}`).join("\n")}`);
+  }
+
+  return lines.join("\n\n");
+}
+
+function expandBuildStepsFromDesignArtifact(plan: AgiPlan, designArtifact: DesignArtifact): AgiPlan | null {
+  if (designArtifact.readiness === "blocked") return null;
+
+  const buildIdx = plan.steps.findIndex((step, index) => index > plan.currentStepIndex && step.type === "build");
+  if (buildIdx === -1) return null;
+
+  const buildStep = plan.steps[buildIdx];
+  if (buildStep.title.startsWith("Build Wave ")) return null;
+
+  const workstreamById = new Map(designArtifact.workstreams.map((workstream) => [workstream.id, workstream]));
+  const waves = designArtifact.buildWaves.length > 0
+    ? designArtifact.buildWaves
+    : [{
+      wave: 1,
+      title: buildStep.title,
+      objective: buildStep.description,
+      workstreamIds: designArtifact.workstreams.map((workstream) => workstream.id),
+    } satisfies DesignBuildWave];
+
+  const expandedSteps: AgiStep[] = waves.map((wave, index) => {
+    const waveWorkstreams = wave.workstreamIds.map((id) => workstreamById.get(id)).filter((value): value is DesignWorkstream => Boolean(value));
+    const fileCount = waveWorkstreams.reduce((total, workstream) => total + workstream.files.length, 0);
+    const turnBudget = Math.min(200, Math.max(60, 45 + fileCount * 4));
+    return {
+      id: `${buildStep.id}-wave-${wave.wave}`,
+      type: "build",
+      title: `Build Wave ${wave.wave}: ${wave.title}`,
+      description: buildWaveDescription(wave, waveWorkstreams, designArtifact),
+      mode: "team",
+      maxTurns: Math.min(buildStep.maxTurns, turnBudget),
+      dependsOn: index === 0 ? buildStep.dependsOn : [`${buildStep.id}-wave-${waves[index - 1]?.wave ?? wave.wave - 1}`],
+      condition: buildStep.condition,
+      priority: Math.max(1, buildStep.priority - index),
+      maxRetries: buildStep.maxRetries,
+      useStrategyBranching: buildStep.useStrategyBranching,
+    };
+  });
+
+  const newSteps = [...plan.steps];
+  newSteps.splice(buildIdx, 1, ...expandedSteps);
+  const lastExpandedId = expandedSteps[expandedSteps.length - 1]?.id ?? buildStep.id;
+
+  for (let index = buildIdx + expandedSteps.length; index < newSteps.length; index++) {
+    const step = newSteps[index];
+    if (!step.dependsOn.includes(buildStep.id)) continue;
+    newSteps[index] = {
+      ...step,
+      dependsOn: step.dependsOn.map((dependencyId) => dependencyId === buildStep.id ? lastExpandedId : dependencyId),
+    };
+  }
+
+  return {
+    ...plan,
+    steps: newSteps,
+    replanCount: plan.replanCount + 1,
+  };
+}
+
 // ─── Replanner: Adapt Plan Based on Results ──────────────────────────────────
 
 /**
@@ -509,103 +629,10 @@ export function replanIfNeeded(ctx: SharedContext): AgiPlan | null {
   const lastResult = stepResults[stepResults.length - 1];
   if (!lastResult) return null;
 
-  // Case 1: Verify failed → ensure fix step exists after it
-  if (lastResult.type === "verify" && lastResult.status === "failed") {
-    const currentIdx = plan.currentStepIndex;
-    const nextStep = plan.steps[currentIdx + 1];
-
-    // If next step isn't a fix step, insert one
-    if (!nextStep || nextStep.type !== "fix") {
-      const newSteps = [...plan.steps];
-      const fixStep: AgiStep = {
-        id: `step-replan-${plan.replanCount + 1}-fix`,
-        type: "fix",
-        title: "Fix Errors (auto-inserted)",
-        description: `Fix errors from verification:\n${lastResult.errors.join("\n")}`,
-        mode: "run",
-        maxTurns: 100,
-        dependsOn: [lastResult.stepId],
-        priority: 55,
-        maxRetries: 3,
-        useStrategyBranching: true,
-      };
-      newSteps.splice(currentIdx + 1, 0, fixStep);
-
-      // Also insert a re-verify after fix
-      const reVerifyStep: AgiStep = {
-        id: `step-replan-${plan.replanCount + 1}-reverify`,
-        type: "verify",
-        title: "Re-verify (auto-inserted)",
-        description: "Verify fixes resolved all errors",
-        mode: "run",
-        maxTurns: 50,
-        dependsOn: [fixStep.id],
-        priority: 54,
-        maxRetries: 0,
-        useStrategyBranching: false,
-      };
-      newSteps.splice(currentIdx + 2, 0, reVerifyStep);
-
-      return { ...plan, steps: newSteps, replanCount: plan.replanCount + 1 };
-    }
-  }
-
-  // Case 2: Fix failed after max retries → insert strategy branching build
-  if (lastResult.type === "fix" && lastResult.status === "failed") {
-    const fixRetries = stepResults.filter(r => r.type === "fix").length;
-    if (fixRetries >= 2) {
-      // Try a completely different build approach
-      const newSteps = [...plan.steps];
-      const currentIdx = plan.currentStepIndex;
-      const rebuildStep: AgiStep = {
-        id: `step-replan-${plan.replanCount + 1}-rebuild`,
-        type: "build",
-        title: "Rebuild (alternative strategy)",
-        description: `Previous approach failed ${fixRetries} times. Try a COMPLETELY DIFFERENT implementation approach.\nPrevious errors:\n${ctx.errorLog.map(e => e.error).join("\n")}`,
-        mode: "team",
-        maxTurns: 200,
-        dependsOn: [lastResult.stepId],
-        priority: 65,
-        maxRetries: 1,
-        useStrategyBranching: true,
-      };
-      newSteps.splice(currentIdx + 1, 0, rebuildStep);
-      return { ...plan, steps: newSteps, replanCount: plan.replanCount + 1 };
-    }
-  }
-
-  // Case 3: Review failed → loop back to fix
-  if (lastResult.type === "review" && lastResult.status === "failed") {
-    const reviewFailCount = stepResults.filter(r => r.type === "review" && r.status === "failed").length;
-    if (reviewFailCount < 3) {
-      const newSteps = [...plan.steps];
-      const currentIdx = plan.currentStepIndex;
-      const fixStep: AgiStep = {
-        id: `step-replan-${plan.replanCount + 1}-reviewfix`,
-        type: "fix",
-        title: "Fix Review Issues",
-        description: `Review failed. Issues:\n${lastResult.summary}`,
-        mode: "run",
-        maxTurns: 80,
-        dependsOn: [lastResult.stepId],
-        priority: 35,
-        maxRetries: 2,
-        useStrategyBranching: false,
-      };
-      const reReviewStep: AgiStep = {
-        id: `step-replan-${plan.replanCount + 1}-rereview`,
-        type: "review",
-        title: "Re-review",
-        description: "Re-review after fixes applied",
-        mode: "run",
-        maxTurns: 40,
-        dependsOn: [fixStep.id],
-        priority: 34,
-        maxRetries: 0,
-        useStrategyBranching: false,
-      };
-      newSteps.splice(currentIdx + 1, 0, fixStep, reReviewStep);
-      return { ...plan, steps: newSteps, replanCount: plan.replanCount + 1 };
+  if (lastResult.type === "design" && lastResult.status === "completed" && ctx.designArtifact) {
+    const expandedPlan = expandBuildStepsFromDesignArtifact(plan, ctx.designArtifact);
+    if (expandedPlan) {
+      return expandedPlan;
     }
   }
 
@@ -625,6 +652,15 @@ export function condenseContext(ctx: SharedContext, maxTokensEstimate: number): 
   sections.push(`Task: ${ctx.task}`);
   if (ctx.decisions.length > 0) {
     sections.push(`Decisions: ${ctx.decisions.join("; ")}`);
+  }
+  if (ctx.analyzeArtifact) {
+    sections.push(`Analyze: ${ctx.analyzeArtifact.summary}`);
+  }
+  if (ctx.debateArtifact) {
+    sections.push(`Debate: ${ctx.debateArtifact.summary}`);
+  }
+  if (ctx.designArtifact) {
+    sections.push(`Design: ${ctx.designArtifact.summary}`);
   }
 
   // Estimate tokens used so far
@@ -678,13 +714,16 @@ export interface AgiPipelineOptions {
   projectDir: string;
   eventBus?: AgentEventBus;
   /** Called for each step — this is where the actual engine.runEngine() happens */
-  executeStep: (stepPrompt: string, mode: "run" | "team", maxTurns: number) => Promise<{
+  executeStep: (stepPrompt: string, mode: "run" | "team", maxTurns: number, step: AgiStep) => Promise<{
     summary: string;
     changes: string[];
     toolResults: Array<{ name: string; ok: boolean; output?: string }>;
     tokensUsed: number;
     errors: string[];
     rawOutput?: string;
+    analysisArtifact?: AnalyzeArtifact;
+    debateArtifact?: DebateArtifact;
+    designArtifact?: DesignArtifact;
   }>;
   /** Called to emit events to UI */
   onEvent?: (event: AgiPipelineEvent) => void;
@@ -701,7 +740,7 @@ export interface AgiPipelineOptions {
  * 1. Assesses the task complexity
  * 2. Generates a dynamic plan
  * 3. Executes each step with full inter-step context
- * 4. Replans on failure (verify fail → fix → re-verify)
+ * 4. Expands BUILD into waves from the DesignArtifact when available
  * 5. Tracks all state in SharedContext
  */
 export async function runAgiPipeline(options: AgiPipelineOptions): Promise<{
@@ -741,6 +780,9 @@ export async function runAgiPipeline(options: AgiPipelineOptions): Promise<{
     totalTokens: 0,
     totalCostUsd: 0,
     startedAt: startTime,
+    analyzeArtifact: undefined,
+    debateArtifact: undefined,
+    designArtifact: undefined,
   };
 
   emit({
@@ -818,29 +860,71 @@ export async function runAgiPipeline(options: AgiPipelineOptions): Promise<{
             ? `${stepPrompt}\n\n[RETRY ${attempts}/${step.maxRetries + 1}] Previous attempt failed. Try a different approach.\nPrevious errors: ${result?.errors.join("; ") ?? "unknown"}`
             : stepPrompt,
           step.mode,
-          step.maxTurns
+          step.maxTurns,
+          step
         );
 
-        result = {
+        const analysisArtifact = step.type === "analyze"
+          ? (output.analysisArtifact ?? extractAnalyzeArtifactFromText(options.task, output.rawOutput ?? output.summary ?? "") ?? undefined)
+          : undefined;
+        const debateArtifact = step.type === "debate"
+          ? (output.debateArtifact ?? extractDebateArtifactFromText(
+            options.task,
+            output.rawOutput ?? output.summary ?? "",
+            ctx.analyzeArtifact ?? undefined
+          ) ?? undefined)
+          : undefined;
+        const designArtifact = step.type === "design"
+          ? (output.designArtifact ?? extractDesignArtifactFromText(
+            options.task,
+            output.rawOutput ?? output.summary ?? "",
+            ctx.analyzeArtifact ?? undefined,
+            ctx.debateArtifact ?? undefined
+          ) ?? undefined)
+          : undefined;
+
+        const stepErrors = [...output.errors];
+        if (step.type === "analyze" && !analysisArtifact) {
+          stepErrors.push("AnalyzeArtifact generation failed.");
+        }
+        if (step.type === "debate" && !debateArtifact) {
+          stepErrors.push("DebateArtifact generation failed.");
+        }
+        if (step.type === "design" && !designArtifact) {
+          stepErrors.push("DesignArtifact generation failed.");
+        }
+
+        const nextResult: StepResult = {
           stepId: step.id,
           type: step.type,
-          status: output.errors.length === 0 || step.type === "verify" ? "completed" : "failed",
-          summary: output.summary,
+          status: stepErrors.length === 0 ? "completed" : "failed",
+          summary: step.type === "analyze" && analysisArtifact
+            ? analysisArtifact.summary
+            : step.type === "debate" && debateArtifact
+              ? debateArtifact.summary
+              : step.type === "design" && designArtifact
+                ? designArtifact.summary
+                : output.summary,
           changes: output.changes,
           toolResults: output.toolResults,
           durationMs: Date.now() - stepStart,
           tokensUsed: output.tokensUsed,
-          errors: output.errors,
-          rawOutput: output.rawOutput,
+          errors: Array.from(new Set(stepErrors)),
+          rawOutput: step.type === "analyze" && analysisArtifact
+            ? JSON.stringify(analysisArtifact, null, 2)
+            : step.type === "debate" && debateArtifact
+              ? JSON.stringify(debateArtifact, null, 2)
+              : step.type === "design" && designArtifact
+                ? JSON.stringify(designArtifact, null, 2)
+                : output.rawOutput,
+          analysisArtifact,
+          debateArtifact,
+          designArtifact,
         };
-
-        // For verify step: completed even with errors (errors are the output)
-        if (step.type === "verify") {
-          result.status = "completed";
-        }
+        result = nextResult;
 
         // Success — break retry loop
-        if (result.status === "completed") break;
+        if (nextResult.status === "completed") break;
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e);
         result = {
@@ -890,11 +974,22 @@ export async function runAgiPipeline(options: AgiPipelineOptions): Promise<{
         }
       }
 
+      if (step.type === "analyze" && result.analysisArtifact) {
+        ctx.analyzeArtifact = result.analysisArtifact;
+      }
+      if (step.type === "debate" && result.debateArtifact) {
+        ctx.debateArtifact = result.debateArtifact;
+      }
+      if (step.type === "design" && result.designArtifact) {
+        ctx.designArtifact = result.designArtifact;
+      }
+
       // Extract decisions from analyze/design steps
       if ((step.type === "analyze" || step.type === "design") && result.status === "completed") {
-        const decisionMatches = result.summary.match(/(?:decision|chose|selected|will use|architecture):\s*([^\n]+)/gi);
+        const decisionSource = result.rawOutput ?? result.summary;
+        const decisionMatches = decisionSource.match(/(?:decision|chose|selected|will use|architecture):\s*([^\n]+)/gi);
         if (decisionMatches) {
-          ctx.decisions.push(...decisionMatches.map(d => d.slice(0, 200)));
+          ctx.decisions.push(...decisionMatches);
         }
       }
 
@@ -912,6 +1007,27 @@ export async function runAgiPipeline(options: AgiPipelineOptions): Promise<{
         completedSteps: ctx.stepResults.filter(r => r.status === "completed").length,
         confidence: ctx.confidence,
       });
+
+      if (step.type === "analyze" && result.status !== "completed") {
+        emit({ type: "agi.pipeline.fail", error: result.errors[0] || "AnalyzeArtifact generation failed" });
+        success = false;
+        break;
+      }
+      if (step.type === "debate" && result.status !== "completed") {
+        emit({ type: "agi.pipeline.fail", error: result.errors[0] || "DebateArtifact generation failed" });
+        success = false;
+        break;
+      }
+      if (step.type === "design" && result.status !== "completed") {
+        emit({ type: "agi.pipeline.fail", error: result.errors[0] || "DesignArtifact generation failed" });
+        success = false;
+        break;
+      }
+      if (step.type === "build" && result.status !== "completed") {
+        emit({ type: "agi.pipeline.fail", error: result.errors[0] || "Build step failed" });
+        success = false;
+        break;
+      }
 
       // Replan check
       const newPlan = replanIfNeeded(ctx);
@@ -933,8 +1049,7 @@ export async function runAgiPipeline(options: AgiPipelineOptions): Promise<{
   // Final status
   const completedSteps = ctx.stepResults.filter(r => r.status === "completed").length;
   const failedSteps = ctx.stepResults.filter(r => r.status === "failed").length;
-  const reviewResult = ctx.stepResults.find(r => r.type === "review");
-  const pipelineSuccess = success && failedSteps === 0 && (!reviewResult || reviewResult.status === "completed");
+  const pipelineSuccess = success && failedSteps === 0;
 
   // Update confidence
   ctx.confidence = completedSteps / Math.max(1, ctx.stepResults.length);

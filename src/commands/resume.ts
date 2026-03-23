@@ -2,6 +2,7 @@ import { loadConfig } from "../core/config.js";
 import { SessionStore } from "../sessions/store.js";
 import { runEngine } from "../orchestration/engine.js";
 import { attachLiveSessionOutput } from "./live-session.js";
+import { isDefaultPipelineSession, runDefaultPipeline } from "./default-pipeline.js";
 
 export async function runResumeCommand(sessionId: string): Promise<void> {
   const cwd = process.cwd();
@@ -14,15 +15,25 @@ export async function runResumeCommand(sessionId: string): Promise<void> {
   let follower: Awaited<ReturnType<typeof attachLiveSessionOutput>> | undefined;
 
   try {
-    const result = await runEngine({
-      cwd,
-      task: existing.task,
-      mode: "run",
-      resumeSessionId: sessionId,
-      async onSessionReady(readySessionId) {
-        follower = await attachLiveSessionOutput(cwd, readySessionId, false);
-      }
-    });
+    const result = isDefaultPipelineSession(existing)
+      ? await runDefaultPipeline({
+        cwd,
+        task: existing.task,
+        mode: existing.metadata?.pipelineMode === "team" ? "team" : "run",
+        resumeSessionId: sessionId,
+        async onSessionReady(readySessionId) {
+          follower = await attachLiveSessionOutput(cwd, readySessionId, false);
+        }
+      })
+      : await runEngine({
+        cwd,
+        task: existing.task,
+        mode: "run",
+        resumeSessionId: sessionId,
+        async onSessionReady(readySessionId) {
+          follower = await attachLiveSessionOutput(cwd, readySessionId, false);
+        }
+      });
     await follower?.stop();
     console.log(`Status: ${result.session.status}`);
     console.log(`Review: ${result.review.summary}`);
