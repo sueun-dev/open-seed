@@ -102,43 +102,16 @@ export default function App() {
           </div>
 
           <div
-            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.style.borderColor = "#2563eb"; }}
-            onDragLeave={(e) => { e.currentTarget.style.borderColor = "#222"; }}
-            onDrop={(e) => {
-              e.preventDefault(); e.stopPropagation();
-              e.currentTarget.style.borderColor = "#222";
-              // Get folder path from dropped items
-              const items = e.dataTransfer.items;
-              if (items?.length) {
-                for (let i = 0; i < items.length; i++) {
-                  const entry = (items[i] as any).webkitGetAsEntry?.();
-                  if (entry?.isDirectory) {
-                    setWorkingDir(entry.fullPath || entry.name);
-                    return;
-                  }
-                }
-              }
-              // Fallback: try file path from dataTransfer
-              const files = e.dataTransfer.files;
-              if (files.length > 0) {
-                // Browser gives us the file name, but for folders we need the path
-                const path = (files[0] as any).path || files[0].name;
-                setWorkingDir(path);
-              }
-              // Also check text data (e.g., dragged from Finder path bar)
-              const text = e.dataTransfer.getData("text/plain");
-              if (text && text.startsWith("/")) setWorkingDir(text.trim());
-            }}
             style={{
               display: "flex", gap: 8, marginBottom: 24, padding: "8px 12px",
-              borderRadius: 8, border: "2px dashed #222", transition: "border-color 0.2s",
+              borderRadius: 8, border: "1px solid #222",
             }}
           >
             <span style={{ color: "#555", fontSize: 12, lineHeight: "32px", whiteSpace: "nowrap" }}>📁 Output:</span>
             <input
               value={workingDir}
               onChange={(e) => setWorkingDir(e.target.value)}
-              placeholder="Drag & drop a folder here, or type a path..."
+              placeholder="Click Browse to select folder, or type full path..."
               style={{
                 flex: 1, padding: "6px 12px", borderRadius: 6,
                 border: "none", background: "transparent", color: "#888",
