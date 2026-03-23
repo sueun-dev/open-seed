@@ -45,11 +45,11 @@ async def run_specialist(
         )
 
     try:
-        # Determine which CLI to use based on model
-        if agent.model.startswith("claude") or agent.model.startswith("opus") or agent.model.startswith("sonnet"):
-            result = await _run_via_claude(agent, context, working_dir)
-        else:
-            result = await _run_via_codex(agent, context, working_dir)
+        # QA review always uses Claude (OAuth, read-only analysis).
+        # TOML agents may specify gpt-5.4 as their design model, but for
+        # review purposes Claude Haiku is faster, cheaper, and doesn't need
+        # Codex's full-auto mode which is designed for code generation, not review.
+        result = await _run_via_claude(agent, context, working_dir)
 
         duration = int((time.monotonic() - start) * 1000)
         result.duration_ms = duration
