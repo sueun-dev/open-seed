@@ -73,6 +73,7 @@ class ClaudeAgent:
         working_dir: str | None = None,
         allowed_tools: list[str] | None = None,
         max_turns: int | None = None,
+        role: str | None = None,
     ) -> ClaudeResponse:
         """
         Invoke Claude for a single task.
@@ -84,11 +85,27 @@ class ClaudeAgent:
             working_dir: Working directory for file operations
             allowed_tools: Tool allowlist (e.g., ["Read", "Write", "Bash"])
             max_turns: Max conversation turns
+            role: Role name from roles.py (overrides model/system_prompt/tools)
 
         Returns:
             ClaudeResponse with text, tool results, and thinking
         """
         cli = self._resolve_cli()
+
+        # Apply role if specified
+        if role:
+            from openseed_left_hand.roles import get_role
+            try:
+                r = get_role(role)
+                model = model or r.model
+                system_prompt = system_prompt or r.system_prompt
+                if not allowed_tools and r.tools:
+                    allowed_tools = r.tools
+                if not max_turns:
+                    max_turns = 5 if role == "oracle" else None
+            except KeyError:
+                pass
+
         resolved_model = self._resolve_model(model)
 
         cmd = [cli, "--print", "--dangerously-skip-permissions"]
