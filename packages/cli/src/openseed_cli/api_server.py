@@ -143,34 +143,82 @@ async def _execute_pipeline(task: str, working_dir: str, config_path: str | None
     global _current_run
 
     from openseed_core.config import load_config
-    from openseed_core.events import EventBus, Event
     from openseed_brain import compile_graph, initial_state
 
     cfg = load_config(Path(config_path) if config_path else None)
-    event_bus = EventBus()
-
-    # Bridge events to WebSocket
-    async def on_event(event: Event) -> None:
-        await _broadcast({
-            "type": event.type.value,
-            "node": event.node,
-            "data": event.data,
-            "timestamp": event.timestamp.isoformat(),
-        })
-        if _current_run:
-            _current_run["messages"].append(f"[{event.node}] {event.type.value}")
-
-    event_bus.subscribe(on_event)
 
     state = initial_state(task=task, working_dir=str(Path(working_dir).resolve()))
     graph = compile_graph()
 
+    await _broadcast({"type": "pipeline.start", "node": "brain", "data": {"task": task, "working_dir": working_dir}})
+
     try:
-        result = await graph.ainvoke(state)
+        # Use astream to get node-by-node events in real time
+        final_state = None
+        async for event in graph.astream(state):
+            for node_name, output in event.items():
+                # Broadcast node start
+                await _broadcast({"type": "node.start", "node": node_name, "data": {}})
+
+                # Broadcast all messages from this node
+                for msg in output.get("messages", []):
+                    await _broadcast({"type": "node.log", "node": node_name, "data": {"message": str(msg)}})
+                    if _current_run:
+                        _current_run["messages"].append(f"[{node_name}] {str(msg)[:500]}")
+
+                # Broadcast plan details
+                if output.get("plan"):
+                    p = output["plan"]
+                    await _broadcast({"type": "node.plan", "node": node_name, "data": {
+                        "summary": p.summary,
+                        "tasks": len(p.tasks),
+                        "files": len(p.file_manifest),
+                        "file_list": [f.path for f in p.file_manifest],
+                    }})
+
+                # Broadcast implementation details
+                if output.get("implementation"):
+                    impl = output["implementation"]
+                    await _broadcast({"type": "node.implementation", "node": node_name, "data": {
+                        "summary": impl.summary[:500],
+                        "files_created": impl.files_created,
+                        "files_modified": impl.files_modified,
+                    }})
+
+                # Broadcast QA result
+                if output.get("qa_result"):
+                    qa = output["qa_result"]
+                    await _broadcast({"type": "node.qa", "node": node_name, "data": {
+                        "verdict": qa.verdict.value,
+                        "findings": len(qa.findings),
+                        "synthesis": qa.synthesis,
+                    }})
+
+                # Broadcast deploy result
+                if output.get("deploy_result"):
+                    d = output["deploy_result"]
+                    await _broadcast({"type": "node.deploy", "node": node_name, "data": {
+                        "success": d.success,
+                        "channel": d.channel,
+                        "message": d.message,
+                    }})
+
+                # Broadcast retry count
+                if "retry_count" in output:
+                    await _broadcast({"type": "node.retry", "node": node_name, "data": {"retry_count": output["retry_count"]}})
+
+                # Broadcast errors
+                for err in output.get("errors", []):
+                    await _broadcast({"type": "node.error", "node": node_name, "data": {"message": err.message, "severity": err.severity.value}})
+
+                # Node complete
+                await _broadcast({"type": "node.complete", "node": node_name, "data": {}})
+
+                final_state = output
+
         if _current_run:
             _current_run["status"] = "completed"
-            _current_run["errors"] = len(result.get("errors", []))
-        await _broadcast({"type": "pipeline.complete", "errors": len(result.get("errors", []))})
+        await _broadcast({"type": "pipeline.complete", "node": "brain", "data": {"status": "completed"}})
     except Exception as e:
         if _current_run:
             _current_run["status"] = "failed"
