@@ -46,6 +46,7 @@ class RunRequest(BaseModel):
     task: str
     working_dir: str = "."
     config_path: str | None = None
+    provider: str = "claude"  # "claude", "codex", "both"
 
 
 class MemorySearchRequest(BaseModel):
@@ -72,7 +73,7 @@ async def start_run(req: RunRequest) -> dict:
     _current_run = {"task": req.task, "status": "running", "messages": []}
 
     # Run pipeline in background
-    asyncio.create_task(_execute_pipeline(req.task, req.working_dir, req.config_path))
+    asyncio.create_task(_execute_pipeline(req.task, req.working_dir, req.config_path, req.provider))
 
     return {"status": "started", "task": req.task}
 
@@ -245,7 +246,7 @@ async def _broadcast(event: dict) -> None:
 # ─── Pipeline Execution ──────────────────────────────────────────────────────
 
 
-async def _execute_pipeline(task: str, working_dir: str, config_path: str | None) -> None:
+async def _execute_pipeline(task: str, working_dir: str, config_path: str | None, provider: str = "claude") -> None:
     """Run the full pipeline with event broadcasting."""
     global _current_run
 
@@ -254,7 +255,7 @@ async def _execute_pipeline(task: str, working_dir: str, config_path: str | None
 
     cfg = load_config(Path(config_path) if config_path else None)
 
-    state = initial_state(task=task, working_dir=str(Path(working_dir).resolve()))
+    state = initial_state(task=task, working_dir=str(Path(working_dir).resolve()), provider=provider)
     graph = compile_graph()
 
     await _broadcast({"type": "pipeline.start", "node": "brain", "data": {"task": task, "working_dir": working_dir}})

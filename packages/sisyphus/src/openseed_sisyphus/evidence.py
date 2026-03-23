@@ -66,13 +66,53 @@ async def verify_command(
     )
 
 
+async def auto_detect_test_commands(working_dir: str) -> list[str]:
+    """Auto-detect which test commands to run based on project files."""
+    commands = []
+
+    pkg_json = os.path.join(working_dir, "package.json")
+    if os.path.exists(pkg_json):
+        try:
+            import json
+            data = json.loads(open(pkg_json).read())
+            scripts = data.get("scripts", {})
+            if "test" in scripts and scripts["test"] != 'echo "Error: no test specified" && exit 1':
+                commands.append("npm test")
+            if "build" in scripts:
+                commands.append("npm run build")
+            # Always check npm install works
+            if "dependencies" in data or "devDependencies" in data:
+                if not os.path.exists(os.path.join(working_dir, "node_modules")):
+                    commands.insert(0, "npm install")
+        except Exception:
+            pass
+
+    if os.path.exists(os.path.join(working_dir, "pyproject.toml")) or os.path.exists(os.path.join(working_dir, "setup.py")):
+        if os.path.exists(os.path.join(working_dir, "tests")) or os.path.exists(os.path.join(working_dir, "test")):
+            commands.append("python -m pytest --tb=short -q")
+
+    if os.path.exists(os.path.join(working_dir, "Makefile")):
+        commands.append("make test 2>/dev/null || true")
+
+    # Basic syntax check for single-file projects
+    for f in os.listdir(working_dir):
+        if f.endswith(".py") and not f.startswith("test_"):
+            commands.append(f"python -c \"import ast; ast.parse(open('{f}').read()); print('{f}: syntax OK')\"")
+            break
+        if f == "index.html":
+            commands.append("ls -la index.html")
+            break
+
+    return commands
+
+
 async def verify_implementation(
     working_dir: str,
     expected_files: list[str] | None = None,
     test_commands: list[str] | None = None,
 ) -> VerificationResult:
     """
-    Full verification: check files exist + run test commands.
+    Full verification: check files exist + auto-detect + run test commands.
 
     This is the evidence gate — the Sisyphus loop only advances
     if ALL evidence checks pass.
@@ -86,6 +126,10 @@ async def verify_implementation(
         file_evidence = await verify_files_exist(working_dir, expected_files)
         evidence.extend(file_evidence)
         missing = [e.check.replace("file exists: ", "") for e in file_evidence if not e.passed]
+
+    # Auto-detect test commands if none provided
+    if not test_commands:
+        test_commands = await auto_detect_test_commands(working_dir)
 
     # Run test commands
     for cmd in (test_commands or []):

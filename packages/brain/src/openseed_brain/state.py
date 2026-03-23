@@ -24,11 +24,12 @@ from openseed_core.types import (
 )
 
 
-def initial_state(task: str, working_dir: str) -> PipelineState:
+def initial_state(task: str, working_dir: str, provider: str = "claude") -> PipelineState:
     """Create the initial pipeline state for a new run."""
     return PipelineState(
         task=task,
         working_dir=working_dir,
+        provider=provider,
         plan=None,
         implementation=None,
         qa_result=None,

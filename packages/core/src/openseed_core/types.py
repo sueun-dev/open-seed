@@ -169,6 +169,7 @@ class PipelineState(TypedDict):
     # Input
     task: str
     working_dir: str
+    provider: str  # "claude", "codex", "both"
 
     # Planning
     plan: Plan | None
