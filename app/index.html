@@ -614,10 +614,17 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
                   style="flex:1;font-size:12px;padding:4px 0;border:none;background:none;color:var(--accent);font-weight:600;font-family:var(--font);outline:none"
                   onchange="setAgiTarget(this.value.trim()||null)"
                   onkeydown="if(event.key==='Enter'){event.preventDefault();setAgiTarget(this.value.trim()||null)}">
+                <button onclick="browseAgiFolder()" style="background:var(--bg5);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:10px;color:var(--fg2);cursor:pointer;flex-shrink:0" title="Browse folders">📁 Browse</button>
                 <button onclick="setAgiTarget(null)" style="background:none;border:none;color:var(--fg3);cursor:pointer;font-size:14px;padding:2px 4px;opacity:.5;flex-shrink:0" title="Reset to workspace root">✕</button>
               </div>
+              <div id="agiResolvedPath" style="margin:-4px 2px 10px 2px;font-size:10px;color:var(--fg3);word-break:break-all"></div>
               <div style="display:flex;gap:8px;margin-bottom:8px">
                 <input class="si" id="agiPrompt" type="text" placeholder="Describe what you want to build..." style="flex:1;font-size:13px;padding:12px 16px;border-radius:8px">
+                <select id="agiProviderSelect" style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg);font-family:var(--font);cursor:pointer;min-width:130px" onchange="switchAgiProvider(this.value)" title="Select AI Provider">
+                  <option value="openai" selected>🟢 GPT-5.4</option>
+                  <option value="anthropic">🟣 Claude Opus</option>
+                  <option value="both">🔀 Both (Dual)</option>
+                </select>
                 <button class="save-btn" id="agiStartBtn" onclick="startAgiV2()" style="font-size:13px;padding:12px 24px;margin:0;border-radius:8px;font-weight:700">AGI Start</button>
                 <button class="save-btn" id="agiStopBtn" onclick="stopAgi()" style="font-size:11px;padding:12px 16px;margin:0;border-radius:8px;background:var(--red);display:none">Stop</button>
               </div>
@@ -707,7 +714,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--fg);-webkit-font-s
               <div><span style="color:var(--fg3)">Files:</span> <span id="agiFiles">0</span></div>
               <div><span style="color:var(--fg3)">Tools:</span> <span id="agiTools">0</span></div>
               <div><span style="color:var(--fg3)">Tokens:</span> <span id="agiTokens">0</span></div>
-              <div><span style="color:var(--fg3)">Cost:</span> <span id="agiCost">$0.00</span></div>
+              <div><span style="color:var(--fg3)">Cost:</span> <span id="agiCost">—</span></div>
               <div><span style="color:var(--fg3)">Elapsed:</span> <span id="agiElapsed">0s</span></div>
               <div><span style="color:var(--fg3)">Replans:</span> <span id="agiReplans">0</span></div>
             </div>
@@ -1113,6 +1120,7 @@ async function initWorkspace(){
     const r=await fetch('/api/workspace');
     const w=await r.json();
     WORKSPACE=w.current;
+    updateAgiTargetDisplay();
     if(WORKSPACE){
       document.title='Open Seed — '+w.name;
       setSB(w.name);
@@ -1133,6 +1141,7 @@ async function openFolder(dir){
     const result=await r.json();
     if(result.ok){
       WORKSPACE=result.dir;
+      updateAgiTargetDisplay();
       document.title='Open Seed — '+result.name;
       // Reload everything
       nav('files');
@@ -2496,7 +2505,7 @@ function ctxMenu(e,p,type){
     items.push(['Reveal in Finder',()=>{fetch('/api/terminal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'open "'+p+'"'})})},'']);
     items.push(['Open in Terminal',()=>{document.getElementById('tIn').value='cd '+p;runCmd()},'']);
     items.push(['---']);
-    items.push([AGI_TARGET_DIR===p?'✓ AGI Target':'Set as AGI Target',()=>{setAgiTarget(AGI_TARGET_DIR===p?null:p);showDropNotification(AGI_TARGET_DIR?'AGI target: '+AGI_TARGET_DIR:'AGI target reset',false)},'']);
+    items.push([getAgiResolvedTarget(AGI_TARGET_DIR)===p?'✓ AGI Target':'Set as AGI Target',()=>{const nextTarget=getAgiResolvedTarget(AGI_TARGET_DIR)===p?null:p;setAgiTarget(nextTarget);showDropNotification(nextTarget?'AGI target: '+getAgiResolvedTarget(nextTarget):'AGI target reset',false)},'']);
     items.push(['---']);
     items.push(['Delete',async()=>{const c=await showModal('Delete "'+p.split('/').pop()+'"? Type "yes" to confirm','yes');if(c==='yes')fetch('/api/file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})}).then(()=>forceReloadFiles())},'']);
   } else {
@@ -2717,13 +2726,59 @@ function pickModel(el,e){
 let AGI_RUNNING=false;
 let AGI_ABORT=null;
 let AGI_PROJECT_DIR=null;
-let AGI_TARGET_DIR=null; // subfolder within workspace to work in (e.g. "Test")
+let AGI_TARGET_DIR=null; // absolute or workspace-relative target path
+let AGI_RUN_SEQ=0;
+
+function isAbsoluteAgiPath(dir){
+  return /^([A-Za-z]:[\\/]|\/|~\/)/.test(dir||'');
+}
+
+function getAgiResolvedTarget(dir){
+  const raw=(dir||'').trim();
+  if(!raw) return WORKSPACE||'';
+  if(isAbsoluteAgiPath(raw)||!WORKSPACE) return raw;
+  const base=(WORKSPACE||'').replace(/[\\/]+$/,'');
+  const suffix=raw.replace(/^[./\\\/]+/,'');
+  return suffix?base+'/'+suffix:base;
+}
+
+function updateAgiTargetDisplay(){
+  const input=document.getElementById('agiPathInput');
+  const resolved=document.getElementById('agiResolvedPath');
+  const fullPath=getAgiResolvedTarget(AGI_TARGET_DIR);
+  if(input){
+    input.value=fullPath||'';
+    input.title=fullPath||'';
+  }
+  if(resolved){
+    if(fullPath){
+      resolved.textContent='Full path: '+fullPath;
+      resolved.title=fullPath;
+    }else if(WORKSPACE){
+      resolved.textContent='Workspace root: '+WORKSPACE;
+      resolved.title=WORKSPACE;
+    }else{
+      resolved.textContent='';
+      resolved.title='';
+    }
+  }
+}
+
+function switchAgiProvider(val){
+  const modelLabel=document.getElementById('sbModels');
+  if(val==='anthropic'){
+    if(modelLabel)modelLabel.textContent='Claude Opus 4.6';
+  }else if(val==='both'){
+    if(modelLabel)modelLabel.textContent='GPT-5.4 + Claude Opus 4.6';
+  }else{
+    if(modelLabel)modelLabel.textContent='GPT-5.4';
+  }
+}
 
 function setAgiTarget(dir){
   AGI_TARGET_DIR=dir&&dir.trim()?dir.trim():null;
-  const input=document.getElementById('agiPathInput');
   const zone=document.getElementById('agiDropZone');
-  if(input) input.value=AGI_TARGET_DIR||'';
+  updateAgiTargetDisplay();
   if(zone){
     if(AGI_TARGET_DIR){
       zone.style.borderColor='var(--accent)';
@@ -2735,36 +2790,172 @@ function setAgiTarget(dir){
   }
 }
 
-function handleAgiDrop(e){
+async function browseAgiFolder(){
+  let currentPath=AGI_TARGET_DIR||WORKSPACE||'/';
+  // If currentPath is relative, resolve against WORKSPACE
+  if(currentPath&&!currentPath.startsWith('/'))currentPath=(WORKSPACE||'/')+'/'+currentPath;
+
+  let popup=document.getElementById('agiFolderBrowsePopup');
+  if(popup){popup.remove();return}
+
+  popup=document.createElement('div');
+  popup.id='agiFolderBrowsePopup';
+  popup.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;z-index:10000;width:420px;max-height:500px;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.5)';
+  document.body.appendChild(popup);
+
+  async function loadDir(browsePath){
+    popup.innerHTML='<div style="color:var(--fg3);padding:8px">Loading...</div>';
+    try{
+      const d=await(await fetch('/api/browse-folders-abs?path='+encodeURIComponent(browsePath||'/'))).json();
+      if(d.error){popup.innerHTML='<div style="color:var(--red);padding:8px">'+esc(d.error)+'</div>';return}
+      let h='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">';
+      h+='<div style="font-size:13px;font-weight:600;color:var(--fg)">Select Folder</div>';
+      h+='<button onclick="document.getElementById(\'agiFolderBrowsePopup\').remove()" style="background:none;border:none;color:var(--fg3);cursor:pointer;font-size:16px">✕</button>';
+      h+='</div>';
+      h+='<div style="font-size:10px;color:var(--fg3);margin-bottom:8px;word-break:break-all;padding:4px 6px;background:var(--bg3);border-radius:4px">'+esc(d.current)+'</div>';
+      h+='<div style="display:flex;gap:6px;margin-bottom:10px">';
+      h+='<button onclick="setAgiTarget(\''+esc(d.current)+'\');document.getElementById(\'agiFolderBrowsePopup\').remove()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:11px;cursor:pointer;font-weight:600">Select This Folder</button>';
+      if(d.parent!==null)h+='<button id="agiBrowseUp" style="background:var(--bg5);border:1px solid var(--border);border-radius:4px;padding:5px 10px;font-size:11px;cursor:pointer;color:var(--fg2)">⬆️ Up</button>';
+      h+='</div>';
+      h+='<div id="agiBrowseList" style="max-height:320px;overflow-y:auto">';
+      if(!d.dirs.length)h+='<div style="color:var(--fg3);font-size:11px;padding:8px">No subfolders</div>';
+      for(const dir of d.dirs){
+        h+='<div class="agi-browse-row" data-path="'+esc(dir.path)+'" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;transition:background .1s" onmouseover="this.style.background=\'var(--bg5)\'" onmouseout="this.style.background=\'\'">';
+        h+='<span style="color:var(--accent);font-size:14px;flex-shrink:0">📁</span>';
+        h+='<span style="flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(dir.name)+'</span>';
+        h+='<button class="agi-browse-select" style="background:var(--accent);color:#fff;border:none;border-radius:3px;padding:2px 8px;font-size:10px;cursor:pointer;flex-shrink:0;opacity:.7" onmouseover="this.style.opacity=\'1\'" onmouseout="this.style.opacity=\'.7\'">Select</button>';
+        h+='</div>';
+      }
+      h+='</div>';
+      popup.innerHTML=h;
+      // Wire up click events
+      if(d.parent!==null){
+        const upBtn=document.getElementById('agiBrowseUp');
+        if(upBtn)upBtn.onclick=()=>loadDir(d.parent);
+      }
+      popup.querySelectorAll('.agi-browse-row').forEach(row=>{
+        const p=row.dataset.path;
+        row.querySelector('.agi-browse-select').onclick=(ev)=>{ev.stopPropagation();setAgiTarget(p);popup.remove()};
+        row.onclick=()=>loadDir(p);
+      });
+    }catch(err){
+      popup.innerHTML='<div style="color:var(--red);padding:8px">Error: '+esc(err.message)+'</div>';
+    }
+  }
+  loadDir(currentPath);
+}
+
+async function handleAgiDrop(e){
   e.preventDefault();
   const zone=document.getElementById('agiDropZone');
   if(zone){zone.style.borderColor='var(--border)';zone.style.background='var(--bg3)'}
-  // Try to get dropped folder path
-  const items=e.dataTransfer?.items;
-  if(items&&items.length>0){
-    // webkitGetAsEntry for folder detection
-    const entry=items[0].webkitGetAsEntry?.();
-    if(entry&&entry.isDirectory){
-      setAgiTarget(entry.fullPath);
-      return;
-    }
-  }
-  // Fallback: text/plain or files
-  const text=e.dataTransfer?.getData('text/plain');
-  if(text&&text.trim()){
-    // Could be a file:// URI or a plain path
-    let p=text.trim();
-    if(p.startsWith('file://'))p=decodeURIComponent(p.replace('file://',''));
-    setAgiTarget(p);
-    return;
-  }
+
+  // 1. Electron path (direct filesystem access)
   const files=e.dataTransfer?.files;
   if(files&&files.length>0){
-    // .path is available in some contexts (Electron/native)
     const f=files[0];
     if(f.path){setAgiTarget(f.path);return}
-    if(f.name){setAgiTarget(f.name);return}
   }
+
+  let fullPath='',name='',isDir=false;
+
+  // 2. file:// URI from Finder drag (macOS Safari/Chrome)
+  const uriList=(e.dataTransfer?.getData('text/uri-list')||'').trim();
+  if(uriList&&uriList.startsWith('file://')){
+    fullPath=decodeURIComponent(uriList.replace('file://','').split('\n')[0].trim());
+  }
+
+  // 3. text/plain might contain full path
+  if(!fullPath){
+    const text=(e.dataTransfer?.getData('text/plain')||'').trim();
+    if(text&&text.startsWith('/'))fullPath=text;
+    else if(text&&text.startsWith('file://'))fullPath=decodeURIComponent(text.replace('file://',''));
+  }
+
+  // 4. webkitGetAsEntry for name/isDirectory detection
+  if(!fullPath){
+    const items=e.dataTransfer?.items;
+    if(items&&items.length>0){
+      const getEntry=items[0].webkitGetAsEntry||items[0].getAsEntry;
+      if(getEntry){
+        const entry=getEntry.call(items[0]);
+        if(entry){name=entry.name;isDir=entry.isDirectory}
+      }
+    }
+  }
+
+  // 5. File name fallback
+  if(!fullPath&&!name&&files&&files.length>0){
+    name=files[0].name;
+  }
+
+  // If we got a direct full path, use it immediately
+  if(fullPath&&isAbsoluteAgiPath(fullPath)){
+    setAgiTarget(fullPath);
+    return;
+  }
+
+  // If we have a fullPath but it wasn't absolute, try server resolve
+  if(fullPath){
+    try{
+      const r=await(await fetch('/api/resolve-drop-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fullPath,name,isDirectory:isDir})})).json();
+      if(r.path!==undefined&&r.path!==null){
+        setAgiTarget(r.path);
+        return;
+      }
+      showDropNotification(r.error||'Could not resolve dropped path. Use 📁 Browse or paste the path.',true);
+    }catch(err){
+      showDropNotification('Drop failed: '+err.message,true);
+    }
+    return;
+  }
+
+  // Only have a name (no full path) — use Spotlight to find the folder system-wide
+  if(name){
+    try{
+      const r=await(await fetch('/api/resolve-drop-folder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})).json();
+      if(r.candidates&&r.candidates.length===1){
+        // Single match — use it directly
+        setAgiTarget(r.candidates[0]);
+        return;
+      }
+      if(r.candidates&&r.candidates.length>1){
+        // Multiple matches — show picker
+        showAgiDropCandidates(r.candidates,name);
+        return;
+      }
+      showDropNotification(r.error||'Folder "'+name+'" not found. Use 📁 Browse or paste the path.',true);
+    }catch(err){
+      showDropNotification('Search failed: '+err.message+'. Use 📁 Browse or paste the path.',true);
+    }
+    return;
+  }
+
+  showDropNotification('Could not read dropped item. Use 📁 Browse button or paste the absolute path.',true);
+}
+
+function showAgiDropCandidates(candidates,name){
+  let popup=document.getElementById('agiDropCandidatePopup');
+  if(popup)popup.remove();
+  popup=document.createElement('div');
+  popup.id='agiDropCandidatePopup';
+  popup.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;z-index:10000;width:460px;max-height:400px;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.5)';
+  let h='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
+  h+='<div style="font-size:13px;font-weight:600;color:var(--fg)">Which "'+esc(name)+'" folder?</div>';
+  h+='<button onclick="document.getElementById(\'agiDropCandidatePopup\').remove()" style="background:none;border:none;color:var(--fg3);cursor:pointer;font-size:16px">✕</button>';
+  h+='</div>';
+  h+='<div style="font-size:11px;color:var(--fg3);margin-bottom:10px">Multiple folders found. Select the one you meant:</div>';
+  for(const p of candidates){
+    h+='<div class="agi-candidate-row" data-path="'+esc(p)+'" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;transition:background .1s;margin-bottom:2px" onmouseover="this.style.background=\'var(--bg5)\'" onmouseout="this.style.background=\'\'">';
+    h+='<span style="color:var(--accent);font-size:14px;flex-shrink:0">📁</span>';
+    h+='<span style="flex:1;color:var(--fg);word-break:break-all">'+esc(p)+'</span>';
+    h+='</div>';
+  }
+  popup.innerHTML=h;
+  document.body.appendChild(popup);
+  popup.querySelectorAll('.agi-candidate-row').forEach(row=>{
+    row.onclick=()=>{setAgiTarget(row.dataset.path);popup.remove()};
+  });
 }
 
 /** Extract a project directory name from user prompt */
@@ -2790,12 +2981,290 @@ function extractProjectName(prompt){
 }
 
 let _agiFileCount=0,_agiTasksDone=0,_agiTasksTotal=0,_agiToolCalls=0,_agiLlmBuf='';
-function agiLog(msg,color,icon){
+let _agiWrittenFiles=new Set();
+let _agiStepStates=new Map();
+let _agiAwaitingClarification=false;
+let _agiClarificationPayload=null;
+
+function normalizeAgiTrackedPath(filePath){
+  if(typeof filePath!=='string')return '';
+  return filePath.trim();
+}
+
+function recordAgiWrittenFiles(paths){
+  const entries=Array.isArray(paths)?paths:[paths];
+  let changed=false;
+  for(const entry of entries){
+    const normalized=normalizeAgiTrackedPath(entry);
+    if(!normalized||_agiWrittenFiles.has(normalized))continue;
+    _agiWrittenFiles.add(normalized);
+    changed=true;
+  }
+  if(changed){
+    _agiFileCount=_agiWrittenFiles.size;
+    updateAgiDashboard({files:_agiFileCount});
+  }
+}
+
+function getAgiTrackedFileCount(reported){
+  const reportedCount=typeof reported==='number'&&Number.isFinite(reported)?reported:0;
+  return Math.max(reportedCount,_agiWrittenFiles.size,_agiFileCount);
+}
+
+function createAgiLogRow(color,icon){
+  const row=document.createElement('div');
+  row.style.cssText=`color:${color||'var(--fg3)'};display:flex;gap:6px;align-items:flex-start;padding:3px 0`;
+  const time=document.createElement('span');
+  time.style.cssText='color:var(--fg3);flex-shrink:0;font-size:10px;opacity:.6';
+  time.textContent=new Date().toLocaleTimeString('en',{hour12:false});
+  const ic=document.createElement('span');
+  ic.style.cssText='flex-shrink:0;width:14px;text-align:center';
+  ic.textContent=icon||'';
+  const body=document.createElement('div');
+  body.style.cssText='flex:1;min-width:0;word-break:break-word';
+  row.appendChild(time);
+  row.appendChild(ic);
+  row.appendChild(body);
+  return {row,body};
+}
+
+function agiLogNode(node,color,icon){
   const el=document.getElementById('agiLog');
-  const time=new Date().toLocaleTimeString('en',{hour12:false});
-  const ic=icon||'';
-  el.innerHTML+=`<div style="color:${color||'var(--fg3)'};display:flex;gap:6px;align-items:baseline;padding:1px 0"><span style="color:var(--fg3);flex-shrink:0;font-size:10px;opacity:.6">${time}</span><span style="flex-shrink:0;width:14px;text-align:center">${ic}</span><span style="word-break:break-all">${esc(msg)}</span></div>`;
+  const parts=createAgiLogRow(color,icon);
+  parts.body.appendChild(node);
+  el.appendChild(parts.row);
   el.scrollTop=el.scrollHeight;
+  return parts.body;
+}
+
+function agiLog(msg,color,icon){
+  const node=document.createElement('span');
+  node.textContent=String(msg??'');
+  agiLogNode(node,color,icon);
+}
+
+function getAgiCostDisplay(value){
+  if(value===undefined||value===null||value==='')return '—';
+  if(typeof value==='number')return value>0?`$${value.toFixed(4)}`:'—';
+  return String(value);
+}
+
+function getAgiCostDisplayFromSummary(summary){
+  if(!summary)return '—';
+  if(summary.hasBillableCost===false)return 'OAuth';
+  const cost=Number(summary.totalEstimatedCostUsd||0);
+  return cost>0?cost:'—';
+}
+
+function getAgiCostDisplayFromUpdate(payload){
+  if(payload?.costAvailable===false)return 'OAuth';
+  const cost=Number(payload?.totalCostUsd||0);
+  return cost>0?cost:'—';
+}
+
+function setAgiClarificationChoiceState(button,selected){
+  const recommended=button.dataset.recommended==='true';
+  button.dataset.selected=selected?'true':'false';
+  button.style.background=selected?'rgba(88,166,255,.18)':recommended?'rgba(88,166,255,.08)':'var(--bg2)';
+  button.style.borderColor=selected?'var(--accent)':recommended?'rgba(88,166,255,.35)':'var(--border)';
+  button.style.color=selected?'var(--fg)':recommended?'var(--accent2)':'var(--fg2)';
+  button.style.boxShadow=selected?'0 0 0 1px rgba(88,166,255,.18) inset':'';
+}
+
+function applyAgiClarificationDefaults(card){
+  const groups={};
+  card.querySelectorAll('button[data-group-id]').forEach(btn=>{
+    (groups[btn.dataset.groupId]=groups[btn.dataset.groupId]||[]).push(btn);
+  });
+  Object.values(groups).forEach(buttons=>{
+    const selected=buttons.filter(btn=>btn.dataset.selected==='true');
+    if(selected.length>0)return;
+    const target=buttons.find(btn=>btn.dataset.recommended==='true')||buttons[0];
+    if(!target)return;
+    if(target.dataset.selectionMode==='multi')setAgiClarificationChoiceState(target,true);
+    else buttons.forEach(btn=>setAgiClarificationChoiceState(btn,btn===target));
+  });
+}
+
+function clearAgiClarificationSelections(card){
+  card.querySelectorAll('button[data-group-id]').forEach(btn=>setAgiClarificationChoiceState(btn,false));
+}
+
+function collectAgiClarificationSelections(card,payload){
+  applyAgiClarificationDefaults(card);
+  const selections=[];
+  for(const group of (payload.groups||[])){
+    const buttons=[...card.querySelectorAll(`button[data-group-id="${group.id}"]`)];
+    const chosen=buttons.filter(btn=>btn.dataset.selected==='true');
+    for(const btn of chosen){
+      selections.push({
+        groupId:group.id,
+        groupLabel:btn.dataset.groupLabel||group.label||group.id,
+        optionId:btn.dataset.optionId||'',
+        optionLabel:btn.dataset.optionLabel||'',
+        optionDetail:btn.dataset.optionDetail||'',
+        promptFragment:btn.dataset.promptFragment||''
+      });
+    }
+  }
+  return selections;
+}
+
+function buildAgiClarifiedPrompt(payload,selections){
+  const original=(payload.originalTask||document.getElementById('agiPrompt').value||'').trim();
+  const bullets=selections.map(sel=>`- ${sel.groupLabel}: ${sel.optionLabel}${sel.optionDetail?` — ${sel.optionDetail}`:''}`);
+  const fragments=selections.map(sel=>`- ${sel.promptFragment||`${sel.groupLabel}: ${sel.optionLabel}`}`);
+  return [
+    original,
+    '',
+    '[Clarification Selections]',
+    bullets.join('\n'),
+    '',
+    'Treat the following as confirmed requirements and preferred defaults:',
+    fragments.join('\n')
+  ].join('\n').trim();
+}
+
+
+function renderAgiClarificationCard(payload){
+  const card=document.createElement('div');
+  card.style.cssText='border:1px solid rgba(88,166,255,.35);background:rgba(88,166,255,.06);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:12px';
+
+  const title=document.createElement('div');
+  title.style.cssText='font-size:12px;font-weight:700;color:var(--fg)';
+  title.textContent=payload.message||'More detail will improve the plan before debate.';
+  card.appendChild(title);
+
+  if(payload.reason){
+    const reason=document.createElement('div');
+    reason.style.cssText='font-size:11px;color:var(--fg2)';
+    reason.textContent=payload.reason;
+    card.appendChild(reason);
+  }
+
+  if(payload.summary){
+    const summary=document.createElement('div');
+    summary.style.cssText='font-size:11px;color:var(--fg3)';
+    summary.textContent=payload.summary;
+    card.appendChild(summary);
+  }
+
+  const note=document.createElement('div');
+  note.style.cssText='font-size:10px;color:var(--fg3)';
+  note.textContent='Recommended defaults are preselected. Change only the groups you care about.';
+  card.appendChild(note);
+
+  for(const group of (payload.groups||[])){
+    const section=document.createElement('div');
+    section.style.cssText='display:flex;flex-direction:column;gap:8px';
+
+    const label=document.createElement('div');
+    label.style.cssText='font-size:11px;font-weight:600;color:var(--fg)';
+    label.textContent=group.label||group.id;
+    section.appendChild(label);
+
+    const options=document.createElement('div');
+    options.style.cssText='display:flex;flex-wrap:wrap;gap:8px';
+    for(const option of (group.options||[])){
+      const btn=document.createElement('button');
+      btn.type='button';
+      btn.dataset.groupId=group.id||'';
+      btn.dataset.groupLabel=group.label||group.id||'';
+      btn.dataset.optionId=option.id||'';
+      btn.dataset.optionLabel=option.label||'';
+      btn.dataset.optionDetail=option.detail||'';
+      btn.dataset.promptFragment=option.promptFragment||'';
+      btn.dataset.selectionMode=group.selectionMode==='multi'?'multi':'single';
+      btn.dataset.recommended=(option.recommended||option.id===group.recommendedOptionId)?'true':'false';
+      btn.style.cssText='display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:9px 10px;min-width:140px;max-width:220px;border-radius:8px;border:1px solid var(--border);cursor:pointer;transition:all .15s ease;text-align:left';
+
+      const top=document.createElement('span');
+      top.style.cssText='font-size:11px;font-weight:600';
+      top.textContent=option.label||option.id||'Option';
+      btn.appendChild(top);
+
+      if(option.detail){
+        const detail=document.createElement('span');
+        detail.style.cssText='font-size:10px;line-height:1.4;color:var(--fg3)';
+        detail.textContent=option.detail;
+        btn.appendChild(detail);
+      }
+
+      if(btn.dataset.recommended==='true'){
+        const badge=document.createElement('span');
+        badge.style.cssText='font-size:9px;padding:1px 6px;border-radius:999px;background:rgba(88,166,255,.12);color:var(--accent2)';
+        badge.textContent='Recommended';
+        btn.appendChild(badge);
+      }
+
+      setAgiClarificationChoiceState(btn,false);
+      btn.addEventListener('click',()=>{
+        const groupButtons=[...options.querySelectorAll(`button[data-group-id="${group.id}"]`)];
+        if(btn.dataset.selectionMode==='multi'){
+          setAgiClarificationChoiceState(btn,btn.dataset.selected!=='true');
+          return;
+        }
+        groupButtons.forEach(other=>setAgiClarificationChoiceState(other,other===btn));
+      });
+      options.appendChild(btn);
+    }
+    section.appendChild(options);
+    card.appendChild(section);
+  }
+
+  const actions=document.createElement('div');
+  actions.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center';
+
+  const recommendedBtn=document.createElement('button');
+  recommendedBtn.type='button';
+  recommendedBtn.className='save-btn';
+  recommendedBtn.style.cssText='font-size:10px;padding:8px 12px;margin:0;border-radius:7px;background:rgba(88,166,255,.12);color:var(--accent2);border:1px solid rgba(88,166,255,.28)';
+  recommendedBtn.textContent='Use Recommended Defaults';
+  recommendedBtn.onclick=()=>applyAgiClarificationDefaults(card);
+  actions.appendChild(recommendedBtn);
+
+  const clearBtn=document.createElement('button');
+  clearBtn.type='button';
+  clearBtn.className='save-btn';
+  clearBtn.style.cssText='font-size:10px;padding:8px 12px;margin:0;border-radius:7px;background:var(--bg3);color:var(--fg2);border:1px solid var(--border)';
+  clearBtn.textContent='Clear Choices';
+  clearBtn.onclick=()=>clearAgiClarificationSelections(card);
+  actions.appendChild(clearBtn);
+
+  const continueBtn=document.createElement('button');
+  continueBtn.type='button';
+  continueBtn.className='save-btn';
+  continueBtn.style.cssText='font-size:10px;padding:8px 12px;margin:0;border-radius:7px;font-weight:700';
+  continueBtn.textContent='Continue With Selected Options';
+  continueBtn.onclick=async()=>{
+    if(continueBtn.disabled)return;
+    continueBtn.disabled=true;
+    continueBtn.style.opacity='.65';
+    continueBtn.style.cursor='default';
+    const selections=collectAgiClarificationSelections(card,payload);
+    const prompt=buildAgiClarifiedPrompt(payload,selections);
+    document.getElementById('agiPrompt').value=prompt;
+    AGI_RUN_SEQ++;
+    if(AGI_ABORT){
+      try{AGI_ABORT.abort();}catch{}
+    }
+    AGI_RUNNING=false;
+    AGI_ABORT=null;
+    _agiLlmBuf='';
+    _agiAwaitingClarification=false;
+    _agiClarificationPayload=null;
+    try{card.remove();}catch{}
+    document.getElementById('agiStartBtn').style.display='';
+    document.getElementById('agiStopBtn').style.display='none';
+    updateAgiDashboard({status:'Restarting',phase:'analyze'});
+    await new Promise(resolve=>setTimeout(resolve,0));
+    await startAgiV2();
+  };
+  actions.appendChild(continueBtn);
+
+  card.appendChild(actions);
+  applyAgiClarificationDefaults(card);
+  agiLogNode(card,'var(--accent)','?');
 }
 
 function setAgiStep(step,state){
@@ -2810,15 +3279,15 @@ function updateAgiDashboard(data){
   if(data.files!==undefined)document.getElementById('agiFiles').textContent=data.files;
   if(data.tools!==undefined){const el=document.getElementById('agiTools');if(el)el.textContent=data.tools;}
   if(data.tokens!==undefined)document.getElementById('agiTokens').textContent=typeof data.tokens==='number'?data.tokens.toLocaleString():data.tokens;
-  if(data.cost!==undefined){const el=document.getElementById('agiCost');if(el)el.textContent=typeof data.cost==='number'?'$'+data.cost.toFixed(4):data.cost;}
+  if(data.cost!==undefined){const el=document.getElementById('agiCost');if(el)el.textContent=getAgiCostDisplay(data.cost);}
   if(data.replans!==undefined){const el=document.getElementById('agiReplans');if(el)el.textContent=data.replans;}
   if(data.percent!==undefined)document.getElementById('agiBar').style.width=data.percent+'%';
   if(data.status){
     const badge=document.getElementById('agiStatusBadge');
     badge.textContent=data.status;
-    const isRun=data.status==='Running';const isDone=data.status==='Done';
-    badge.style.background=isRun?'rgba(88,166,255,0.15)':isDone?'rgba(16,163,127,0.3)':'var(--bg5)';
-    badge.style.color=isRun?'var(--accent)':isDone?'var(--green)':'var(--fg3)';
+    const isRun=data.status==='Running';const isDone=data.status==='Done';const needsInput=data.status==='Needs Input';
+    badge.style.background=isRun?'rgba(88,166,255,0.15)':isDone?'rgba(16,163,127,0.3)':needsInput?'rgba(210,153,34,0.18)':'var(--bg5)';
+    badge.style.color=isRun?'var(--accent)':isDone?'var(--green)':needsInput?'var(--yellow)':'var(--fg3)';
     document.getElementById('agiDot').style.display=isRun?'':'none';
     // Elapsed timer
     if(isRun&&!_agiElapsedTimer){
@@ -2835,8 +3304,10 @@ function updateAgiDashboard(data){
 }
 
 function stopAgi(){
+  AGI_RUN_SEQ++;
   AGI_RUNNING=false;
   if(AGI_ABORT)AGI_ABORT.abort();
+  AGI_ABORT=null;
   _agiLlmBuf='';
   agiLog('Pipeline stopped by user','var(--yellow)');
   updateAgiDashboard({status:'Stopped'});
@@ -2886,9 +3357,11 @@ function renderPipelineSteps(steps){
     div.title=s.title;
     el.appendChild(div);
   });
+  steps.forEach((s)=>setAgiStepById(s.id,_agiStepStates.get(s.id)||'pending'));
 }
 
 function setAgiStepById(stepId,state){
+  _agiStepStates.set(stepId,state);
   const el=document.getElementById('agi-s-'+stepId);
   if(!el)return;
   const styles={
@@ -2909,6 +3382,7 @@ function setAgiStepById(stepId,state){
 async function startAgiV2(){
   const prompt=document.getElementById('agiPrompt').value.trim();
   if(!prompt||AGI_RUNNING)return;
+  const runSeq=++AGI_RUN_SEQ;
 
   AGI_RUNNING=true;
   AGI_PROJECT_DIR=null; // no longer used for folder creation
@@ -2916,24 +3390,45 @@ async function startAgiV2(){
   document.getElementById('agiStopBtn').style.display='';
   document.getElementById('agiLog').innerHTML='';
   _agiFileCount=0;_agiTasksDone=0;_agiTasksTotal=0;_agiToolCalls=0;
-  updateAgiDashboard({files:0,tasks:'0/0',tokens:0,cost:0,confidence:'—'});
+  _agiWrittenFiles=new Set();
+  _agiStepStates=new Map();
+  _agiAwaitingClarification=false;_agiClarificationPayload=null;
+  updateAgiDashboard({files:0,tasks:'0/0',tokens:0,cost:'—',confidence:'—'});
 
-  const targetLabel=AGI_TARGET_DIR?AGI_TARGET_DIR+'/':'/ (root)';
+  const targetLabel=AGI_TARGET_DIR?getAgiResolvedTarget(AGI_TARGET_DIR):(WORKSPACE?WORKSPACE+' (workspace root)':'/ (root)');
   agiLog('AGI Pipeline V2 starting: '+prompt,'var(--accent)');
   agiLog('Target: '+targetLabel,'var(--fg2)');
-  agiLog('Dynamic pipeline — steps auto-generated based on task complexity','var(--fg3)');
+  agiLog('Fixed pipeline: ANALYZE → DEBATE → DESIGN → BUILD → VERIFY → FIX','var(--fg3)');
   updateAgiDashboard({status:'Running',percent:0});
 
   try{
     const ctrl=new AbortController();AGI_ABORT=ctrl;
     const payload={task:prompt};
-    if(AGI_TARGET_DIR) payload.targetDir=AGI_TARGET_DIR;
+    if(AGI_TARGET_DIR) payload.targetDir=getAgiResolvedTarget(AGI_TARGET_DIR);
+    const providerSel=document.getElementById('agiProviderSelect')?.value||'openai';
+    payload.provider=providerSel;
     const r=await fetch('/api/agi/run',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(payload),
       signal:ctrl.signal
     });
+    const contentType=(r.headers.get('content-type')||'').toLowerCase();
+    if(!r.ok||!contentType.includes('text/event-stream')||!r.body){
+      let details=`HTTP ${r.status}`;
+      try{
+        const raw=(await r.text()).trim();
+        if(raw){
+          try{
+            const parsed=JSON.parse(raw);
+            details=parsed.error||parsed.message||raw;
+          }catch{
+            details=raw;
+          }
+        }
+      }catch{}
+      throw new Error(details);
+    }
 
     const reader=r.body.getReader();
     const decoder=new TextDecoder();
@@ -2941,17 +3436,25 @@ async function startAgiV2(){
     let pipelineStartTime=Date.now();
     let currentSteps=[];
     let completedCount=0;
+    let streamDone=false;
 
     while(true){
+      if(runSeq!==AGI_RUN_SEQ){
+        try{await reader.cancel();}catch{}
+        return;
+      }
       const{done,value}=await reader.read();
-      if(done)break;
+      if(done||streamDone)break;
       buf+=decoder.decode(value,{stream:true});
       const lines=buf.split('\n');buf=lines.pop()||'';
 
       for(const l of lines){
         if(!l.startsWith('data: '))continue;
         const d=l.slice(6);
-        if(d==='[DONE]')break;
+        if(d==='[DONE]'){
+          streamDone=true;
+          break;
+        }
         try{
           const ev=JSON.parse(d);
 
@@ -2973,8 +3476,8 @@ async function startAgiV2(){
             completedCount++;
             setAgiStepById(ev.stepId,'done');
             agiLog(`[DONE] ${(ev.stepType||'').toUpperCase()}: completed`,'var(--green)');
-            updateAgiDashboard({tasks:`${completedCount}/${currentSteps.length}`,files:ev.filesCreated||_agiFileCount});
-            if(ev.filesCreated)_agiFileCount=ev.filesCreated;
+            _agiFileCount=getAgiTrackedFileCount(ev.filesCreated);
+            updateAgiDashboard({tasks:`${completedCount}/${currentSteps.length}`,files:_agiFileCount});
           }
           else if(ev.type==='agi.step.fail'){
             setAgiStepById(ev.stepId,'error');
@@ -2987,13 +3490,32 @@ async function startAgiV2(){
           else if(ev.type==='agi.replan'){
             agiLog(`REPLAN #${ev.replanCount}: ${ev.reason}`,'var(--yellow)');
             updateAgiDashboard({replans:ev.replanCount||0});
-            if(ev.totalSteps>currentSteps.length){
-              agiLog(`Pipeline expanded: ${currentSteps.length} → ${ev.totalSteps} steps`,'var(--yellow)');
+            const previousCount=currentSteps.length;
+            if(Array.isArray(ev.plan?.steps)&&ev.plan.steps.length>0){
+              currentSteps=ev.plan.steps;
+              renderPipelineSteps(currentSteps);
+              updateAgiDashboard({tasks:`${completedCount}/${currentSteps.length}`});
+            }
+            if(ev.totalSteps>previousCount){
+              agiLog(`Pipeline expanded: ${previousCount} → ${ev.totalSteps} steps`,'var(--yellow)');
             }
           }
           else if(ev.type==='agi.pipeline.complete'){
-            agiLog(`Pipeline ${ev.success?'COMPLETE':'FINISHED'}: ${ev.completedSteps}/${ev.totalSteps} steps, ${ev.filesCreated||0} files`,'var(--green)');
+            const finalFiles=getAgiTrackedFileCount(ev.filesCreated);
+            _agiFileCount=finalFiles;
+            agiLog(`Pipeline ${ev.success?'COMPLETE':'FINISHED'}: ${ev.completedSteps}/${ev.totalSteps} steps, ${finalFiles} files`,'var(--green)');
             if(ev.replanCount>0)agiLog(`Auto-replanned ${ev.replanCount} times`,'var(--fg3)');
+          }
+          else if(ev.type==='agi.pipeline.awaiting_input'){
+            _agiAwaitingClarification=true;
+            updateAgiDashboard({status:'Needs Input',phase:'clarify'});
+          }
+          else if(ev.type==='agi.clarification.requested'){
+            _agiAwaitingClarification=true;
+            _agiClarificationPayload=ev;
+            agiLog(`Analyze needs a bit more direction before ${(ev.targetStep||'the next step').toUpperCase()}.`,'var(--yellow)','?');
+            renderAgiClarificationCard(ev);
+            updateAgiDashboard({status:'Needs Input',phase:'clarify'});
           }
           else if(ev.type==='agi.pipeline.fail'){
             agiLog(`Pipeline FAILED: ${ev.error||'unknown'}`,'var(--red)');
@@ -3038,10 +3560,9 @@ async function startAgiV2(){
               const color=ok?'var(--green)':'var(--red)';
 
               if(tool==='write'&&ok){
-                _agiFileCount++;
                 const fp=pl.output?.path||'';
+                recordAgiWrittenFiles(fp);
                 agiLog(`[write] ${fp}`,'var(--green)','W');
-                updateAgiDashboard({files:_agiFileCount});
               } else if(tool==='read'&&ok){
                 agiLog(`[read] ${pl.output?.path||'file'}`,'var(--fg3)','R');
               } else if(tool==='bash'){
@@ -3053,6 +3574,7 @@ async function startAgiV2(){
               } else if(tool==='glob'&&ok){
                 agiLog(`[glob] ${pl.input?.pattern||'?'} → ${pl.output?.count||'?'} files`,'var(--fg3)');
               } else if(tool==='apply_patch'&&ok){
+                recordAgiWrittenFiles(pl.output?.path||'');
                 agiLog(`[patch] ${pl.output?.path||'?'} (${pl.output?.editsApplied||'?'} edits)`,'var(--accent)');
               } else if(tool==='multi_patch'){
                 agiLog(`[multi_patch] ${pl.output?.patchCount||'?'} files ${ok?'patched':'FAILED'}`,color);
@@ -3116,15 +3638,17 @@ async function startAgiV2(){
               agiLog(`FATAL: ${(pl.message||'').slice(0,200)}`,'var(--red)');
             }
             else if(cls==='sandbox.applied'){
+              recordAgiWrittenFiles(pl.paths||[]);
               agiLog(`Sandbox applied: ${pl.paths?.length||0} files written to disk`,'var(--green)');
             }
             else if(cls==='sandbox.staged'){
               agiLog(`Staged: ${pl.path||'?'} (${pl.bytes||0} bytes)`,'var(--fg3)');
             }
             else if(cls==='cost.update'){
-              const cost=pl.totalCostUsd?`$${Number(pl.totalCostUsd).toFixed(4)}`:'?';
-              agiLog(`Cost: ${cost}, tokens: ${pl.totalTokens||'?'}`,'var(--fg3)');
-              updateAgiDashboard({cost:cost,tokens:pl.totalTokens||0});
+              const cost=getAgiCostDisplayFromUpdate(pl);
+              if(pl.costAvailable===false)agiLog(`Tokens: ${pl.totalTokens||'?'}`,'var(--fg3)');
+              else agiLog(`Cost: ${getAgiCostDisplay(cost)}, tokens: ${pl.totalTokens||'?'}`,'var(--fg3)');
+              updateAgiDashboard({cost,tokens:pl.totalTokens||0});
             }
             else if(cls==='session.checkpoint'){
               agiLog(`Checkpoint saved (${pl.fileCount||0} files)`,'var(--fg3)');
@@ -3167,23 +3691,37 @@ async function startAgiV2(){
 
         }catch(parseErr){/* ignore parse errors */}
       }
+      if(streamDone){
+        try{await reader.cancel();}catch{}
+        break;
+      }
     }
   }catch(e){
+    if(runSeq!==AGI_RUN_SEQ)return;
     if(e.name==='AbortError'){
-      agiLog('Pipeline stopped by user','var(--yellow)');
+      if(AGI_RUNNING)agiLog('Pipeline stopped by user','var(--yellow)');
     }else{
       agiLog('Pipeline error: '+(e.message||e),'var(--red)');
     }
   }
 
+  if(runSeq!==AGI_RUN_SEQ)return;
+
   // Finish
-  updateAgiDashboard({status:'Done',percent:100});
-  if(AGI_TARGET_DIR){
-    agiLog('Output: '+AGI_TARGET_DIR+'/','var(--green)');
-  }
-  agiLog('AGI Pipeline V2 complete!','var(--green)');
+  const awaitingInput=_agiAwaitingClarification;
+  const waitingPercent=currentSteps.length>0?Math.round((completedCount/Math.max(1,currentSteps.length))*100):0;
+  updateAgiDashboard({status:awaitingInput?'Needs Input':'Done',phase:awaitingInput?'clarify':undefined,percent:awaitingInput?waitingPercent:100});
+  if(awaitingInput){
+    agiLog(`Waiting for your selections before moving to ${((_agiClarificationPayload?.targetStep)||'the next step').toUpperCase()}.`,'var(--yellow)','?');
+	  }else{
+	    if(AGI_TARGET_DIR){
+	      agiLog('Output: '+getAgiResolvedTarget(AGI_TARGET_DIR),'var(--green)');
+	    }
+	    agiLog('AGI Pipeline V2 complete!','var(--green)');
+	  }
   AGI_RUNNING=false;
   AGI_PROJECT_DIR=null;
+  AGI_ABORT=null;
   document.getElementById('agiStartBtn').style.display='';
   document.getElementById('agiStopBtn').style.display='none';
   forceReloadFiles();
@@ -3469,7 +4007,7 @@ async function processAgiStream(response){
             agiLog(cls+' '+(ps||''),'var(--fg3)','·');
           }
           // Update costs
-          if(po.costs)updateAgiDashboard({cost:po.costs.totalEstimatedCostUsd||0,tokens:(po.costs.totalInputTokens||0)+(po.costs.totalOutputTokens||0)});
+          if(po.costs)updateAgiDashboard({cost:getAgiCostDisplayFromSummary(po.costs),tokens:(po.costs.totalInputTokens||0)+(po.costs.totalOutputTokens||0)});
         }else if(ev.type==='llm'){
           fullOutput+=ev.text||'';
           // Show periodic LLM activity indicator (not every chunk)

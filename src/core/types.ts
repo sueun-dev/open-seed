@@ -286,7 +286,8 @@ export type EventType =
   | "rule.blocked"
   | "error.retriable"
   | "error.fatal"
-  | "enforcer.stuck";
+  | "enforcer.stuck"
+  | "agi.prelude.artifact";
 
 export interface AgentEvent {
   type: EventType;
@@ -341,6 +342,7 @@ export interface SessionRecord {
   resumedFrom?: string;
   tasks: TaskRecord[];
   lastReview?: ReviewResult;
+  metadata?: Record<string, unknown>;
   /** Token budget tracking */
   tokenBudget?: TokenBudget;
   /** PID of the process running this session (for liveness checks) */

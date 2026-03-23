@@ -1,0 +1,14 @@
+{
+  "name": "neon-snake",
+  "version": "1.0.0",
+  "description": "Neon-styled Snake game — HTML5 Canvas, Web Audio API, progressive difficulty, keyboard controls",
+  "private": true,
+  "scripts": {
+    "start": "npx serve .",
+    "test": "npx playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "serve": "^14.2.4"
+  }
+}

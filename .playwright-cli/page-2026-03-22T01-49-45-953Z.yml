@@ -1,0 +1,408 @@
+- generic [active] [ref=e1]:
+  - banner:
+    - generic [ref=e2]:
+      - generic [ref=e4]:
+        - link "OpenAI Home" [ref=e5] [cursor=pointer]:
+          - /url: /
+          - img [ref=e7]
+        - generic [ref=e14]:
+          - generic [ref=e16]:
+            - button "Open Search" [ref=e18] [cursor=pointer]:
+              - img [ref=e19]
+            - button "Close Search" [ref=e21] [cursor=pointer]:
+              - img [ref=e22]
+          - generic [ref=e24]:
+            - link "Try ChatGPT (opens in a new window)" [ref=e26] [cursor=pointer]:
+              - /url: https://chatgpt.com/?openaicom-did=7c73ac4e-8f3b-4df5-9926-0946c98f9cd6&openaicom_referred=true
+              - text: Try ChatGPT
+              - img [ref=e27]
+              - generic [ref=e29]: (opens in a new window)
+            - button "Open mobile navigation" [ref=e30] [cursor=pointer]:
+              - img [ref=e31]
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - list:
+                - listitem:
+                  - button: Research
+                - listitem:
+                  - button: Products
+                - listitem:
+                  - button: Business
+                - listitem:
+                  - button: Developers
+                - listitem:
+                  - button: Company
+                - listitem:
+                  - link:
+                    - /url: /foundation/
+                    - text: Foundation
+  - generic [ref=e33]:
+    - main [ref=e34]:
+      - generic [ref=e35]: Codex | AI Coding Partner from OpenAI | OpenAI
+      - generic [ref=e36]:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic: Your browser does not support the video tag.
+        - generic [ref=e41]:
+          - button "asdfadsf" [ref=e42] [cursor=pointer]
+          - heading "Codex" [level=1] [ref=e44]
+          - paragraph [ref=e46]: Try with Free and Go, or enjoy 2x rate limits on other plans for a limited time.
+          - link "Download for macOS" [ref=e52] [cursor=pointer]:
+            - /url: https://persistent.oaistatic.com/codex-app-prod/Codex.dmg
+        - img "Codex interface showing a workspace sidebar with tasks like “Create Codex hero” and “Implement dark mode.” The main panel displays a prompt to create a launch hero for the Codex app, progress updates (reading and editing files), and an input field labeled “Ask Codex anything,” with the model set to GPT-5.3-Codex." [ref=e58]
+        - group "Cisco logo, Instacart logo, Duolingo logo, Vanta logo, Virgin Atlantic logo, Miro logo, Rakuten logo, Whoop logo" [ref=e63]
+        - generic [ref=e133]:
+          - heading "The best way to build with agents" [level=2] [ref=e137]
+          - generic [ref=e139]:
+            - generic [ref=e141]:
+              - heading "Built to drive real engineering work" [level=3] [ref=e142]
+              - paragraph [ref=e143]: From routine pull requests to your hardest problems, Codex reliably completes tasks end to end, like building features, complex refactors, migrations, and more, powered by OpenAI’s frontier coding models.
+            - img "Left-hand navigation panel listing workspaces and projects, including Codex, ChatGPT, and Sora, with active tasks such as onboarding polish and implementing dark mode." [ref=e151]
+          - generic [ref=e153]:
+            - generic [ref=e155]:
+              - heading "Designed for multi-agent workflows" [level=3] [ref=e156]
+              - paragraph [ref=e157]: The Codex app is a command center for agentic coding. With built-in worktrees and cloud environments, agents work in parallel across projects, completing weeks of work in days.
+            - img "New skill creation modal offering options to create a skill with Codex from a thread or upload a skill file, with additional suggested skills listed below." [ref=e165]
+          - generic [ref=e167]:
+            - generic [ref=e169]:
+              - heading "Adapts to how your team builds" [level=3] [ref=e170]
+              - paragraph [ref=e171]: With Skills, Codex goes beyond writing code to directly contribute to the work that turns pull requests into products, like code understanding, prototyping, and documentation, aligned with your team’s standards.
+            - img "Interface showing a Codex skill workflow where the user asks to use the $openai-image style skill to turn website assets into clouds. The panel shows step-by-step status messages (“Thought for 3s,” “Using skills”), and a generated preview image of a dog formed from clouds against a blue sky." [ref=e179]
+          - generic [ref=e181]:
+            - generic [ref=e183]:
+              - heading "Made for always-on background work" [level=3] [ref=e184]
+              - paragraph [ref=e185]: With Automations, Codex works unprompted, picking up routine but important work like issue triage, alert monitoring, CI/CD, and more, so you can stay focused on building.
+            - img "Commit dialog summarizing pending changes, branch name, number of files changed with line additions and removals, an input to describe changes, and buttons to commit or create a pull request" [ref=e193]
+          - generic [ref=e195]:
+            - generic [ref=e197]:
+              - heading "Raises the bar across your team" [level=3] [ref=e198]
+              - paragraph [ref=e199]: Codex raises baseline quality with more thorough designs, comprehensive testing, and high-signal code review—so issues are caught early and your team ships with confidence.
+            - img "Confirmation panel indicating all changes applied to a local workspace, showing workspace name, branch, files changed with additions and deletions, and a primary action button to continue locally." [ref=e207]
+        - generic [ref=e210]:
+          - generic [ref=e213]:
+            - heading "The same agent everywhere you build" [level=2] [ref=e214]
+            - paragraph [ref=e216]: Use Codex across multiple surfaces, all connected by your ChatGPT account.
+            - link "Learn more in the developer docs (opens in a new window)" [ref=e219] [cursor=pointer]:
+              - /url: https://developers.openai.com/codex/
+              - text: Learn more in the developer docs
+              - img [ref=e220]
+              - generic [ref=e222]: (opens in a new window)
+          - generic [ref=e225]:
+            - generic [ref=e226]:
+              - img "App-style coding interface titled “Let’s code,” set to a weather app. A prompt reads “Add exponential backoff to the notifications API,” showing a developer using Codex to request a specific backend improvement." [ref=e232]
+              - generic [ref=e233]:
+                - heading "Start in the Codex app" [level=3] [ref=e235]
+                - link "Download for macOS" [ref=e240] [cursor=pointer]:
+                  - /url: https://persistent.oaistatic.com/codex-app-prod/Codex.dmg
+            - generic [ref=e241]:
+              - img "Code review interface showing recent changes after implementing dark mode. Two files are edited with added and removed lines, and a message says “Looks great, add tests!” indicating collaborative review and iteration within a development workflow." [ref=e247]
+              - generic [ref=e248]:
+                - heading "Move to your editor" [level=3] [ref=e250]
+                - button "Try in your IDE" [ref=e256] [cursor=pointer]:
+                  - img [ref=e257]
+                  - text: Try in your IDE
+            - generic [ref=e259]:
+              - img "Terminal-style interface showing OpenAI Codex (v0.91.0) with the model set to “gpt-5.2-codex medium.” A prompt reads “Hey Codex, implement dark mode,” indicating a developer asking Codex to modify code via the command line." [ref=e265]
+              - generic [ref=e266]:
+                - heading "Keep going in the terminal" [level=3] [ref=e268]
+                - button "$ npm i -g @openai/codex" [ref=e273] [cursor=pointer]:
+                  - generic [ref=e274]: $ npm i -g @openai/codex
+                  - img [ref=e275]
+        - generic [ref=e279]:
+          - generic [ref=e281]:
+            - heading "What builders are saying" [level=2] [ref=e285]
+            - group "Testimonials" [ref=e286]:
+              - generic [ref=e287]:
+                - generic [ref=e288]:
+                  - img "Codex app > Layout > Testimonials > daniel-sikorskiy 1" [ref=e292]
+                  - paragraph [ref=e293]: “At Wonderful, Codex CLI has completely replaced every other agentic harness for our core technology and architecture work requiring deep reasoning and understanding.”
+                - paragraph [ref=e294]: Daniel Sikorskiy, Chief Architect, Wonderful
+              - generic [ref=e295]:
+                - generic [ref=e296]:
+                  - img "Codex app > Layout > Testimonials > joey wang" [ref=e300]
+                  - paragraph [ref=e301]: “At Harvey, Codex transformed how we build by cutting early iteration time by 30–50%, freeing engineers to focus on system design and high-leverage decisions.”
+                - paragraph [ref=e302]: Joey Wang, Mobile Lead, Harvey
+              - generic [ref=e303]:
+                - generic [ref=e304]:
+                  - img "Codex app > Layout > Testimonials > tess-rosania 1" [ref=e308]
+                  - paragraph [ref=e309]: “With Codex, we ship in a weekend what previously took a quarter. It’s become our go-to for projects we wouldn’t have otherwise been able to take on.”
+                - paragraph [ref=e310]: Tess Rosania, Software Engineer, Sierra
+              - generic [ref=e311]:
+                - generic [ref=e312]:
+                  - img "Codex app > Layout > Testimonials > austin-ray 1" [ref=e316]
+                  - paragraph [ref=e317]: “The recent Codex releases have been a step change. Codex PR reviews catch bugs our team would have missed, and we ship with more confidence because of it. Now we’re pulling the CLI and desktop app into more of our workflows—each release raises the bar.”
+                - paragraph [ref=e318]: Austin Ray, AI Dev X Team Lead, Ramp
+              - generic [ref=e319]:
+                - generic [ref=e320]:
+                  - img "Codex app > Layout > Testimonials > dan-shipper 1" [ref=e324]
+                  - paragraph [ref=e325]: “Codex performed best in our backend Python code-review benchmark. It was the only one to catch tricky backward compatibility issues and consistently found the hard bugs that other bots missed.”
+                - paragraph [ref=e326]: Aaron Wang, Senior Software Engineer, Duolingo
+              - generic [ref=e327]:
+                - generic [ref=e328]:
+                  - img "Codex app > Layout > Testimonials > tres-wong-godfrey 1" [ref=e332]
+                  - paragraph [ref=e333]: “I needed to update another team’s codebase for a release. Codex handled the refactor and test generation, delivering fully tested code I handed back fast—keeping the feature on schedule without added risk.”
+                - paragraph [ref=e334]: Tres Wong-Godfrey, Tech Lead, Cisco Meraki
+          - generic [ref=e336]:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic: Your browser does not support the video tag.
+            - generic [ref=e337]:
+              - heading "Try Codex today" [level=2] [ref=e338]
+              - generic [ref=e339]: Try with Free and Go, or enjoy 2x rate limits on other plans for a limited time.
+              - link "Download for macOS" [ref=e345] [cursor=pointer]:
+                - /url: https://persistent.oaistatic.com/codex-app-prod/Codex.dmg
+    - contentinfo [ref=e346]:
+      - generic [ref=e348]:
+        - generic [ref=e349]:
+          - generic [ref=e350]:
+            - heading "Our Research" [level=2] [ref=e351]
+            - list [ref=e352]:
+              - listitem [ref=e353]:
+                - link "Research Index" [ref=e354] [cursor=pointer]:
+                  - /url: /research/index/
+              - listitem [ref=e355]:
+                - link "Research Overview" [ref=e356] [cursor=pointer]:
+                  - /url: /research/
+              - listitem [ref=e357]:
+                - link "Research Residency" [ref=e358] [cursor=pointer]:
+                  - /url: /residency/
+              - listitem [ref=e359]:
+                - link "OpenAI for Science" [ref=e360] [cursor=pointer]:
+                  - /url: /science/
+              - listitem [ref=e361]:
+                - link "Economic Research" [ref=e362] [cursor=pointer]:
+                  - /url: /signals/
+          - generic [ref=e363]:
+            - heading "Latest Advancements" [level=2] [ref=e364]
+            - list [ref=e365]:
+              - listitem [ref=e366]:
+                - link "GPT-5.3 Instant" [ref=e367] [cursor=pointer]:
+                  - /url: /index/gpt-5-3-instant/
+              - listitem [ref=e368]:
+                - link "GPT-5.3-Codex" [ref=e369] [cursor=pointer]:
+                  - /url: /index/introducing-gpt-5-3-codex/
+              - listitem [ref=e370]:
+                - link "GPT-5" [ref=e371] [cursor=pointer]:
+                  - /url: /gpt-5/
+              - listitem [ref=e372]:
+                - link "Codex" [ref=e373] [cursor=pointer]:
+                  - /url: /index/introducing-gpt-5-3-codex/
+          - generic [ref=e374]:
+            - heading "Safety" [level=2] [ref=e375]
+            - list [ref=e376]:
+              - listitem [ref=e377]:
+                - link "Safety Approach" [ref=e378] [cursor=pointer]:
+                  - /url: /safety/
+              - listitem [ref=e379]:
+                - link "Security & Privacy" [ref=e380] [cursor=pointer]:
+                  - /url: /security-and-privacy/
+              - listitem [ref=e381]:
+                - link "Trust & Transparency" [ref=e382] [cursor=pointer]:
+                  - /url: /trust-and-transparency/
+        - generic [ref=e383]:
+          - generic [ref=e384]:
+            - heading "ChatGPT" [level=2] [ref=e385]
+            - list [ref=e386]:
+              - listitem [ref=e387]:
+                - link "Explore ChatGPT (opens in a new window)" [ref=e388] [cursor=pointer]:
+                  - /url: https://chatgpt.com/overview?openaicom-did=7c73ac4e-8f3b-4df5-9926-0946c98f9cd6&openaicom_referred=true
+                  - text: Explore ChatGPT
+                  - img [ref=e389]
+                  - generic [ref=e391]: (opens in a new window)
+              - listitem [ref=e392]:
+                - link "Business" [ref=e393] [cursor=pointer]:
+                  - /url: https://chatgpt.com/business/business-plan?openaicom-did=7c73ac4e-8f3b-4df5-9926-0946c98f9cd6&openaicom_referred=true
+              - listitem [ref=e394]:
+                - link "Enterprise" [ref=e395] [cursor=pointer]:
+                  - /url: https://chatgpt.com/business/enterprise?openaicom-did=7c73ac4e-8f3b-4df5-9926-0946c98f9cd6&openaicom_referred=true
+              - listitem [ref=e396]:
+                - link "Education" [ref=e397] [cursor=pointer]:
+                  - /url: https://chatgpt.com/business/education?openaicom-did=7c73ac4e-8f3b-4df5-9926-0946c98f9cd6&openaicom_referred=true
+              - listitem [ref=e398]:
+                - link "Pricing (opens in a new window)" [ref=e399] [cursor=pointer]:
+                  - /url: https://chatgpt.com/pricing?openaicom-did=7c73ac4e-8f3b-4df5-9926-0946c98f9cd6&openaicom_referred=true
+                  - text: Pricing
+                  - img [ref=e400]
+                  - generic [ref=e402]: (opens in a new window)
+              - listitem [ref=e403]:
+                - link "Download (opens in a new window)" [ref=e404] [cursor=pointer]:
+                  - /url: https://chatgpt.com/download?openaicom-did=7c73ac4e-8f3b-4df5-9926-0946c98f9cd6&openaicom_referred=true
+                  - text: Download
+                  - img [ref=e405]
+                  - generic [ref=e407]: (opens in a new window)
+          - generic [ref=e408]:
+            - heading "Sora" [level=2] [ref=e409]
+            - list [ref=e410]:
+              - listitem [ref=e411]:
+                - link "Sora Overview" [ref=e412] [cursor=pointer]:
+                  - /url: /sora/
+              - listitem [ref=e413]:
+                - link "Features" [ref=e414] [cursor=pointer]:
+                  - /url: /sora/#features
+              - listitem [ref=e415]:
+                - link "Pricing" [ref=e416] [cursor=pointer]:
+                  - /url: /sora/#pricing
+              - listitem [ref=e417]:
+                - link "Sora log in (opens in a new window)" [ref=e418] [cursor=pointer]:
+                  - /url: https://sora.com/
+                  - text: Sora log in
+                  - img [ref=e419]
+                  - generic [ref=e421]: (opens in a new window)
+          - generic [ref=e422]:
+            - heading "API Platform" [level=2] [ref=e423]
+            - list [ref=e424]:
+              - listitem [ref=e425]:
+                - link "Platform Overview" [ref=e426] [cursor=pointer]:
+                  - /url: /api/
+              - listitem [ref=e427]:
+                - link "Pricing" [ref=e428] [cursor=pointer]:
+                  - /url: /api/pricing/
+              - listitem [ref=e429]:
+                - link "API log in (opens in a new window)" [ref=e430] [cursor=pointer]:
+                  - /url: https://platform.openai.com/login
+                  - text: API log in
+                  - img [ref=e431]
+                  - generic [ref=e433]: (opens in a new window)
+              - listitem [ref=e434]:
+                - link "Documentation (opens in a new window)" [ref=e435] [cursor=pointer]:
+                  - /url: https://developers.openai.com/api/docs
+                  - text: Documentation
+                  - img [ref=e436]
+                  - generic [ref=e438]: (opens in a new window)
+              - listitem [ref=e439]:
+                - link "Developer Forum (opens in a new window)" [ref=e440] [cursor=pointer]:
+                  - /url: https://community.openai.com/
+                  - text: Developer Forum
+                  - img [ref=e441]
+                  - generic [ref=e443]: (opens in a new window)
+        - generic [ref=e444]:
+          - generic [ref=e445]:
+            - heading "For Business" [level=2] [ref=e446]
+            - list [ref=e447]:
+              - listitem [ref=e448]:
+                - link "Business Overview" [ref=e449] [cursor=pointer]:
+                  - /url: /business/
+              - listitem [ref=e450]:
+                - link "Solutions" [ref=e451] [cursor=pointer]:
+                  - /url: /solutions/
+              - listitem [ref=e452]:
+                - link "Contact Sales" [ref=e453] [cursor=pointer]:
+                  - /url: /contact-sales/
+          - generic [ref=e454]:
+            - heading "Company" [level=2] [ref=e455]
+            - list [ref=e456]:
+              - listitem [ref=e457]:
+                - link "About Us" [ref=e458] [cursor=pointer]:
+                  - /url: /about/
+              - listitem [ref=e459]:
+                - link "Our Charter" [ref=e460] [cursor=pointer]:
+                  - /url: /charter/
+              - listitem [ref=e461]:
+                - link "Foundation" [ref=e462] [cursor=pointer]:
+                  - /url: /foundation/
+              - listitem [ref=e463]:
+                - link "Careers" [ref=e464] [cursor=pointer]:
+                  - /url: /careers/
+              - listitem [ref=e465]:
+                - link "Brand" [ref=e466] [cursor=pointer]:
+                  - /url: /brand/
+          - generic [ref=e467]:
+            - heading "Support" [level=2] [ref=e468]
+            - list [ref=e469]:
+              - listitem [ref=e470]:
+                - link "Help Center (opens in a new window)" [ref=e471] [cursor=pointer]:
+                  - /url: https://help.openai.com/
+                  - text: Help Center
+                  - img [ref=e472]
+                  - generic [ref=e474]: (opens in a new window)
+          - generic [ref=e475]:
+            - heading "More" [level=2] [ref=e476]
+            - list [ref=e477]:
+              - listitem [ref=e478]:
+                - link "News" [ref=e479] [cursor=pointer]:
+                  - /url: /news/
+              - listitem [ref=e480]:
+                - link "Stories" [ref=e481] [cursor=pointer]:
+                  - /url: /stories/
+              - listitem [ref=e482]:
+                - link "Livestreams" [ref=e483] [cursor=pointer]:
+                  - /url: /live/
+              - listitem [ref=e484]:
+                - link "Podcast" [ref=e485] [cursor=pointer]:
+                  - /url: /podcast/
+              - listitem [ref=e486]:
+                - link "RSS" [ref=e487] [cursor=pointer]:
+                  - /url: /news/rss.xml
+        - generic [ref=e489]:
+          - heading "Terms & Policies" [level=2] [ref=e490]
+          - list [ref=e491]:
+            - listitem [ref=e492]:
+              - link "Terms of Use" [ref=e493] [cursor=pointer]:
+                - /url: /policies/terms-of-use/
+            - listitem [ref=e494]:
+              - link "Privacy Policy" [ref=e495] [cursor=pointer]:
+                - /url: /policies/privacy-policy/
+            - listitem [ref=e496]:
+              - link "Other Policies" [ref=e497] [cursor=pointer]:
+                - /url: /policies/
+      - generic [ref=e498]:
+        - generic [ref=e499]:
+          - link "X" [ref=e500] [cursor=pointer]:
+            - /url: https://x.com/OpenAI
+            - img [ref=e501]
+            - generic [ref=e503]: (opens in a new window)
+          - link "YouTube" [ref=e504] [cursor=pointer]:
+            - /url: https://www.youtube.com/OpenAI
+            - img [ref=e505]
+            - generic [ref=e507]: (opens in a new window)
+          - link "LinkedIn" [ref=e508] [cursor=pointer]:
+            - /url: https://www.linkedin.com/company/openai
+            - img [ref=e509]
+            - generic [ref=e511]: (opens in a new window)
+          - link "GitHub" [ref=e512] [cursor=pointer]:
+            - /url: https://github.com/openai
+            - img [ref=e513]
+            - generic [ref=e515]: (opens in a new window)
+          - link "Instagram" [ref=e516] [cursor=pointer]:
+            - /url: https://www.instagram.com/openai/
+            - img [ref=e517]
+            - generic [ref=e519]: (opens in a new window)
+          - link "TikTok" [ref=e520] [cursor=pointer]:
+            - /url: https://www.tiktok.com/@openai
+            - img [ref=e521]
+            - generic [ref=e523]: (opens in a new window)
+          - link "Discord" [ref=e524] [cursor=pointer]:
+            - /url: https://discord.gg/openai
+            - img [ref=e525]
+            - generic [ref=e527]: (opens in a new window)
+        - generic [ref=e528]:
+          - generic [ref=e529]: OpenAI © 2015–2026
+          - button "Manage Cookies" [ref=e530] [cursor=pointer]
+        - generic [ref=e531]:
+          - button "Change language" [ref=e532] [cursor=pointer]:
+            - generic [ref=e533]:
+              - img [ref=e534]
+              - generic [ref=e537]:
+                - text: English
+                - generic [ref=e538]: United States
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - img
+                    - textbox "Search locales by name or region":
+                      - /placeholder: Search
+  - alert [ref=e539]

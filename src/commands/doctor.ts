@@ -34,7 +34,7 @@ export async function runDoctorCommand(): Promise<void> {
     ["active roles", roles.filter((role) => role.active).map((role) => role.id).join(", ")]
   ];
 
-  for (const providerId of ["anthropic", "openai", "gemini"] as const) {
+  for (const providerId of ["openai"] as const) {
     const adapter = providers.get(providerId);
     const auth = getProviderAuthStatus(providerId, config.providers[providerId]);
     const state = adapter.isConfigured(config.providers[providerId]) ? "configured" : "mock fallback";

@@ -29,6 +29,7 @@ export type AppCategory =
   | "discord-bot"
   | "slack-bot"
   | "automation"
+  | "game"
   | "unknown";
 
 export type StackLayer =
@@ -155,6 +156,11 @@ const CATEGORY_RULES: CategoryRule[] = [
     patterns: [/\b(automat|자동화|scrape|crawl|bot|cron|schedule|workflow)\b/i],
     defaultLayers: ["backend", "testing"]
   },
+  {
+    category: "game",
+    patterns: [/(game|게임|snake|tetris|platformer|shooter|arcade|puzzle|canvas\s*game|스네이크|테트리스|벽돌깨기)/i],
+    defaultLayers: ["frontend", "testing"]
+  },
 ];
 
 // ─── Layer Detection ─────────────────────────────────────────────────────────
@@ -201,6 +207,15 @@ function estimateComplexity(
 
 function suggestStack(category: AppCategory, layers: StackLayer[]): Record<string, string> {
   const stack: Record<string, string> = {};
+
+  // Game category — minimal stack, no frameworks
+  if (category === "game") {
+    stack["runtime"] = "Browser (no server)";
+    stack["language"] = "Vanilla JavaScript (ES2022+)";
+    stack["frontend"] = "HTML5 Canvas";
+    stack["testing"] = "Playwright (browser E2E)";
+    return stack;
+  }
 
   // Runtime
   stack["runtime"] = "Node.js 22+";

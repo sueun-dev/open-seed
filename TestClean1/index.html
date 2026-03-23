@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>네온 스네이크 게임</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+  }
+  h1 {
+    color: #0ff;
+    font-size: 2rem;
+    text-shadow: 0 0 10px #0ff, 0 0 20px #0ff, 0 0 40px #08f;
+    margin-bottom: 10px;
+    letter-spacing: 4px;
+  }
+  #hud {
+    display: flex;
+    gap: 30px;
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+  }
+  #hud span {
+    color: #0f0;
+    text-shadow: 0 0 6px #0f0, 0 0 12px #0f0;
+  }
+  #hud .label { color: #888; text-shadow: none; }
+  #game-container {
+    position: relative;
+    border: 2px solid #0ff;
+    box-shadow: 0 0 15px #0ff, 0 0 30px #08f, inset 0 0 15px rgba(0,255,255,0.1);
+  }
+  canvas#game {
+    display: block;
+    background: #0a0a0a;
+  }
+  canvas#game:focus-visible {
+    outline: 2px solid #0ff;
+    outline-offset: 2px;
+  }
+  #startScreen, #gameOverScreen {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.85);
+    z-index: 10;
+  }
+  #startScreen h2, #gameOverScreen h2 {
+    color: #f0f;
+    font-size: 1.8rem;
+    text-shadow: 0 0 10px #f0f, 0 0 20px #f0f;
+    margin-bottom: 20px;
+  }
+  #startScreen p, #gameOverScreen p {
+    color: #0ff;
+    font-size: 1rem;
+    text-shadow: 0 0 6px #0ff;
+    margin-bottom: 10px;
+  }
+  #finalScore {
+    color: #0f0;
+    font-size: 1.5rem;
+    text-shadow: 0 0 10px #0f0;
+    margin-bottom: 15px;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<h1>🐍 NEON SNAKE</h1>
+<div id="hud">
+  <div><span class="label">SCORE:</span> <span id="score" aria-live="polite">0</span></div>
+  <div><span class="label">LEVEL:</span> <span id="level" aria-live="polite">1</span></div>
+  <div><span class="label">HIGH:</span> <span id="high" aria-live="polite">0</span></div>
+</div>
+<div id="game-container">
+  <canvas id="game" role="img" aria-label="Snake game canvas" tabindex="0"></canvas>
+  <div id="startScreen" role="dialog" aria-modal="true" aria-label="Game Start">
+    <h2>🐍 NEON SNAKE</h2>
+    <p>화살표 키 또는 WASD로 조작</p>
+    <p>Press arrow key to start</p>
+    <p style="color:#888;font-size:0.8rem;margin-top:10px;">ESC = Pause</p>
+  </div>
+  <div id="gameOverScreen" role="dialog" aria-modal="true" aria-label="Game Over" style="display:none;">
+    <h2>GAME OVER</h2>
+    <div id="finalScore" role="alert" aria-live="assertive">0</div>
+    <p id="msg">Press ENTER or SPACE to restart</p>
+  </div>
+</div>
+<div id="announcer" class="sr-only" aria-live="polite"></div>
+
+<script>
+(function() {
+  'use strict';
+
+  // === CONSTANTS ===
+  const COLS = 25;
+  const ROWS = 25;
+  const CELL = 20;
+  const BASE_INTERVAL = 150;
+  const MIN_INTERVAL = 50;
+  const SPEEDUP_EVERY = 5;
+  const SPEEDUP_AMOUNT = 5;
+
+  // === DOM ===
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const levelEl = document.getElementById('level');
+  const highEl = document.getElementById('high');
+  const msgEl = document.getElementById('msg');
+  const finalScoreEl = document.getElementById('finalScore');
+  const startScreen = document.getElementById('startScreen');
+  const gameOverScreen = document.getElementById('gameOverScreen');
+  const announcer = document.getElementById('announcer');
+
+  canvas.width = COLS * CELL;
+  canvas.height = ROWS * CELL;
+
+  // === AUDIO ===
+  let audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playTone(freq, duration, type) {
+    if (!audioCtx) return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type || 'square';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch (e) { /* ignore audio errors */ }
+  }
+
+  function sfxEat() {
+    playTone(587, 0.1, 'square');
+    setTimeout(function() { playTone(784, 0.1, 'square'); }, 50);
+  }
+
+  function sfxDie() {
+    playTone(200, 0.3, 'sawtooth');
+    setTimeout(function() { playTone(100, 0.4, 'sawtooth'); }, 150);
+  }
+
+  function sfxLevel() {
+    playTone(523, 0.1, 'square');
+    setTimeout(function() { playTone(659, 0.1, 'square'); }, 80);
+    setTimeout(function() { playTone(784, 0.15, 'square'); }, 160);
+  }
+
+  function sfxMove() {
+    playTone(440, 0.03, 'sine');
+  }
+
+  // === GAME STATE ===
+  let snake, direction, nextDirection, food, score, level, highScore, gameOver, gameStarted, paused;
+  let lastTime = 0;
+  let accum = 0;
+
+  highScore = parseInt(localStorage.getItem('snakeHigh')) || 0;
+  highEl.textContent = highScore;
+
+  function getInterval() {
+    return Math.max(MIN_INTERVAL, BASE_INTERVAL - Math.floor(score / SPEEDUP_EVERY) * SPEEDUP_AMOUNT);
+  }
+
+  function resetGame() {
+    var cx = Math.floor(COLS / 2);
+    var cy = Math.floor(ROWS / 2);
+    snake = [
+      { x: cx, y: cy },
+      { x: cx - 1, y: cy },
+      { x: cx - 2, y: cy }
+    ];
+    direction = { x: 1, y: 0 };
+    nextDirection = { x: 1, y: 0 };
+    score = 0;
+    level = 1;
+    gameOver = false;
+    paused = false;
+    scoreEl.textContent = '0';
+    levelEl.textContent = '1';
+    spawnFood();
+    accum = 0;
+  }
+
+  function spawnFood() {
+    var occupied = {};
+    for (var i = 0; i < snake.length; i++) {
+      occupied[snake[i].x + ',' + snake[i].y] = true;
+    }
+    var free = [];
+    for (var r = 0; r < ROWS; r++) {
+      for (var c = 0; c < COLS; c++) {
+        if (!occupied[c + ',' + r]) {
+          free.push({ x: c, y: r });
+        }
+      }
+    }
+    if (free.length === 0) return;
+    food = free[Math.floor(Math.random() * free.length)];
+  }
+
+  // === INPUT ===
+  var dirMap = {
+    ArrowUp:    { x: 0, y: -1 },
+    ArrowDown:  { x: 0, y: 1 },
+    ArrowLeft:  { x: -1, y: 0 },
+    ArrowRight: { x: 1, y: 0 },
+    w: { x: 0, y: -1 },
+    W: { x: 0, y: -1 },
+    s: { x: 0, y: 1 },
+    S: { x: 0, y: 1 },
+    a: { x: -1, y: 0 },
+    A: { x: -1, y: 0 },
+    d: { x: 1, y: 0 },
+    D: { x: 1, y: 0 }
+  };
+
+  document.addEventListener('keydown', function(e) {
+    // Prevent arrow key page scrolling
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].indexOf(e.key) !== -1) {
+      e.preventDefault();
+    }
+
+    // Pause toggle
+    if (e.key === 'Escape' && gameStarted && !gameOver) {
+      paused = !paused;
+      announcer.textContent = paused ? 'Game paused' : 'Game resumed';
+      return;
+    }
+
+    // Start game on first arrow/WASD press
+    if (!gameStarted) {
+      if (dirMap[e.key]) {
+        ensureAudio();
+        gameStarted = true;
+        startScreen.style.display = 'none';
+        resetGame();
+        announcer.textContent = 'Game started. Use arrow keys to move.';
+        lastTime = performance.now();
+        requestAnimationFrame(gameLoop);
+      }
+      return;
+    }
+
+    // Restart on game over
+    if (gameOver) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        gameOverScreen.style.display = 'none';
+        resetGame();
+        announcer.textContent = 'Game restarted.';
+        lastTime = performance.now();
+        requestAnimationFrame(gameLoop);
+      }
+      return;
+    }
+
+    // Direction change
+    var nd = dirMap[e.key];
+    if (nd) {
+      // Prevent 180-degree reversal
+      if (nd.x + direction.x !== 0 || nd.y + direction.y !== 0) {
+        nextDirection = nd;
+        sfxMove();
+      }
+    }
+  });
+
+  // === GAME LOOP ===
+  function gameLoop(timestamp) {
+    if (gameOver) return;
+    if (paused) {
+      lastTime = timestamp;
+      requestAnimationFrame(gameLoop);
+      return;
+    }
+
+    var delta = timestamp - lastTime;
+    lastTime = timestamp;
+    accum += delta;
+
+    var interval = getInterval();
+    while (accum >= interval) {
+      accum -= interval;
+      update();
+      if (gameOver) break;
+    }
+
+    draw();
+
+    if (!gameOver) {
+      requestAnimationFrame(gameLoop);
+    }
+  }
+
+  function update() {
+    direction = nextDirection;
+    var head = { x: snake[0].x + direction.x, y: snake[0].y + direction.y };
+
+    // Wall collision
+    if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
+      die();
+      return;
+    }
+
+    // Self collision
+    for (var i = 0; i < snake.length; i++) {
+      if (snake[i].x === head.x && snake[i].y === head.y) {
+        die();
+        return;
+      }
+    }
+
+    snake.unshift(head);
+
+    // Eat food
+    if (head.x === food.x && head.y === food.y) {
+      score++;
+      scoreEl.textContent = score;
+      sfxEat();
+
+      // Level up check
+      var newLevel = Math.floor(score / SPEEDUP_EVERY) + 1;
+      if (newLevel > level) {
+        level = newLevel;
+        levelEl.textContent = level;
+        sfxLevel();
+        announcer.textContent = 'Level ' + level + ', speed increased!';
+      }
+
+      // High score
+      if (score > highScore) {
+        highScore = score;
+        highEl.textContent = highScore;
+        localStorage.setItem('snakeHigh', highScore);
+      }
+
+      spawnFood();
+    } else {
+      snake.pop();
+    }
+  }
+
+  function die() {
+    gameOver = true;
+    sfxDie();
+    finalScoreEl.textContent = 'Score: ' + score + ' | Level: ' + level;
+    gameOverScreen.style.display = 'flex';
+    announcer.textContent = 'Game over. Score: ' + score + '. Press Enter or Space to restart.';
+  }
+
+  // === RENDERING ===
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Grid lines
+    ctx.strokeStyle = 'rgba(0,255,255,0.05)';
+    ctx.lineWidth = 0.5;
+    for (var x = 0; x <= COLS; x++) {
+      ctx.beginPath();
+      ctx.moveTo(x * CELL, 0);
+      ctx.lineTo(x * CELL, canvas.height);
+      ctx.stroke();
+    }
+    for (var y = 0; y <= ROWS; y++) {
+      ctx.beginPath();
+      ctx.moveTo(0, y * CELL);
+      ctx.lineTo(canvas.width, y * CELL);
+      ctx.stroke();
+    }
+
+    // Food with neon glow
+    ctx.save();
+    ctx.shadowColor = '#f0f';
+    ctx.shadowBlur = 15;
+    ctx.fillStyle = '#f0f';
+    ctx.beginPath();
+    ctx.arc(food.x * CELL + CELL / 2, food.y * CELL + CELL / 2, CELL / 2 - 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Snake
+    for (var i = 0; i < snake.length; i++) {
+      var seg = snake[i];
+      var isHead = (i === 0);
+
+      ctx.save();
+      if (isHead) {
+        ctx.shadowColor = '#0ff';
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = '#0ff';
+      } else {
+        var brightness = Math.max(0.3, 1 - (i / snake.length) * 0.7);
+        ctx.shadowColor = 'rgba(0,255,0,' + brightness + ')';
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = 'rgba(0,255,0,' + brightness + ')';
+      }
+
+      var pad = isHead ? 1 : 2;
+      ctx.fillRect(seg.x * CELL + pad, seg.y * CELL + pad, CELL - pad * 2, CELL - pad * 2);
+
+      // Inner highlight for head
+      if (isHead) {
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.fillRect(seg.x * CELL + 5, seg.y * CELL + 5, CELL - 10, CELL - 10);
+      }
+      ctx.restore();
+    }
+
+    // Pause overlay
+    if (paused) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#0ff';
+      ctx.font = 'bold 30px Courier New';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#0ff';
+      ctx.shadowBlur = 20;
+      ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2);
+      ctx.font = '16px Courier New';
+      ctx.fillText('Press ESC to resume', canvas.width / 2, canvas.height / 2 + 35);
+      ctx.restore();
+    }
+  }
+
+  // === INITIAL DRAW ===
+  resetGame();
+  draw();
+  canvas.focus();
+
+})();
+</script>
+</body>
+</html>

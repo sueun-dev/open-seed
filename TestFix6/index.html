@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Top-Down Shooter</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  canvas { background: #000; display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<script>
+(function() {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+
+  // State machine: 'start' | 'playing' | 'gameover'
+  let state = 'start';
+  let score = 0;
+  let highScore = parseInt(localStorage.getItem('highScore')) || 0;
+  let frameCount = 0;
+  let spawnInterval = 90;
+  const MIN_SPAWN = 25;
+
+  // Player
+  const player = { x: W / 2, y: H / 2, size: 16, speed: 4 };
+
+  // Entities
+  let bullets = [];
+  let enemies = [];
+
+  // Shooting
+  let shootCooldown = 0;
+  const SHOOT_DELAY = 8;
+  const BULLET_SPEED = 8;
+  const BULLET_RADIUS = 3;
+
+  // Enemies
+  const ENEMY_SIZE = 20;
+  const ENEMY_SPEED = 1.5;
+
+  // Input
+  const keys = {};
+  window.addEventListener('keydown', function(e) {
+    keys[e.key] = true;
+    if (state === 'start') { startGame(); }
+    else if (state === 'gameover' && e.key === 'Enter') { startGame(); }
+  });
+  window.addEventListener('keyup', function(e) { keys[e.key] = false; });
+
+  function startGame() {
+    state = 'playing';
+    score = 0;
+    frameCount = 0;
+    spawnInterval = 90;
+    player.x = W / 2;
+    player.y = H / 2;
+    bullets = [];
+    enemies = [];
+    shootCooldown = 0;
+  }
+
+  function spawnEnemy() {
+    const edge = Math.floor(Math.random() * 4);
+    let x, y;
+    if (edge === 0) { x = Math.random() * W; y = -ENEMY_SIZE; }
+    else if (edge === 1) { x = W + ENEMY_SIZE; y = Math.random() * H; }
+    else if (edge === 2) { x = Math.random() * W; y = H + ENEMY_SIZE; }
+    else { x = -ENEMY_SIZE; y = Math.random() * H; }
+    enemies.push({ x: x, y: y, size: ENEMY_SIZE });
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    frameCount++;
+
+    // Difficulty ramp
+    if (frameCount % 300 === 0 && spawnInterval > MIN_SPAWN) {
+      spawnInterval -= 5;
+    }
+
+    // Spawn enemies
+    if (frameCount % spawnInterval === 0) spawnEnemy();
+
+    // Move player
+    let dx = 0, dy = 0;
+    if (keys['w'] || keys['W'] || keys['ArrowUp']) dy = -1;
+    if (keys['s'] || keys['S'] || keys['ArrowDown']) dy = 1;
+    if (keys['a'] || keys['A'] || keys['ArrowLeft']) dx = -1;
+    if (keys['d'] || keys['D'] || keys['ArrowRight']) dx = 1;
+    if (dx !== 0 && dy !== 0) { var len = Math.SQRT2; dx /= len; dy /= len; }
+    player.x = Math.max(player.size, Math.min(W - player.size, player.x + dx * player.speed));
+    player.y = Math.max(player.size, Math.min(H - player.size, player.y + dy * player.speed));
+
+    // Shoot
+    if (shootCooldown > 0) shootCooldown--;
+    if (keys[' '] && shootCooldown <= 0) {
+      bullets.push({ x: player.x, y: player.y - player.size, vy: -BULLET_SPEED });
+      shootCooldown = SHOOT_DELAY;
+    }
+
+    // Move bullets
+    for (var i = bullets.length - 1; i >= 0; i--) {
+      bullets[i].y += bullets[i].vy;
+      if (bullets[i].y < -10) bullets.splice(i, 1);
+    }
+
+    // Move enemies toward player
+    for (var i = 0; i < enemies.length; i++) {
+      var e = enemies[i];
+      var edx = player.x - e.x;
+      var edy = player.y - e.y;
+      var elen = Math.sqrt(edx * edx + edy * edy) || 1;
+      e.x += (edx / elen) * ENEMY_SPEED;
+      e.y += (edy / elen) * ENEMY_SPEED;
+    }
+
+    // Bullet-enemy collision
+    for (var i = bullets.length - 1; i >= 0; i--) {
+      for (var j = enemies.length - 1; j >= 0; j--) {
+        var b = bullets[i];
+        var e = enemies[j];
+        if (b && Math.abs(b.x - e.x) < e.size / 2 + BULLET_RADIUS && Math.abs(b.y - e.y) < e.size / 2 + BULLET_RADIUS) {
+          bullets.splice(i, 1);
+          enemies.splice(j, 1);
+          score += 10;
+          break;
+        }
+      }
+    }
+
+    // Player-enemy collision
+    for (var i = 0; i < enemies.length; i++) {
+      var e = enemies[i];
+      if (Math.abs(player.x - e.x) < player.size + e.size / 2 && Math.abs(player.y - e.y) < player.size + e.size / 2) {
+        state = 'gameover';
+        if (score > highScore) {
+          highScore = score;
+          localStorage.setItem('highScore', highScore);
+        }
+        return;
+      }
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    if (state === 'start') {
+      ctx.fillStyle = '#0ff';
+      ctx.font = '36px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('TOP-DOWN SHOOTER', W / 2, H / 2 - 40);
+      ctx.fillStyle = '#fff';
+      ctx.font = '18px monospace';
+      ctx.fillText('Press any key to start', W / 2, H / 2 + 20);
+      ctx.fillText('WASD / Arrows = Move | Space = Shoot', W / 2, H / 2 + 50);
+    } else if (state === 'playing' || state === 'gameover') {
+      // Draw player (cyan triangle)
+      ctx.fillStyle = '#0ff';
+      ctx.beginPath();
+      ctx.moveTo(player.x, player.y - player.size);
+      ctx.lineTo(player.x - player.size, player.y + player.size);
+      ctx.lineTo(player.x + player.size, player.y + player.size);
+      ctx.closePath();
+      ctx.fill();
+
+      // Draw bullets (yellow circles)
+      ctx.fillStyle = '#ff0';
+      for (var i = 0; i < bullets.length; i++) {
+        ctx.beginPath();
+        ctx.arc(bullets[i].x, bullets[i].y, BULLET_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Draw enemies (red squares)
+      ctx.fillStyle = '#f00';
+      for (var i = 0; i < enemies.length; i++) {
+        var e = enemies[i];
+        ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2, e.size, e.size);
+      }
+
+      // HUD
+      ctx.fillStyle = '#fff';
+      ctx.font = '16px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('Score: ' + score, 10, 24);
+      ctx.textAlign = 'right';
+      ctx.fillText('High: ' + highScore, W - 10, 24);
+
+      if (state === 'gameover') {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#f00';
+        ctx.font = '40px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('GAME OVER', W / 2, H / 2 - 20);
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px monospace';
+        ctx.fillText('Score: ' + score, W / 2, H / 2 + 20);
+        ctx.fillText('Press Enter to restart', W / 2, H / 2 + 55);
+      }
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>

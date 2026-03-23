@@ -1,0 +1,785 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic "Explorer (⌘⇧E)" [ref=e4] [cursor=pointer]:
+      - img [ref=e5]
+    - generic "Search (⌘⇧F)" [ref=e7] [cursor=pointer]:
+      - img [ref=e8]
+    - generic "AI Chat (⌘⇧A)" [ref=e10] [cursor=pointer]:
+      - img [ref=e11]
+    - generic "Sessions" [ref=e13] [cursor=pointer]:
+      - img [ref=e14]
+    - generic "AGI Autonomous Mode" [ref=e16] [cursor=pointer]:
+      - img [ref=e17]
+    - generic "Doctor" [ref=e19] [cursor=pointer]:
+      - img [ref=e20]
+    - generic "Settings" [ref=e22] [cursor=pointer]:
+      - img [ref=e23]
+  - generic [ref=e25]:
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - generic [ref=e28]: Explorer
+        - generic [ref=e29]:
+          - button "New File" [ref=e30] [cursor=pointer]:
+            - img [ref=e31]
+            - text: New File
+          - button "New Folder" [ref=e34] [cursor=pointer]:
+            - img [ref=e35]
+            - text: New Folder
+          - button "Sort Files" [ref=e37] [cursor=pointer]:
+            - img [ref=e38]
+            - text: Sort Files
+          - button "Collapse Folders" [ref=e40] [cursor=pointer]:
+            - img [ref=e41]
+            - text: Collapse Folders
+          - button "Refresh Explorer" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - text: Refresh Explorer
+          - button "Open Folder" [ref=e47] [cursor=pointer]:
+            - img [ref=e48]
+            - text: Open Folder
+      - generic [ref=e51]:
+        - generic [ref=e52] [cursor=pointer]:
+          - generic [ref=e53]: ▶
+          - img [ref=e54]
+          - generic [ref=e56]: $tmpdir/project
+        - generic "$tmpdir/project/AGENTS.md" [ref=e58] [cursor=pointer]:
+          - generic [ref=e59]: MD
+          - generic [ref=e60]: AGENTS.md
+        - generic [ref=e61] [cursor=pointer]:
+          - generic [ref=e62]: ▶
+          - img [ref=e63]
+          - generic [ref=e65]: .playwright-cli
+        - generic [ref=e66]:
+          - generic ".playwright-cli/page-2026-03-22T01-49-41-594Z.yml" [ref=e67] [cursor=pointer]:
+            - generic [ref=e68]: YM
+            - generic [ref=e69]: page-2026-03-22T01-49-41-594Z.yml
+          - generic ".playwright-cli/page-2026-03-22T01-49-45-953Z.yml" [ref=e70] [cursor=pointer]:
+            - generic [ref=e71]: YM
+            - generic [ref=e72]: page-2026-03-22T01-49-45-953Z.yml
+        - generic [ref=e73] [cursor=pointer]:
+          - generic [ref=e74]: ▶
+          - img [ref=e75]
+          - generic [ref=e77]: Test
+        - generic "Test/AGENTS.md" [ref=e79] [cursor=pointer]:
+          - generic [ref=e80]: MD
+          - generic [ref=e81]: AGENTS.md
+        - generic [ref=e82] [cursor=pointer]:
+          - generic [ref=e83]: ▶
+          - img [ref=e84]
+          - generic [ref=e86]: app
+        - generic [ref=e87]:
+          - generic "app/desktop.py" [ref=e88] [cursor=pointer]:
+            - generic [ref=e89]: PY
+            - generic [ref=e90]: desktop.py
+          - generic "app/icon.icns" [ref=e91] [cursor=pointer]:
+            - generic [ref=e92]: IC
+            - generic [ref=e93]: icon.icns
+          - generic "app/icon.png" [ref=e94] [cursor=pointer]:
+            - generic [ref=e95]: IM
+            - generic [ref=e96]: icon.png
+          - generic "app/index.html" [ref=e97] [cursor=pointer]:
+            - generic [ref=e98]: <>
+            - generic [ref=e99]: index.html
+          - generic "app/launch-app.sh" [ref=e100] [cursor=pointer]:
+            - generic [ref=e101]: $
+            - generic [ref=e102]: launch-app.sh
+          - generic "app/main.js" [ref=e103] [cursor=pointer]:
+            - generic [ref=e104]: JS
+            - generic [ref=e105]: main.js
+          - generic "app/OpenSeed" [ref=e106] [cursor=pointer]:
+            - generic [ref=e107]: OP
+            - generic [ref=e108]: OpenSeed
+          - generic "app/OpenSeedApp.swift" [ref=e109] [cursor=pointer]:
+            - generic [ref=e110]: SW
+            - generic [ref=e111]: OpenSeedApp.swift
+          - generic "app/package.json" [ref=e112] [cursor=pointer]:
+            - generic [ref=e113]: "{}"
+            - generic [ref=e114]: package.json
+            - generic "1 nested" [ref=e115]: "+1"
+          - generic "app/preload.js" [ref=e116] [cursor=pointer]:
+            - generic [ref=e117]: JS
+            - generic [ref=e118]: preload.js
+          - generic "app/server.js" [ref=e119] [cursor=pointer]:
+            - generic [ref=e120]: JS
+            - generic [ref=e121]: server.js
+        - generic [ref=e122] [cursor=pointer]:
+          - generic [ref=e123]: ▶
+          - img [ref=e124]
+          - generic [ref=e126]: autoresearch-mega-eval
+        - generic [ref=e127]:
+          - generic "autoresearch-mega-eval/eval-500.cjs" [ref=e128] [cursor=pointer]:
+            - generic [ref=e129]: JS
+            - generic [ref=e130]: eval-500.cjs
+          - generic "autoresearch-mega-eval/eval-doctor.cjs" [ref=e131] [cursor=pointer]:
+            - generic [ref=e132]: JS
+            - generic [ref=e133]: eval-doctor.cjs
+          - generic "autoresearch-mega-eval/eval-settings-900.cjs" [ref=e134] [cursor=pointer]:
+            - generic [ref=e135]: JS
+            - generic [ref=e136]: eval-settings-900.cjs
+          - generic "autoresearch-mega-eval/results.json" [ref=e137] [cursor=pointer]:
+            - generic [ref=e138]: "{}"
+            - generic [ref=e139]: results.json
+        - generic [ref=e140] [cursor=pointer]:
+          - generic [ref=e141]: ▶
+          - img [ref=e142]
+          - generic [ref=e144]: autoresearch-search-panel
+        - generic [ref=e145]:
+          - generic "autoresearch-search-panel/changelog.md" [ref=e146] [cursor=pointer]:
+            - generic [ref=e147]: MD
+            - generic [ref=e148]: changelog.md
+          - generic "autoresearch-search-panel/dashboard.html" [ref=e149] [cursor=pointer]:
+            - generic [ref=e150]: <>
+            - generic [ref=e151]: dashboard.html
+          - generic "autoresearch-search-panel/eval-deep.cjs" [ref=e152] [cursor=pointer]:
+            - generic [ref=e153]: JS
+            - generic [ref=e154]: eval-deep.cjs
+          - generic "autoresearch-search-panel/eval-sidebar.cjs" [ref=e155] [cursor=pointer]:
+            - generic [ref=e156]: JS
+            - generic [ref=e157]: eval-sidebar.cjs
+          - generic "autoresearch-search-panel/eval-v3.cjs" [ref=e158] [cursor=pointer]:
+            - generic [ref=e159]: JS
+            - generic [ref=e160]: eval-v3.cjs
+          - generic "autoresearch-search-panel/eval.cjs" [ref=e161] [cursor=pointer]:
+            - generic [ref=e162]: JS
+            - generic [ref=e163]: eval.cjs
+          - generic "autoresearch-search-panel/results.json" [ref=e164] [cursor=pointer]:
+            - generic [ref=e165]: "{}"
+            - generic [ref=e166]: results.json
+          - generic "autoresearch-search-panel/results.tsv" [ref=e167] [cursor=pointer]:
+            - generic [ref=e168]: TV
+            - generic [ref=e169]: results.tsv
+          - generic "autoresearch-search-panel/test-integration.cjs" [ref=e170] [cursor=pointer]:
+            - generic [ref=e171]: JS
+            - generic [ref=e172]: test-integration.cjs
+        - generic [ref=e173] [cursor=pointer]:
+          - generic [ref=e174]: ▶
+          - img [ref=e175]
+          - generic [ref=e177]: autoresearch-sessions
+        - generic [ref=e178]:
+          - generic "autoresearch-sessions/eval.cjs" [ref=e179] [cursor=pointer]:
+            - generic [ref=e180]: JS
+            - generic [ref=e181]: eval.cjs
+          - generic "autoresearch-sessions/results.json" [ref=e182] [cursor=pointer]:
+            - generic [ref=e183]: "{}"
+            - generic [ref=e184]: results.json
+          - generic "autoresearch-sessions/test-integration.cjs" [ref=e185] [cursor=pointer]:
+            - generic [ref=e186]: JS
+            - generic [ref=e187]: test-integration.cjs
+        - generic [ref=e188] [cursor=pointer]:
+          - generic [ref=e189]: ▶
+          - img [ref=e190]
+          - generic [ref=e192]: docs/screenshots
+        - generic "docs/screenshots/explorer.png" [ref=e194] [cursor=pointer]:
+          - generic [ref=e195]: IM
+          - generic [ref=e196]: explorer.png
+        - generic [ref=e197] [cursor=pointer]:
+          - generic [ref=e198]: ▶
+          - img [ref=e199]
+          - generic [ref=e201]: output/playwright
+        - generic [ref=e202] [cursor=pointer]:
+          - generic [ref=e203]: ▶
+          - img [ref=e204]
+          - generic [ref=e206]: src
+        - generic [ref=e207]:
+          - generic [ref=e208] [cursor=pointer]:
+            - generic [ref=e209]: ▶
+            - img [ref=e210]
+            - generic [ref=e212]: commands
+          - generic [ref=e213]:
+            - generic "src/commands/check-comments.ts" [ref=e214] [cursor=pointer]:
+              - generic [ref=e215]: TS
+              - generic [ref=e216]: check-comments.ts
+            - generic "src/commands/create.ts" [ref=e217] [cursor=pointer]:
+              - generic [ref=e218]: TS
+              - generic [ref=e219]: create.ts
+            - generic "src/commands/default-pipeline.ts" [ref=e220] [cursor=pointer]:
+              - generic [ref=e221]: TS
+              - generic [ref=e222]: default-pipeline.ts
+            - generic "src/commands/doctor.ts" [ref=e223] [cursor=pointer]:
+              - generic [ref=e224]: TS
+              - generic [ref=e225]: doctor.ts
+            - generic "src/commands/init-deep.ts" [ref=e226] [cursor=pointer]:
+              - generic [ref=e227]: TS
+              - generic [ref=e228]: init-deep.ts
+            - generic "src/commands/init.ts" [ref=e229] [cursor=pointer]:
+              - generic [ref=e230]: TS
+              - generic [ref=e231]: init.ts
+            - generic "src/commands/live-session.ts" [ref=e232] [cursor=pointer]:
+              - generic [ref=e233]: TS
+              - generic [ref=e234]: live-session.ts
+            - generic "src/commands/omo-commands.ts" [ref=e235] [cursor=pointer]:
+              - generic [ref=e236]: TS
+              - generic [ref=e237]: omo-commands.ts
+            - generic "src/commands/resume.ts" [ref=e238] [cursor=pointer]:
+              - generic [ref=e239]: TS
+              - generic [ref=e240]: resume.ts
+            - generic "src/commands/run.ts" [ref=e241] [cursor=pointer]:
+              - generic [ref=e242]: TS
+              - generic [ref=e243]: run.ts
+            - generic "src/commands/soak.ts" [ref=e244] [cursor=pointer]:
+              - generic [ref=e245]: TS
+              - generic [ref=e246]: soak.ts
+            - generic "src/commands/status.ts" [ref=e247] [cursor=pointer]:
+              - generic [ref=e248]: TS
+              - generic [ref=e249]: status.ts
+            - generic "src/commands/team.ts" [ref=e250] [cursor=pointer]:
+              - generic [ref=e251]: TS
+              - generic [ref=e252]: team.ts
+          - generic [ref=e253] [cursor=pointer]:
+            - generic [ref=e254]: ▶
+            - img [ref=e255]
+            - generic [ref=e257]: core
+          - generic [ref=e258]:
+            - generic "src/core/config.ts" [ref=e259] [cursor=pointer]:
+              - generic [ref=e260]: TS
+              - generic [ref=e261]: config.ts
+            - generic "src/core/event-bus.ts" [ref=e262] [cursor=pointer]:
+              - generic [ref=e263]: TS
+              - generic [ref=e264]: event-bus.ts
+            - generic "src/core/paths.ts" [ref=e265] [cursor=pointer]:
+              - generic [ref=e266]: TS
+              - generic [ref=e267]: paths.ts
+            - generic "src/core/token-counter.ts" [ref=e268] [cursor=pointer]:
+              - generic [ref=e269]: TS
+              - generic [ref=e270]: token-counter.ts
+            - generic "src/core/types.ts" [ref=e271] [cursor=pointer]:
+              - generic [ref=e272]: TS
+              - generic [ref=e273]: types.ts
+            - generic "src/core/utils.ts" [ref=e274] [cursor=pointer]:
+              - generic [ref=e275]: TS
+              - generic [ref=e276]: utils.ts
+          - generic [ref=e277] [cursor=pointer]:
+            - generic [ref=e278]: ▶
+            - img [ref=e279]
+            - generic [ref=e281]: mcp
+          - generic [ref=e282]:
+            - generic "src/mcp/builtin-mcps.ts" [ref=e283] [cursor=pointer]:
+              - generic [ref=e284]: TS
+              - generic [ref=e285]: builtin-mcps.ts
+            - generic "src/mcp/client.ts" [ref=e286] [cursor=pointer]:
+              - generic [ref=e287]: TS
+              - generic [ref=e288]: client.ts
+            - generic "src/mcp/server.ts" [ref=e289] [cursor=pointer]:
+              - generic [ref=e290]: TS
+              - generic [ref=e291]: server.ts
+          - generic [ref=e292] [cursor=pointer]:
+            - generic [ref=e293]: ▶
+            - img [ref=e294]
+            - generic [ref=e296]: memory
+          - generic [ref=e297]:
+            - generic "src/memory/memory-pipeline.ts" [ref=e298] [cursor=pointer]:
+              - generic [ref=e299]: TS
+              - generic [ref=e300]: memory-pipeline.ts
+            - generic "src/memory/project-memory.ts" [ref=e301] [cursor=pointer]:
+              - generic [ref=e302]: TS
+              - generic [ref=e303]: project-memory.ts
+          - generic [ref=e304] [cursor=pointer]:
+            - generic [ref=e305]: ▶
+            - img [ref=e306]
+            - generic [ref=e308]: orchestration
+          - generic [ref=e309]:
+            - generic "src/orchestration/agentic-runner.ts" [ref=e310] [cursor=pointer]:
+              - generic [ref=e311]: TS
+              - generic [ref=e312]: agentic-runner.ts
+            - generic "src/orchestration/agi-pipeline.ts" [ref=e313] [cursor=pointer]:
+              - generic [ref=e314]: TS
+              - generic [ref=e315]: agi-pipeline.ts
+            - generic "src/orchestration/analyze-artifact.ts" [ref=e316] [cursor=pointer]:
+              - generic [ref=e317]: TS
+              - generic [ref=e318]: analyze-artifact.ts
+            - generic "src/orchestration/blueprint.ts" [ref=e319] [cursor=pointer]:
+              - generic [ref=e320]: TS
+              - generic [ref=e321]: blueprint.ts
+            - generic "src/orchestration/builtin-skills.ts" [ref=e322] [cursor=pointer]:
+              - generic [ref=e323]: TS
+              - generic [ref=e324]: builtin-skills.ts
+            - generic "src/orchestration/checkpoint.ts" [ref=e325] [cursor=pointer]:
+              - generic [ref=e326]: TS
+              - generic [ref=e327]: checkpoint.ts
+            - generic "src/orchestration/circuit-breaker.ts" [ref=e328] [cursor=pointer]:
+              - generic [ref=e329]: TS
+              - generic [ref=e330]: circuit-breaker.ts
+            - generic "src/orchestration/code-simplifier.ts" [ref=e331] [cursor=pointer]:
+              - generic [ref=e332]: TS
+              - generic [ref=e333]: code-simplifier.ts
+            - generic "src/orchestration/confidence-engine.ts" [ref=e334] [cursor=pointer]:
+              - generic [ref=e335]: TS
+              - generic [ref=e336]: confidence-engine.ts
+            - generic "src/orchestration/context-cache.ts" [ref=e337] [cursor=pointer]:
+              - generic [ref=e338]: TS
+              - generic [ref=e339]: context-cache.ts
+            - generic "src/orchestration/contracts.ts" [ref=e340] [cursor=pointer]:
+              - generic [ref=e341]: TS
+              - generic [ref=e342]: contracts.ts
+            - generic "src/orchestration/cost-tracker.ts" [ref=e343] [cursor=pointer]:
+              - generic [ref=e344]: TS
+              - generic [ref=e345]: cost-tracker.ts
+            - generic "src/orchestration/custom-commands.ts" [ref=e346] [cursor=pointer]:
+              - generic [ref=e347]: TS
+              - generic [ref=e348]: custom-commands.ts
+            - generic "src/orchestration/debate-artifact.ts" [ref=e349] [cursor=pointer]:
+              - generic [ref=e350]: TS
+              - generic [ref=e351]: debate-artifact.ts
+            - generic "src/orchestration/debate-mode.ts" [ref=e352] [cursor=pointer]:
+              - generic [ref=e353]: TS
+              - generic [ref=e354]: debate-mode.ts
+            - generic "src/orchestration/delegation.ts" [ref=e355] [cursor=pointer]:
+              - generic [ref=e356]: TS
+              - generic [ref=e357]: delegation.ts
+            - generic "src/orchestration/dependency-graph.ts" [ref=e358] [cursor=pointer]:
+              - generic [ref=e359]: TS
+              - generic [ref=e360]: dependency-graph.ts
+            - generic "src/orchestration/design-artifact.ts" [ref=e361] [cursor=pointer]:
+              - generic [ref=e362]: TS
+              - generic [ref=e363]: design-artifact.ts
+            - generic "src/orchestration/design-references.ts" [ref=e364] [cursor=pointer]:
+              - generic [ref=e365]: TS
+              - generic [ref=e366]: design-references.ts
+            - generic "src/orchestration/durable-execution.ts" [ref=e367] [cursor=pointer]:
+              - generic [ref=e368]: TS
+              - generic [ref=e369]: durable-execution.ts
+            - generic "src/orchestration/enforcer.ts" [ref=e370] [cursor=pointer]:
+              - generic [ref=e371]: TS
+              - generic [ref=e372]: enforcer.ts
+            - generic "src/orchestration/engine-wiring.ts" [ref=e373] [cursor=pointer]:
+              - generic [ref=e374]: TS
+              - generic [ref=e375]: engine-wiring.ts
+            - generic "src/orchestration/engine.ts" [ref=e376] [cursor=pointer]:
+              - generic [ref=e377]: TS
+              - generic [ref=e378]: engine.ts
+            - generic "src/orchestration/event-flows.ts" [ref=e379] [cursor=pointer]:
+              - generic [ref=e380]: TS
+              - generic [ref=e381]: event-flows.ts
+            - generic "src/orchestration/factcheck.ts" [ref=e382] [cursor=pointer]:
+              - generic [ref=e383]: TS
+              - generic [ref=e384]: factcheck.ts
+            - generic "src/orchestration/file-lock.ts" [ref=e385] [cursor=pointer]:
+              - generic [ref=e386]: TS
+              - generic [ref=e387]: file-lock.ts
+            - generic "src/orchestration/fresh-context-loop.ts" [ref=e388] [cursor=pointer]:
+              - generic [ref=e389]: TS
+              - generic [ref=e390]: fresh-context-loop.ts
+            - generic "src/orchestration/full-stack-orchestrator.ts" [ref=e391] [cursor=pointer]:
+              - generic [ref=e392]: TS
+              - generic [ref=e393]: full-stack-orchestrator.ts
+            - generic "src/orchestration/graceful-degradation.ts" [ref=e394] [cursor=pointer]:
+              - generic [ref=e395]: TS
+              - generic [ref=e396]: graceful-degradation.ts
+            - generic "src/orchestration/guards.ts" [ref=e397] [cursor=pointer]:
+              - generic [ref=e398]: TS
+              - generic [ref=e399]: guards.ts
+            - generic "src/orchestration/hooks.ts" [ref=e400] [cursor=pointer]:
+              - generic [ref=e401]: TS
+              - generic [ref=e402]: hooks.ts
+            - generic "src/orchestration/hud.ts" [ref=e403] [cursor=pointer]:
+              - generic [ref=e404]: TS
+              - generic [ref=e405]: hud.ts
+            - generic "src/orchestration/human-in-the-loop.ts" [ref=e406] [cursor=pointer]:
+              - generic [ref=e407]: TS
+              - generic [ref=e408]: human-in-the-loop.ts
+            - generic "src/orchestration/intent-gate.ts" [ref=e409] [cursor=pointer]:
+              - generic [ref=e410]: TS
+              - generic [ref=e411]: intent-gate.ts
+            - generic "src/orchestration/interview-mode.ts" [ref=e412] [cursor=pointer]:
+              - generic [ref=e413]: TS
+              - generic [ref=e414]: interview-mode.ts
+            - generic "src/orchestration/language-reviewers.ts" [ref=e415] [cursor=pointer]:
+              - generic [ref=e416]: TS
+              - generic [ref=e417]: language-reviewers.ts
+            - generic "src/orchestration/live-error-monitor.ts" [ref=e418] [cursor=pointer]:
+              - generic [ref=e419]: TS
+              - generic [ref=e420]: live-error-monitor.ts
+            - generic "src/orchestration/microagents.ts" [ref=e421] [cursor=pointer]:
+              - generic [ref=e422]: TS
+              - generic [ref=e423]: microagents.ts
+            - generic "src/orchestration/model-router.ts" [ref=e424] [cursor=pointer]:
+              - generic [ref=e425]: TS
+              - generic [ref=e426]: model-router.ts
+            - generic "src/orchestration/model-variants.ts" [ref=e427] [cursor=pointer]:
+              - generic [ref=e428]: TS
+              - generic [ref=e429]: model-variants.ts
+            - generic "src/orchestration/omo-hooks-full.ts" [ref=e430] [cursor=pointer]:
+              - generic [ref=e431]: TS
+              - generic [ref=e432]: omo-hooks-full.ts
+            - generic "src/orchestration/omo-hooks.ts" [ref=e433] [cursor=pointer]:
+              - generic [ref=e434]: TS
+              - generic [ref=e435]: omo-hooks.ts
+            - generic "src/orchestration/pr-checks.ts" [ref=e436] [cursor=pointer]:
+              - generic [ref=e437]: TS
+              - generic [ref=e438]: pr-checks.ts
+            - generic "src/orchestration/process.ts" [ref=e439] [cursor=pointer]:
+              - generic [ref=e440]: TS
+              - generic [ref=e441]: process.ts
+            - generic "src/orchestration/prompt-discovery.ts" [ref=e442] [cursor=pointer]:
+              - generic [ref=e443]: TS
+              - generic [ref=e444]: prompt-discovery.ts
+            - generic "src/orchestration/prompts.ts" [ref=e445] [cursor=pointer]:
+              - generic [ref=e446]: TS
+              - generic [ref=e447]: prompts.ts
+            - generic "src/orchestration/quality-gate.ts" [ref=e448] [cursor=pointer]:
+              - generic [ref=e449]: TS
+              - generic [ref=e450]: quality-gate.ts
+            - generic "src/orchestration/ralph.ts" [ref=e451] [cursor=pointer]:
+              - generic [ref=e452]: TS
+              - generic [ref=e453]: ralph.ts
+            - generic "src/orchestration/rate-limit-scheduler.ts" [ref=e454] [cursor=pointer]:
+              - generic [ref=e455]: TS
+              - generic [ref=e456]: rate-limit-scheduler.ts
+            - generic "src/orchestration/retry.ts" [ref=e457] [cursor=pointer]:
+              - generic [ref=e458]: TS
+              - generic [ref=e459]: retry.ts
+            - generic "src/orchestration/self-heal.ts" [ref=e460] [cursor=pointer]:
+              - generic [ref=e461]: TS
+              - generic [ref=e462]: self-heal.ts
+            - generic "src/orchestration/sisyphus.ts" [ref=e463] [cursor=pointer]:
+              - generic [ref=e464]: TS
+              - generic [ref=e465]: sisyphus.ts
+            - generic "src/orchestration/skill-chain.ts" [ref=e466] [cursor=pointer]:
+              - generic [ref=e467]: TS
+              - generic [ref=e468]: skill-chain.ts
+            - generic "src/orchestration/spawn-reservation.ts" [ref=e469] [cursor=pointer]:
+              - generic [ref=e470]: TS
+              - generic [ref=e471]: spawn-reservation.ts
+            - generic "src/orchestration/strategy-branching.ts" [ref=e472] [cursor=pointer]:
+              - generic [ref=e473]: TS
+              - generic [ref=e474]: strategy-branching.ts
+            - generic "src/orchestration/stream-protocol.ts" [ref=e475] [cursor=pointer]:
+              - generic [ref=e476]: TS
+              - generic [ref=e477]: stream-protocol.ts
+            - generic "src/orchestration/stuck-detector.ts" [ref=e478] [cursor=pointer]:
+              - generic [ref=e479]: TS
+              - generic [ref=e480]: stuck-detector.ts
+            - generic "src/orchestration/undo.ts" [ref=e481] [cursor=pointer]:
+              - generic [ref=e482]: TS
+              - generic [ref=e483]: undo.ts
+            - generic "src/orchestration/verify-fix.ts" [ref=e484] [cursor=pointer]:
+              - generic [ref=e485]: TS
+              - generic [ref=e486]: verify-fix.ts
+            - generic "src/orchestration/worker-manager.ts" [ref=e487] [cursor=pointer]:
+              - generic [ref=e488]: TS
+              - generic [ref=e489]: worker-manager.ts
+            - generic "src/orchestration/worker-runner.ts" [ref=e490] [cursor=pointer]:
+              - generic [ref=e491]: TS
+              - generic [ref=e492]: worker-runner.ts
+            - generic "src/orchestration/workspace-checkpoint.ts" [ref=e493] [cursor=pointer]:
+              - generic [ref=e494]: TS
+              - generic [ref=e495]: workspace-checkpoint.ts
+          - generic [ref=e496] [cursor=pointer]:
+            - generic [ref=e497]: ▶
+            - img [ref=e498]
+            - generic [ref=e500]: providers
+          - generic [ref=e501]:
+            - generic "src/providers/anthropic.ts" [ref=e502] [cursor=pointer]:
+              - generic [ref=e503]: TS
+              - generic [ref=e504]: anthropic.ts
+            - generic "src/providers/auth.ts" [ref=e505] [cursor=pointer]:
+              - generic [ref=e506]: TS
+              - generic [ref=e507]: auth.ts
+            - generic "src/providers/external-auth.ts" [ref=e508] [cursor=pointer]:
+              - generic [ref=e509]: TS
+              - generic [ref=e510]: external-auth.ts
+            - generic "src/providers/gemini.ts" [ref=e511] [cursor=pointer]:
+              - generic [ref=e512]: TS
+              - generic [ref=e513]: gemini.ts
+            - generic "src/providers/mock.ts" [ref=e514] [cursor=pointer]:
+              - generic [ref=e515]: TS
+              - generic [ref=e516]: mock.ts
+            - generic "src/providers/openai.ts" [ref=e517] [cursor=pointer]:
+              - generic [ref=e518]: TS
+              - generic [ref=e519]: openai.ts
+            - generic "src/providers/registry.ts" [ref=e520] [cursor=pointer]:
+              - generic [ref=e521]: TS
+              - generic [ref=e522]: registry.ts
+            - generic "src/providers/shared.ts" [ref=e523] [cursor=pointer]:
+              - generic [ref=e524]: TS
+              - generic [ref=e525]: shared.ts
+          - generic [ref=e526] [cursor=pointer]:
+            - generic [ref=e527]: ▶
+            - img [ref=e528]
+            - generic [ref=e530]: roles
+          - generic "src/roles/registry.ts" [ref=e532] [cursor=pointer]:
+            - generic [ref=e533]: TS
+            - generic [ref=e534]: registry.ts
+          - generic [ref=e535] [cursor=pointer]:
+            - generic [ref=e536]: ▶
+            - img [ref=e537]
+            - generic [ref=e539]: routing
+          - generic "src/routing/policy.ts" [ref=e541] [cursor=pointer]:
+            - generic [ref=e542]: TS
+            - generic [ref=e543]: policy.ts
+          - generic [ref=e544] [cursor=pointer]:
+            - generic [ref=e545]: ▶
+            - img [ref=e546]
+            - generic [ref=e548]: safety
+          - generic [ref=e549]:
+            - generic "src/safety/approval.ts" [ref=e550] [cursor=pointer]:
+              - generic [ref=e551]: TS
+              - generic [ref=e552]: approval.ts
+            - generic "src/safety/resolver.ts" [ref=e553] [cursor=pointer]:
+              - generic [ref=e554]: TS
+              - generic [ref=e555]: resolver.ts
+            - generic "src/safety/rules-engine.ts" [ref=e556] [cursor=pointer]:
+              - generic [ref=e557]: TS
+              - generic [ref=e558]: rules-engine.ts
+          - generic [ref=e559] [cursor=pointer]:
+            - generic [ref=e560]: ▶
+            - img [ref=e561]
+            - generic [ref=e563]: sessions
+          - generic [ref=e564]:
+            - generic "src/sessions/activity.ts" [ref=e565] [cursor=pointer]:
+              - generic [ref=e566]: TS
+              - generic [ref=e567]: activity.ts
+            - generic "src/sessions/follow.ts" [ref=e568] [cursor=pointer]:
+              - generic [ref=e569]: TS
+              - generic [ref=e570]: follow.ts
+            - generic "src/sessions/store.ts" [ref=e571] [cursor=pointer]:
+              - generic [ref=e572]: TS
+              - generic [ref=e573]: store.ts
+          - generic [ref=e574] [cursor=pointer]:
+            - generic [ref=e575]: ▶
+            - img [ref=e576]
+            - generic [ref=e578]: soak
+          - generic "src/soak/harness.ts" [ref=e580] [cursor=pointer]:
+            - generic [ref=e581]: TS
+            - generic [ref=e582]: harness.ts
+          - generic [ref=e583] [cursor=pointer]:
+            - generic [ref=e584]: ▶
+            - img [ref=e585]
+            - generic [ref=e587]: tools
+          - generic [ref=e588]:
+            - generic "src/tools/agents-context.ts" [ref=e589] [cursor=pointer]:
+              - generic [ref=e590]: TS
+              - generic [ref=e591]: agents-context.ts
+            - generic "src/tools/ast-grep.ts" [ref=e592] [cursor=pointer]:
+              - generic [ref=e593]: TS
+              - generic [ref=e594]: ast-grep.ts
+            - generic "src/tools/browser-session.ts" [ref=e595] [cursor=pointer]:
+              - generic [ref=e596]: TS
+              - generic [ref=e597]: browser-session.ts
+            - generic "src/tools/browser.ts" [ref=e598] [cursor=pointer]:
+              - generic [ref=e599]: TS
+              - generic [ref=e600]: browser.ts
+            - generic "src/tools/comment-checker.ts" [ref=e601] [cursor=pointer]:
+              - generic [ref=e602]: TS
+              - generic [ref=e603]: comment-checker.ts
+            - generic "src/tools/diff-sandbox.ts" [ref=e604] [cursor=pointer]:
+              - generic [ref=e605]: TS
+              - generic [ref=e606]: diff-sandbox.ts
+            - generic "src/tools/edit-strategies.ts" [ref=e607] [cursor=pointer]:
+              - generic [ref=e608]: TS
+              - generic [ref=e609]: edit-strategies.ts
+            - generic "src/tools/hashline.ts" [ref=e610] [cursor=pointer]:
+              - generic [ref=e611]: TS
+              - generic [ref=e612]: hashline.ts
+            - generic "src/tools/lsp.ts" [ref=e613] [cursor=pointer]:
+              - generic [ref=e614]: TS
+              - generic [ref=e615]: lsp.ts
+            - generic "src/tools/omo-tools.ts" [ref=e616] [cursor=pointer]:
+              - generic [ref=e617]: TS
+              - generic [ref=e618]: omo-tools.ts
+            - generic "src/tools/repomap.ts" [ref=e619] [cursor=pointer]:
+              - generic [ref=e620]: TS
+              - generic [ref=e621]: repomap.ts
+            - generic "src/tools/runtime.ts" [ref=e622] [cursor=pointer]:
+              - generic [ref=e623]: TS
+              - generic [ref=e624]: runtime.ts
+            - generic "src/tools/web-search.ts" [ref=e625] [cursor=pointer]:
+              - generic [ref=e626]: TS
+              - generic [ref=e627]: web-search.ts
+          - generic "src/cli.ts" [ref=e628] [cursor=pointer]:
+            - generic [ref=e629]: TS
+            - generic [ref=e630]: cli.ts
+          - generic "src/index.ts" [ref=e631] [cursor=pointer]:
+            - generic [ref=e632]: TS
+            - generic [ref=e633]: index.ts
+        - generic [ref=e634] [cursor=pointer]:
+          - generic [ref=e635]: ▶
+          - img [ref=e636]
+          - generic [ref=e638]: test-debug-parse2
+        - generic [ref=e639]:
+          - generic "test-debug-parse2/AGENTS.md" [ref=e640] [cursor=pointer]:
+            - generic [ref=e641]: MD
+            - generic [ref=e642]: AGENTS.md
+          - generic "test-debug-parse2/result-by-step.md" [ref=e643] [cursor=pointer]:
+            - generic [ref=e644]: MD
+            - generic [ref=e645]: result-by-step.md
+        - generic [ref=e646] [cursor=pointer]:
+          - generic [ref=e647]: ▶
+          - img [ref=e648]
+          - generic [ref=e650]: test-dp3
+        - generic [ref=e651]:
+          - generic "test-dp3/AGENTS.md" [ref=e652] [cursor=pointer]:
+            - generic [ref=e653]: MD
+            - generic [ref=e654]: AGENTS.md
+          - generic "test-dp3/result-by-step.md" [ref=e655] [cursor=pointer]:
+            - generic [ref=e656]: MD
+            - generic [ref=e657]: result-by-step.md
+        - generic ".gitignore" [ref=e658] [cursor=pointer]:
+          - generic [ref=e659]: GI
+          - generic [ref=e660]: .gitignore
+        - generic "AGENTS.md" [ref=e661] [cursor=pointer]:
+          - generic [ref=e662]: MD
+          - generic [ref=e663]: AGENTS.md
+        - generic "OpenSeed" [ref=e664] [cursor=pointer]:
+          - generic [ref=e665]: OP
+          - generic [ref=e666]: OpenSeed
+        - generic "package.json" [ref=e667] [cursor=pointer]:
+          - generic [ref=e668]: "{}"
+          - generic [ref=e669]: package.json
+          - generic "1 nested" [ref=e670]: "+1"
+        - generic "plan.md" [ref=e671] [cursor=pointer]:
+          - generic [ref=e672]: MD
+          - generic [ref=e673]: plan.md
+        - generic "README.md" [ref=e674] [cursor=pointer]:
+          - generic [ref=e675]: MD
+          - generic [ref=e676]: README.md
+        - generic "result-by-step.md" [ref=e677] [cursor=pointer]:
+          - generic [ref=e678]: MD
+          - generic [ref=e679]: result-by-step.md
+        - generic "tsconfig.json" [ref=e680] [cursor=pointer]:
+          - generic [ref=e681]: "{}"
+          - generic [ref=e682]: tsconfig.json
+      - generic [ref=e684] [cursor=pointer]:
+        - generic [ref=e685]: OUTLINE
+        - generic [ref=e686]: ▶
+      - generic [ref=e688] [cursor=pointer]:
+        - generic [ref=e689]: TIMELINE
+        - generic [ref=e690]: ▶
+    - generic [ref=e692]:
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - heading "System Diagnostics" [level=2]
+              - generic: Not yet run
+            - generic:
+              - button "Run Full Diagnostic"
+              - button "Scan Code Health"
+              - button "Export"
+            - generic:
+              - generic: "Scan target:"
+              - generic:
+                - textbox "Drop folder/file here or type path (empty = project root)"
+                - button "📁 Browse"
+          - generic:
+            - generic:
+              - generic: —
+              - generic: Passed
+            - generic:
+              - generic: —
+              - generic: Warnings
+            - generic:
+              - generic: —
+              - generic: Errors
+            - generic:
+              - generic: —
+              - generic: Total Checks
+          - generic: Press "Run Full Diagnostic" to check providers, tools, config, and system health.
+      - generic:
+        - generic:
+          - generic:
+            - generic: 🧠
+            - generic:
+              - heading "AGI Engine" [level=2]
+              - generic: Command mode for directed tasks. Autonomous mode for self-directed work.
+          - generic:
+            - button "Command AGI"
+            - button "Autonomous AGI"
+          - generic:
+            - generic:
+              - generic:
+                - generic: 📁
+                - textbox "Drop folder here or type path..."
+                - button "✕"
+              - generic:
+                - textbox "Describe what you want to build..."
+                - button "AGI Start"
+          - generic:
+            - generic: Pipeline steps will appear here...
+          - generic:
+            - generic:
+              - generic: Status Dashboard
+              - generic: Idle
+            - generic:
+              - generic: "Phase: —"
+              - generic: "Steps: 0/0"
+              - generic: "Files: 0"
+              - generic: "Tools: 0"
+              - generic: "Tokens: 0"
+              - generic: "Cost: —"
+              - generic: "Elapsed: 0s"
+              - generic: "Replans: 0"
+          - heading "Activity Log" [level=2]
+          - generic:
+            - generic: Enter a prompt and click AGI Start to begin autonomous execution.
+      - generic [ref=e695]:
+        - heading "Open Seed" [level=1] [ref=e696]
+        - paragraph [ref=e697]:
+          - text: Autonomous AGI Coding Engine
+          - text: 49 subsystems · 40 neural roles · Prometheus Engine
+        - generic [ref=e698]:
+          - button "Open Folder" [ref=e699] [cursor=pointer]
+          - generic [ref=e700]:
+            - generic [ref=e701]: Recent
+            - generic [ref=e702] [cursor=pointer]:
+              - generic [ref=e703]: 📁
+              - generic [ref=e704]:
+                - generic [ref=e705]: mygent
+                - generic [ref=e706]: /Volumes/DevSSD/Developer/Codebase/mygent
+            - generic [ref=e707] [cursor=pointer]:
+              - generic [ref=e708]: 📁
+              - generic [ref=e709]:
+                - generic [ref=e710]: test
+                - generic [ref=e711]: /Volumes/DevSSD/Developer/Codebase/test
+            - generic [ref=e712] [cursor=pointer]:
+              - generic [ref=e713]: 📁
+              - generic [ref=e714]:
+                - generic [ref=e715]: banana-story
+                - generic [ref=e716]: /Volumes/DevSSD/Developer/Codebase/banana-story
+            - generic [ref=e717] [cursor=pointer]:
+              - generic [ref=e718]: 📁
+              - generic [ref=e719]:
+                - generic [ref=e720]: test-ws-46
+                - generic [ref=e721]: /tmp/test-ws-46
+        - paragraph [ref=e722]:
+          - text: ⌘⇧A AI Chat ⌘⇧E Explorer ⌘J Terminal
+          - text: 🧠 AGI Mode — 프롬프트 하나로 완전한 앱 생성
+          - text: 🔨 Build — 코드 작성, 수정, 테스트
+          - text: 💬 Ask — 질문, 설명, 분석
+      - generic [ref=e723]:
+        - generic [ref=e724]:
+          - generic [ref=e725]: Terminal
+          - generic [ref=e726]: Ready
+          - button "Clear" [ref=e727] [cursor=pointer]
+          - button "×" [ref=e728] [cursor=pointer]
+        - generic [ref=e730]:
+          - generic [ref=e731]: $
+          - textbox "command..." [ref=e732]
+    - button "O.S" [ref=e733] [cursor=pointer]
+    - generic:
+      - generic:
+        - heading "Open Seed" [level=3]
+        - button "×"
+      - generic:
+        - generic:
+          - textbox "Describe a task or ask a question..."
+          - generic:
+            - generic:
+              - button "Ask"
+              - button "Build"
+              - button "AGI"
+            - generic:
+              - generic: GPT-5.4
+              - generic: ▼
+            - button "↑"
+  - generic:
+    - generic:
+      - heading "Input" [level=3]
+      - textbox [active]
+      - generic:
+        - button "Cancel"
+        - button "OK"
+  - generic [ref=e734]:
+    - generic [ref=e735]: mygent
+    - generic [ref=e737]: GPT-5.4 + Claude Opus 4.6
+    - generic [ref=e739]: Open Seed v0.1

@@ -66,10 +66,10 @@ export function getProviderAuthStatus(
     summary = "disabled";
   } else if (!hasModel) {
     summary = "missing model";
-  } else if (!hasCredential) {
-    summary = missingCredentialSummary(providerId, authMode, credentialEnv);
   } else if (!supported) {
     summary = unsupportedSummary(providerId, authMode);
+  } else if (!hasCredential) {
+    summary = missingCredentialSummary(providerId, authMode, credentialEnv);
   } else if (warnings.length > 0) {
     summary = `${summary}; ${warnings[0]}`;
   }
@@ -191,24 +191,31 @@ function getWarnings(
     }
     return warnings;
   }
+  if (providerId === "openai" && authMode === "api_key") {
+    return ["OpenAI API key auth is disabled; use OPENAI_OAUTH_TOKEN or Codex CLI auth"];
+  }
   if (providerId === "anthropic" && authMode === "oauth") {
     const external = loadAnthropicClaudeCliAuth();
     const warnings = [];
     if (!external) {
-      warnings.push("Claude Code OAuth credentials were not found");
-    } else if (isAnthropicClaudeAuthExpired(external)) {
-      warnings.push("stored Claude Code OAuth token is expired; run `claude auth login` to refresh it");
+      warnings.push("Claude Code CLI auth not found — run 'claude' to authenticate");
     }
-    if (external && !external.scopes?.includes("org:create_api_key")) {
-      warnings.push("Claude Code OAuth is missing org:create_api_key scope; public API fallback is limited, so OAuth execution will prefer local Claude CLI transport");
+    if (external && isAnthropicClaudeAuthExpired(external)) {
+      warnings.push("Claude Code OAuth token may be expired — run 'claude' to refresh");
     }
-    warnings.push("Claude Code OAuth bearer mode; ensure the stored Claude session is still valid");
     return warnings;
   }
   return [];
 }
 
 function isSupported(providerId: Exclude<ProviderId, "mock">, authMode: "api_key" | "oauth"): boolean {
+  if (providerId === "openai" && authMode === "api_key") {
+    return false;
+  }
+  // Anthropic OAuth is supported via Claude Code CLI credentials
+  if (providerId === "anthropic" && authMode === "oauth") {
+    return true;
+  }
   if (providerId === "gemini" && authMode === "oauth") {
     return false;
   }
@@ -216,6 +223,12 @@ function isSupported(providerId: Exclude<ProviderId, "mock">, authMode: "api_key
 }
 
 function unsupportedSummary(providerId: Exclude<ProviderId, "mock">, authMode: "api_key" | "oauth"): string {
+  if (providerId === "openai" && authMode === "api_key") {
+    return "OpenAI API key auth is disabled; use OAuth";
+  }
+  if (providerId === "anthropic" && authMode === "oauth") {
+    return "Anthropic OAuth requires Claude Code CLI auth — run 'claude' to authenticate";
+  }
   if (providerId === "gemini" && authMode === "oauth") {
     return "Gemini OAuth is not implemented yet";
   }

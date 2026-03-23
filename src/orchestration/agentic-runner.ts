@@ -186,7 +186,8 @@ export async function runAgenticLoop(params: AgenticRunParams): Promise<AgenticR
         usage: {
           inputTokens: response.usage.inputTokens ?? 0,
           outputTokens: response.usage.outputTokens ?? 0
-        }
+        },
+        authMode: response.metadata?.authMode
       });
     }
 

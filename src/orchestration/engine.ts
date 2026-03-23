@@ -23,11 +23,12 @@ import type {
   ReviewResult,
   SessionRecord,
   SpecialistArtifact,
+  ToolResult,
   WorkerTransport
 } from "../core/types.js";
 import { nowIso } from "../core/utils.js";
 import { ProviderRegistry } from "../providers/registry.js";
-import { classifyTask } from "../routing/policy.js";
+import { classifyTask, getPrimaryModel } from "../routing/policy.js";
 import { getRoleRegistry, resolveRole } from "../roles/registry.js";
 import { ApprovalEngine } from "../safety/approval.js";
 import { RulesEngine } from "../safety/rules-engine.js";
@@ -47,6 +48,12 @@ import {
   type DelegationOutcome
 } from "./delegation.js";
 import { loadDesignReferenceContext } from "./design-references.js";
+import type { AnalyzeArtifact } from "./analyze-artifact.js";
+import { extractAnalyzeArtifactFromText, extractOriginalTaskFromPrompt, normalizeAnalyzeArtifact } from "./analyze-artifact.js";
+import type { DebateArtifact } from "./debate-artifact.js";
+import { extractDebateArtifactFromText, normalizeDebateArtifact } from "./debate-artifact.js";
+import type { DesignArtifact } from "./design-artifact.js";
+import { extractDesignArtifactFromText, normalizeDesignArtifact } from "./design-artifact.js";
 import {
   buildExecutorPrompt,
   buildPlannerPrompt,
@@ -149,14 +156,30 @@ export interface RunEngineResult {
   evidence?: import("./sisyphus.js").EvidenceRequirement[];
   /** Undo manager for post-run rollback */
   undoManager: UndoManager;
+  /** Normalized ANALYZE output for AGI prelude steps */
+  analysisArtifact?: AnalyzeArtifact;
+  /** Normalized DEBATE output for AGI prelude steps */
+  debateArtifact?: DebateArtifact;
+  /** Normalized DESIGN output for AGI prelude steps */
+  designArtifact?: DesignArtifact;
+}
+
+type AgiPreludeStepType = "analyze" | "debate" | "design";
+type AgiExecutionOnlyStepType = "build" | "fix" | "improve" | "deploy" | "custom";
+type AgiVerifyOnlyStepType = "verify";
+type AgiReviewOnlyStepType = "review";
+
+interface ParsedAgiStep {
+  isAgiStep: boolean;
+  stepType?: string;
 }
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
 export async function runEngine(options: RunEngineOptions): Promise<RunEngineResult> {
   // Auto-detect AGI pipeline steps: limit enforcer rounds to keep each step fast
-  const isAgiStep = /^\[STEP \d+:/.test(options.task);
-  if (isAgiStep && options.maxEnforcerRounds === undefined) {
+  const agiStep = parseAgiStep(options.task);
+  if (agiStep.isAgiStep && options.maxEnforcerRounds === undefined) {
     options.maxEnforcerRounds = 2;
   }
 
@@ -189,7 +212,7 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     : undefined;
 
   // Token budget tracking
-  const tokenBudget = createTokenBudget(config.providers.anthropic?.defaultModel ?? "claude-sonnet-4-5");
+  const tokenBudget = createTokenBudget(getPrimaryModel(config));
 
   // Stream protocol — wire event bus for real-time output
   // When running as child process (non-TTY), output NDJSON to stdout for server parsing
@@ -388,7 +411,8 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     if (summary.entries > 0 && summary.entries % 5 === 0) {
       await eventBus.fire("cost.update", "system", session?.id ?? "", {
         totalCostUsd: summary.totalEstimatedCostUsd,
-        totalTokens: summary.totalInputTokens + summary.totalOutputTokens
+        totalTokens: summary.totalInputTokens + summary.totalOutputTokens,
+        costAvailable: summary.hasBillableCost
       });
     }
   });
@@ -470,7 +494,7 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   const evidence = createEvidenceRequirements(intent);
 
   // Model variant detection
-  const providerModel = config.providers.anthropic?.defaultModel ?? "claude-sonnet-4-5";
+  const providerModel = getPrimaryModel(config);
   const modelVariant = getModelVariant(providerModel);
 
   // Undo Manager
@@ -526,12 +550,20 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
 
   const rateLimitCtx = getRateLimitSummary(rateLimitScheduler);
   const combinedContext = [wiring.autoInjectedContext, wiring.recoveryContext, agentsContext, designReferenceContext, memoryContext, consolidatedMemoryContext, microagentContext, assessmentContext, modelRoutingCtx, learnedCtx, skillContext, skillPromptContext, mcpContext, customCmdContext, rateLimitCtx, langReviewCtx, atlasContext, startCtx].filter(Boolean).join("\n\n");
+  const preludeStepType = isPreludeOnlyStep(agiStep.stepType) ? agiStep.stepType : undefined;
+  const preludeOnlyStep = preludeStepType !== undefined;
+  const executionOnlyStep = isExecutionOnlyStep(agiStep.stepType) ? agiStep.stepType : undefined;
+  const verifyOnlyStep = isVerifyOnlyStep(agiStep.stepType) ? agiStep.stepType : undefined;
+  const reviewOnlyStep = isReviewOnlyStep(agiStep.stepType) ? agiStep.stepType : undefined;
   const requestedCategory = classifyTask(options.task);
   const repoSummary = buildRepoSummary(repoMap);
 
   const plannerRole = resolveRole(roleRegistry, "planner");
   const researcherRole = resolveRole(roleRegistry, "researcher");
-  const executorRole = resolveRole(roleRegistry, requestedCategory === "frontend" ? "frontend-engineer" : "executor");
+  const executorRole = resolveRole(
+    roleRegistry,
+    executionOnlyStep ? "executor" : requestedCategory === "frontend" ? "frontend-engineer" : "executor"
+  );
   const reviewerRole = resolveRole(roleRegistry, "reviewer");
 
   // ═══ CONFIDENCE CHECK — decide if we can proceed autonomously ═══
@@ -599,9 +631,19 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   // ─── Phase: Delegation ───────────────────────────────────────────────────
 
   const delegatedPlannerTasks = augmentPlannerTasks(options.task, plannerOutput.tasks ?? []);
+
+  // For BUILD/FIX steps, only delegate to roles that can write files
+  const NON_WRITING_ROLES = new Set(["browser-operator", "api-designer", "security-auditor", "cicd-engineer", "git-strategist", "db-engineer", "accessibility-auditor", "cost-optimizer", "model-router", "compliance-reviewer", "pr-author", "observability-engineer"]);
+  const isExecutionStep = executionOnlyStep === "build" || executionOnlyStep === "fix";
+
   const delegationAssignments = options.mode === "team" && !intent.skipDelegation
     ? selectDelegationAssignments({
-      tasks: delegatedPlannerTasks.filter((task) => task.category !== "review"),
+      tasks: delegatedPlannerTasks.filter((task) => {
+        if (task.category === "review") return false;
+        // In BUILD/FIX steps, skip roles that can't write files
+        if (isExecutionStep && task.roleHint && NON_WRITING_ROLES.has(task.roleHint)) return false;
+        return true;
+      }),
       registry: roleRegistry,
       limit: Math.max(0, config.team.maxWorkers - 2)
     })
@@ -626,7 +668,7 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   let delegationSummary = summarizeDelegationArtifacts(delegationOutcomes);
 
   // ═══ BACKGROUND PARALLEL AGENTS — fire research specialists concurrently ═══
-  if (options.mode === "run" && !intent.skipResearch && intent.scope !== "single-file") {
+  if (!preludeOnlyStep && options.mode === "run" && !intent.skipResearch && intent.scope !== "single-file") {
     const bgTasks: BackgroundAgentTask[] = intent.suggestedRoles
       .filter(r => r !== "executor" && r !== "planner" && r !== "reviewer")
       .slice(0, 3)
@@ -668,6 +710,135 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
     });
   }
 
+  if (preludeOnlyStep) {
+    const originalTask = extractOriginalTaskFromPrompt(options.task);
+    const promptAnalyzeArtifact = preludeStepType !== "analyze"
+      ? (extractAnalyzeArtifactFromText(originalTask, options.task) ?? undefined)
+      : undefined;
+    const promptDebateArtifact = preludeStepType === "design"
+      ? (extractDebateArtifactFromText(originalTask, options.task, promptAnalyzeArtifact ?? null) ?? undefined)
+      : undefined;
+    const analysisArtifact = preludeStepType === "analyze"
+      ? normalizeAnalyzeArtifact({
+        task: originalTask,
+        planner: plannerOutput,
+        research: researchOutput ?? null
+      })
+      : undefined;
+    const debateArtifact = preludeStepType === "debate"
+      ? normalizeDebateArtifact({
+        task: originalTask,
+        analyzeArtifact: promptAnalyzeArtifact ?? null,
+        planner: plannerOutput,
+        research: researchOutput ?? null
+      })
+      : undefined;
+    const designArtifact = preludeStepType === "design"
+      ? normalizeDesignArtifact({
+        task: originalTask,
+        analyzeArtifact: promptAnalyzeArtifact ?? null,
+        debateArtifact: promptDebateArtifact ?? null,
+        planner: plannerOutput,
+        research: researchOutput ?? null
+      })
+      : undefined;
+
+    const review = buildPreludeStepReview({
+      stepType: preludeStepType,
+      plannerSummary: plannerOutput.summary,
+      researchSummary: researchOutput?.summary,
+      delegationSummary,
+      factcheckWarnings: factcheckResult.warnings
+    });
+
+    session.lastReview = review;
+    session.status = "completed";
+    session.updatedAt = nowIso();
+    await transitionPhase(session, "done", sessionStore, eventBus);
+    await sessionStore.saveSnapshot(session);
+
+    await eventBus.fire("review.pass", "engine", session.id, { review });
+
+    await checkpointSaver.save(createCheckpoint(session.id, "completed", 1, {
+      status: session.status,
+      review,
+      costs: costTracker.getSummary(),
+      enforcerVerdict: "prelude-only"
+    }));
+
+    await projectMemory.save();
+
+    try {
+      const { markCheckpointComplete } = await import("./durable-execution.js");
+      await markCheckpointComplete(options.cwd, config.sessions.localDirName);
+    } catch { /* non-critical */ }
+
+    try {
+      const { saveRalphState, createRalphState: createRS } = await import("./ralph.js");
+      const ralphState = createRS();
+      ralphState.learnedPatterns = learnedPatterns;
+      await saveRalphState(options.cwd, config.sessions.localDirName, ralphState);
+    } catch { /* first run, no patterns yet */ }
+
+    const sessionEvents = await sessionStore.readEvents(session.id);
+    await extractSessionMemories(options.cwd, config.sessions.localDirName, session.id, sessionEvents);
+
+    await hooks.fire("session.end", {
+      sessionId: session.id,
+      task: options.task,
+      event: "session.end",
+      data: { status: session.status, costs: costTracker.getSummary() }
+    });
+
+    // Emit prelude artifacts so AGI pipeline server can capture them from stdout
+    if (analysisArtifact) {
+      // Ensure clarificationRequest from planner is preserved in the artifact
+      const rawKeys = rawPlannerOutput ? Object.keys(rawPlannerOutput) : [];
+      // eslint-disable-next-line no-console
+      console.error(`[DEBUG] rawPlannerOutput keys: ${rawKeys.join(", ")}`);
+      const plannerCR = (rawPlannerOutput as unknown as Record<string, unknown>)?.clarificationRequest;
+      if (plannerCR && typeof plannerCR === "object" && (plannerCR as Record<string, unknown>).required === true && analysisArtifact) {
+        analysisArtifact.clarificationRequest = plannerCR as AnalyzeArtifact["clarificationRequest"];
+        analysisArtifact.clarificationRequired = true;
+      }
+      await eventBus.fire("agi.prelude.artifact", "engine", session.id, {
+        type: "analyze",
+        artifact: analysisArtifact
+      });
+    }
+    if (debateArtifact) {
+      await eventBus.fire("agi.prelude.artifact", "engine", session.id, {
+        type: "debate",
+        artifact: debateArtifact
+      });
+    }
+    if (designArtifact) {
+      await eventBus.fire("agi.prelude.artifact", "engine", session.id, {
+        type: "design",
+        artifact: designArtifact
+      });
+    }
+
+    await eventBus.fire("session.completed", "engine", session.id, {
+      status: session.status,
+      browserAvailable: browserHealth.available,
+      costs: costTracker.getSummary()
+    });
+
+    return {
+      session,
+      review,
+      intent,
+      costs: costTracker.getSummary(),
+      eventBus,
+      evidence,
+      undoManager,
+      analysisArtifact,
+      debateArtifact,
+      designArtifact
+    };
+  }
+
   // ─── Phase: Execution + Review (enforcer loop) ───────────────────────────
 
   await transitionPhase(session, "executing", sessionStore, eventBus);
@@ -677,9 +848,181 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
 
   // Inject factcheck warnings into context
   const executionContext = factcheckCtx ? `${combinedContext}\n\n${factcheckCtx}` : combinedContext;
+  const maxRetries = config.retry.maxParseRetries;
+
+  if (verifyOnlyStep) {
+    const originalTask = extractOriginalTaskFromPrompt(options.task);
+    const promptAnalyzeArtifact = /##\s+Analyze Artifact/i.test(options.task)
+      ? (extractAnalyzeArtifactFromText(originalTask, options.task) ?? undefined)
+      : undefined;
+    const promptDebateArtifact = /##\s+Debate Artifact/i.test(options.task)
+      ? (extractDebateArtifactFromText(
+        originalTask,
+        options.task,
+        promptAnalyzeArtifact ?? null
+      ) ?? undefined)
+      : undefined;
+    const promptDesignArtifact = /##\s+Design Artifact/i.test(options.task)
+      ? (extractDesignArtifactFromText(
+        originalTask,
+        options.task,
+        promptAnalyzeArtifact ?? null,
+        promptDebateArtifact ?? null
+      ) ?? undefined)
+      : undefined;
+    const verificationCommands = await detectVerificationCommandsForStep(options.cwd, promptDesignArtifact ?? undefined);
+    const verificationRun = await runVerificationCommands(options.cwd, verificationCommands);
+
+    await persistSyntheticTask({
+      session,
+      sessionStore,
+      roleId: "verify",
+      category: "review",
+      prompt: options.task,
+      output: {
+        summary: verificationRun.summary,
+        verificationCommands,
+        issues: verificationRun.result.issues,
+        toolResults: verificationRun.toolResults
+      }
+    });
+
+    await transitionPhase(session, "reviewing", sessionStore, eventBus);
+    await hooks.fire("before.review", {
+      sessionId: session.id,
+      task: options.task,
+      event: "before.review",
+      data: { verificationCommands }
+    });
+
+    let review: ReviewResult;
+    if (verificationCommands.length === 0) {
+      review = {
+        verdict: "fail",
+        summary: "No verification commands were detected for the VERIFY step.",
+        followUp: ["Define explicit acceptance checks or install the project dependencies before running VERIFY."]
+      };
+    } else {
+      review = await executeRoleTaskWithRetry({
+        ...roleTaskCtx,
+        role: reviewerRole,
+        mode: options.mode,
+        prompt: buildReviewerPrompt(
+          `${options.task}\n\nThis is a VERIFY-only step. Judge the verification command outputs. Do not propose code edits in this step.`,
+          {
+            kind: "execution",
+            summary: verificationRun.summary,
+            changes: [],
+            suggestedCommands: verificationCommands,
+            toolCalls: [],
+            toolResults: verificationRun.toolResults
+          },
+          delegationSummary,
+          executionContext
+        ),
+        retryConfig: config.retry,
+        maxRetries
+      }) as ReviewResult;
+      review = normalizeVerificationReview(review, verificationRun.result, verificationCommands);
+    }
+
+    await hooks.fire("after.review", {
+      sessionId: session.id,
+      task: options.task,
+      event: "after.review",
+      data: { verdict: review.verdict, verificationCommands }
+    });
+
+    await eventBus.fire("enforcer.checklist", "engine", session.id, {
+      round: 1,
+      verdict: review.verdict === "pass" ? "verify-pass" : "verify-fail",
+      checklist: [verificationRun.summary]
+    });
+
+    const updatedEvidence = updateEvidence([...evidence], `${verificationRun.summary}\n${review.summary}`);
+    return finalizeEngineRun({
+      options,
+      session,
+      sessionStore,
+      eventBus,
+      checkpointSaver,
+      costTracker,
+      projectMemory,
+      hooks,
+      browserHealth,
+      config,
+      sandbox,
+      review,
+      checkpointRound: 2,
+      enforcerVerdict: review.verdict === "pass" ? "verify-only" : "verify-only-fail",
+      updatedEvidence,
+      undoManager,
+      intent,
+      learnedPatterns
+    });
+  }
+
+  if (reviewOnlyStep) {
+    await transitionPhase(session, "reviewing", sessionStore, eventBus);
+    await hooks.fire("before.review", {
+      sessionId: session.id,
+      task: options.task,
+      event: "before.review",
+      data: { reviewOnly: true }
+    });
+
+    const review = await executeRoleTaskWithRetry({
+      ...roleTaskCtx,
+      role: reviewerRole,
+      mode: options.mode,
+      prompt: buildReviewerPrompt(
+        `${options.task}\n\nThis is a REVIEW-only step. Review the complete project state and prior step results. Do not write code in this step.`,
+        {
+          kind: "execution",
+          summary: "Review-only step. Use the AGI prompt, prior step results, and current repository state as the evidence set.",
+          changes: [],
+          suggestedCommands: [],
+          toolCalls: [],
+          toolResults: []
+        },
+        delegationSummary,
+        executionContext
+      ),
+      retryConfig: config.retry,
+      maxRetries
+    }) as ReviewResult;
+
+    await hooks.fire("after.review", {
+      sessionId: session.id,
+      task: options.task,
+      event: "after.review",
+      data: { verdict: review.verdict, reviewOnly: true }
+    });
+
+    const updatedEvidence = updateEvidence([...evidence], review.summary);
+    return finalizeEngineRun({
+      options,
+      session,
+      sessionStore,
+      eventBus,
+      checkpointSaver,
+      costTracker,
+      projectMemory,
+      hooks,
+      browserHealth,
+      config,
+      sandbox,
+      review,
+      checkpointRound: 2,
+      enforcerVerdict: review.verdict === "pass" ? "review-only" : "review-only-fail",
+      updatedEvidence,
+      undoManager,
+      intent,
+      learnedPatterns
+    });
+  }
 
   let enforcer = createEnforcerState(intent);
-  const maxRetries = config.retry.maxParseRetries;
 
   let executionOutput = await executeRoleTaskWithRetry({
     ...roleTaskCtx,
@@ -697,373 +1040,747 @@ export async function runEngine(options: RunEngineOptions): Promise<RunEngineRes
   }
   if (!executionOutput.summary) executionOutput.summary = "";
   if (!Array.isArray(executionOutput.changes)) executionOutput.changes = [];
+  executionOutput = mergeDelegationExecutionEvidence(executionOutput, delegationOutcomes);
   enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
+  let updatedEvidence = updateEvidence([...evidence], executionOutput.summary);
 
   // Fire after.execute hook
   await hooks.fire("after.execute", { sessionId: session.id, task: options.task, event: "after.execute", data: { execution: executionOutput.summary } });
 
-  // ═══ LIVE ERROR MONITOR + VERIFY-FIX — only for real projects (skip for mock/empty projects) ═══
-  const hasVerifiableProject = codebaseAssessment.patterns.primaryLanguage !== null;
-
-  if (hasVerifiableProject) {
-    // Live error monitor — check for errors right after execution
-    const changedFiles = (executionOutput.changes ?? [])
-      .map((c: string) => c.replace(/^(created|modified|updated)\s+/i, "").trim())
-      .filter((f: string) => /\.(ts|tsx|js|jsx)$/.test(f));
-    if (changedFiles.length > 0) {
-      try {
-        const errorReport = await checkFilesForErrors(options.cwd, changedFiles);
-        const errorPrompt = formatErrorsForPrompt(errorReport);
-        if (errorPrompt) {
-          await eventBus.fire("enforcer.checklist", "engine", session.id, {
-            round: 0, verdict: "live-errors",
-            checklist: [`${errorReport.totalErrors} errors, ${errorReport.totalWarnings} warnings in ${changedFiles.length} files`]
-          });
-        }
-      } catch { /* live error check is non-critical */ }
-    }
-
-    // Verify-fix auto-loop — run tests, parse errors, fix, retest
-    try {
-      const { execSync } = await import("node:child_process");
-      const vfResult = await runVerifyFixLoop({
-        cwd: options.cwd,
-        executionOutput,
-        maxCycles: 3,
-        runCommand: async (cmd) => {
-          try {
-            const stdout = execSync(cmd, { cwd: options.cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
-            return { stdout, stderr: "", exitCode: 0 };
-          } catch (e: unknown) {
-            const err = e as { stdout?: string; stderr?: string; status?: number };
-            return { stdout: err.stdout ?? "", stderr: err.stderr ?? "", exitCode: err.status ?? 1 };
-          }
-        },
-        fixWithLLM: async (fixPrompt) => {
-          return await executeRoleTaskWithRetry({
-            ...roleTaskCtx,
-            role: executorRole, mode: options.mode,
-            prompt: buildExecutorPrompt(fixPrompt, plannerOutput.summary, researchOutput?.summary, delegationSummary, executionContext, repoMap),
-            retryConfig: config.retry, maxRetries
-          }) as ExecutorArtifact;
-        },
-        eventBus,
-        sessionId: session.id
-      });
-      if (vfResult?.finalOutput) {
-        executionOutput = vfResult.finalOutput;
-        if (!executionOutput.summary) executionOutput.summary = "";
-        if (!Array.isArray(executionOutput.changes)) executionOutput.changes = [];
-      }
-      enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
-    } catch { /* verify-fix is non-critical — engine continues */ }
-  }
+  let review: ReviewResult;
 
   // Checkpoint after first execution
   await checkpointSaver.save(createCheckpoint(session.id, "executing", enforcer.executionRounds, {
     executionOutput, costs: costTracker.getSummary()
   }));
 
-  // Fire before.review hook
-  await hooks.fire("before.review", { sessionId: session.id, task: options.task, event: "before.review", data: { execution: executionOutput.summary } });
+  if (executionOnlyStep) {
+    review = buildExecutionOnlyReview(executionOnlyStep, executionOutput);
+    await eventBus.fire("enforcer.checklist", "engine", session.id, {
+      round: enforcer.executionRounds,
+      verdict: review.verdict === "pass" ? "execute-only" : "execute-only-fail",
+      checklist: [review.summary]
+    });
+  } else {
+    // ═══ LIVE ERROR MONITOR + VERIFY-FIX — only for real projects (skip for mock/empty projects) ═══
+    const hasVerifiableProject = codebaseAssessment.patterns.primaryLanguage !== null;
 
-  await transitionPhase(session, "reviewing", sessionStore, eventBus);
+    if (hasVerifiableProject) {
+      // Live error monitor — check for errors right after execution
+      const changedFiles = (executionOutput.changes ?? [])
+        .map((c: string) => c.replace(/^(created|modified|updated)\s+/i, "").trim())
+        .filter((f: string) => /\.(ts|tsx|js|jsx)$/.test(f));
+      if (changedFiles.length > 0) {
+        try {
+          const errorReport = await checkFilesForErrors(options.cwd, changedFiles);
+          const errorPrompt = formatErrorsForPrompt(errorReport);
+          if (errorPrompt) {
+            await eventBus.fire("enforcer.checklist", "engine", session.id, {
+              round: 0, verdict: "live-errors",
+              checklist: [`${errorReport.totalErrors} errors, ${errorReport.totalWarnings} warnings in ${changedFiles.length} files`]
+            });
+          }
+        } catch { /* live error check is non-critical */ }
+      }
 
-  let review = await executeRoleTaskWithRetry({
-    ...roleTaskCtx,
-    role: reviewerRole, mode: options.mode,
-    prompt: buildReviewerPrompt(options.task, executionOutput, delegationSummary, combinedContext),
-    retryConfig: config.retry, maxRetries
-  }) as ReviewResult;
-  // [FIX #9] Defensive: ensure review always has safe defaults — with warning
-  if (!review || typeof review !== "object") {
-    await eventBus.fire("error.retriable", "engine", session.id, { message: "[WARN] review output was empty/undefined — using defaults", category: "defensive-default", attempt: 0 });
-    review = {} as ReviewResult;
-  }
-  if (!review.verdict) review.verdict = "fail";
-  if (!review.summary) review.summary = "";
-  if (!Array.isArray(review.followUp)) review.followUp = [];
-  enforcer = updateEnforcerAfterReview(enforcer, review);
-
-  // Fire after.review hook
-  await hooks.fire("after.review", { sessionId: session.id, task: options.task, event: "after.review", data: { verdict: review.verdict } });
-
-  // Stuck detection
-  stuckDetector.recordRound(enforcer.executionRounds, review.verdict, executionOutput.summary);
-
-  await eventBus.fire("enforcer.checklist", "engine", session.id, {
-    round: enforcer.executionRounds,
-    verdict: enforcer.verdict,
-    checklist: enforcer.checklist
-  });
-
-  // ─── Enforcer Loop (with self-heal, evidence, oracle) ────────────────────
-
-  let consecutiveFailures = 0;
-  let updatedEvidence = [...evidence];
-  const failureHistory: string[] = [];
-
-  // Update evidence from first execution
-  updatedEvidence = updateEvidence(updatedEvidence, executionOutput.summary);
-
-  while (!isEnforcerDone(enforcer)) {
-    // Stop continuation guard (OMO)
-    const enforcerMaxRounds = options.maxEnforcerRounds ?? 8;
-    const stopCheck = shouldStop(enforcer.executionRounds, enforcerMaxRounds, review.verdict, consecutiveFailures);
-    if (stopCheck.stop) {
-      await eventBus.fire("enforcer.checklist", "engine", session.id, { round: enforcer.executionRounds, verdict: "stop-guard", checklist: [stopCheck.reason!] });
-      break;
-    }
-
-    // Check if stuck (OpenHands-inspired loop detection)
-    if (stuckDetector.isStuck()) {
-      await eventBus.fire("enforcer.stuck", "engine", session.id, {
-        reason: stuckDetector.getStuckReason(),
-        rounds: enforcer.executionRounds
-      });
-      break;
-    }
-
-    // Budget guard — stop if cost exceeds budget
-    if (costTracker.isOverBudget()) {
-      await eventBus.fire("error.fatal", "engine", session.id, {
-        message: `Cost budget exceeded: $${costTracker.getSummary().totalEstimatedCostUsd.toFixed(4)}`
-      });
-      break;
-    }
-
-    // Oracle escalation — consult strategic advisor after repeated failures
-    if (review.verdict === "fail") {
-      consecutiveFailures++;
-      failureHistory.push(`Round ${enforcer.executionRounds}: ${(executionOutput.summary || "").slice(0, 200)}`);
-
-      const oracle = checkOracleEscalation(consecutiveFailures);
-      if (oracle.shouldEscalate) {
-        await eventBus.fire("enforcer.checklist", "engine", session.id, {
-          round: enforcer.executionRounds,
-          verdict: "oracle-escalation",
-          checklist: [oracle.reason]
+      // Verify-fix auto-loop — run tests, parse errors, fix, retest
+      try {
+        const { execSync } = await import("node:child_process");
+        const vfResult = await runVerifyFixLoop({
+          cwd: options.cwd,
+          executionOutput,
+          maxCycles: 3,
+          runCommand: async (cmd) => {
+            try {
+              const stdout = execSync(cmd, { cwd: options.cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+              return { stdout, stderr: "", exitCode: 0 };
+            } catch (e: unknown) {
+              const err = e as { stdout?: string; stderr?: string; status?: number };
+              return { stdout: err.stdout ?? "", stderr: err.stderr ?? "", exitCode: err.status ?? 1 };
+            }
+          },
+          fixWithLLM: async (fixPrompt) => {
+            return await executeRoleTaskWithRetry({
+              ...roleTaskCtx,
+              role: executorRole, mode: options.mode,
+              prompt: buildExecutorPrompt(fixPrompt, plannerOutput.summary, researchOutput?.summary, delegationSummary, executionContext, repoMap),
+              retryConfig: config.retry, maxRetries
+            }) as ExecutorArtifact;
+          },
+          eventBus,
+          sessionId: session.id
         });
-        // Build oracle prompt and inject into next execution
-        const oraclePrompt = buildOraclePrompt(options.task, failureHistory, stuckDetector.getStuckReason() ?? `${consecutiveFailures} failures`);
-        // Oracle guidance becomes part of the follow-up context
-        failureHistory.push(`[Oracle consulted at round ${enforcer.executionRounds}]`);
-      }
-    } else {
-      consecutiveFailures = 0;
-    }
-
-    // Self-healing: detect errors in execution output and generate recovery prompt
-    let selfHealContext = "";
-    if (review.verdict === "fail") {
-      const detectedErrors = detectErrorsInOutput(executionOutput.summary);
-      if (detectedErrors.length > 0) {
-        const primaryError = detectedErrors[0];
-        if (shouldSelfHeal(primaryError, consecutiveFailures, config.retry.maxParseRetries + 2)) {
-          selfHealContext = buildRecoveryPrompt(primaryError, options.task);
-          await eventBus.fire("error.retriable", "engine", session.id, {
-            message: primaryError.message,
-            category: primaryError.category,
-            strategy: primaryError.strategy,
-            attempt: consecutiveFailures
-          });
+        if (vfResult?.finalOutput) {
+          executionOutput = vfResult.finalOutput;
+          if (!executionOutput.summary) executionOutput.summary = "";
+          if (!Array.isArray(executionOutput.changes)) executionOutput.changes = [];
+          executionOutput = mergeDelegationExecutionEvidence(executionOutput, delegationOutcomes);
         }
-      }
+        enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
+        updatedEvidence = updateEvidence(updatedEvidence, executionOutput.summary);
+      } catch { /* verify-fix is non-critical — engine continues */ }
     }
 
-    await transitionPhase(session, "executing", sessionStore, eventBus);
-
-    // Fire before.execute for each round
-    await hooks.fire("before.execute", { sessionId: session.id, task: options.task, event: "before.execute", data: { round: enforcer.executionRounds } });
-
-    const enforcerFollowUp = getEnforcerFollowUp(enforcer);
-    const reviewFollowUp = review.verdict === "fail" ? (review.followUp ?? []) : [];
-    const combinedFollowUp = [...reviewFollowUp, ...enforcerFollowUp];
-    if (selfHealContext) combinedFollowUp.push(selfHealContext);
-
-    const followUpTask = buildFollowUpPrompt(options.task, combinedFollowUp);
-
-    // ═══ PREEMPTIVE COMPACTION — actually compact context before overflow ═══
-    let effectiveContext = executionContext;
-    const compactionResult = preemptiveCompact(effectiveContext, contextMonitor, tokenBudget.maxTokens);
-    if (compactionResult.compacted) {
-      const { compacted } = compactContext(effectiveContext, Math.floor(tokenBudget.maxTokens * 0.4));
-      effectiveContext = compacted;
-      await eventBus.fire("error.retriable", "engine", session.id, {
-        message: compactionResult.summary,
-        category: "preemptive-compaction",
-        attempt: contextMonitor.compactionCount
-      });
-    }
-
-    executionOutput = await executeRoleTaskWithRetry({
-      ...roleTaskCtx,
-      role: executorRole, mode: options.mode,
-      prompt: buildExecutorPrompt(
-        followUpTask, plannerOutput.summary, researchOutput?.summary,
-        delegationSummary, effectiveContext, repoMap
-      ),
-      retryConfig: config.retry, maxRetries
-    }) as ExecutorArtifact;
-    // Defensive: ensure executionOutput always has safe defaults
-    if (!executionOutput || typeof executionOutput !== "object") executionOutput = {} as ExecutorArtifact;
-    if (!executionOutput.summary) executionOutput.summary = "";
-    if (!Array.isArray(executionOutput.changes)) executionOutput.changes = [];
-    enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
-
-    // Update evidence from execution
-    updatedEvidence = updateEvidence(updatedEvidence, executionOutput.summary);
-
-    // Fire after.execute
-    await hooks.fire("after.execute", { sessionId: session.id, task: options.task, event: "after.execute", data: { execution: executionOutput.summary, round: enforcer.executionRounds } });
-
-    // Checkpoint each round + durable checkpoint for crash recovery
-    await checkpointSaver.save(createCheckpoint(session.id, "executing", enforcer.executionRounds, {
-      round: enforcer.executionRounds, costs: costTracker.getSummary(),
-      evidence: updatedEvidence
-    }));
-    try {
-      const { saveDurableCheckpoint } = await import("./durable-execution.js");
-      await saveDurableCheckpoint(options.cwd, config.sessions.localDirName, {
-        sessionId: session.id, phase: "executing", round: enforcer.executionRounds,
-        timestamp: new Date().toISOString(), state: { verdict: enforcer.verdict },
-        modifiedFiles: (executionOutput.changes ?? []).filter((c: string) => c.includes(":")),
-        resumable: true
-      });
-    } catch { /* durable save failed — non-critical */ }
+    // Fire before.review hook
+    await hooks.fire("before.review", { sessionId: session.id, task: options.task, event: "before.review", data: { execution: executionOutput.summary } });
 
     await transitionPhase(session, "reviewing", sessionStore, eventBus);
-
-    // Fire before.review
-    await hooks.fire("before.review", { sessionId: session.id, task: options.task, event: "before.review", data: { round: enforcer.executionRounds } });
 
     review = await executeRoleTaskWithRetry({
       ...roleTaskCtx,
       role: reviewerRole, mode: options.mode,
-      prompt: buildReviewerPrompt(options.task, executionOutput, delegationSummary, executionContext),
+      prompt: buildReviewerPrompt(options.task, executionOutput, delegationSummary, combinedContext),
       retryConfig: config.retry, maxRetries
     }) as ReviewResult;
-    // Defensive: ensure review always has safe defaults
-    if (!review || typeof review !== "object") review = {} as ReviewResult;
+    // [FIX #9] Defensive: ensure review always has safe defaults — with warning
+    if (!review || typeof review !== "object") {
+      await eventBus.fire("error.retriable", "engine", session.id, { message: "[WARN] review output was empty/undefined — using defaults", category: "defensive-default", attempt: 0 });
+      review = {} as ReviewResult;
+    }
     if (!review.verdict) review.verdict = "fail";
     if (!review.summary) review.summary = "";
     if (!Array.isArray(review.followUp)) review.followUp = [];
     enforcer = updateEnforcerAfterReview(enforcer, review);
 
-    // Update evidence from review
-    updatedEvidence = updateEvidence(updatedEvidence, review.summary);
+    // Fire after.review hook
+    await hooks.fire("after.review", { sessionId: session.id, task: options.task, event: "after.review", data: { verdict: review.verdict } });
 
-    // Fire after.review
-    await hooks.fire("after.review", { sessionId: session.id, task: options.task, event: "after.review", data: { verdict: review.verdict, round: enforcer.executionRounds } });
-
-    // Record round for stuck detection
+    // Stuck detection
     stuckDetector.recordRound(enforcer.executionRounds, review.verdict, executionOutput.summary);
 
     await eventBus.fire("enforcer.checklist", "engine", session.id, {
       round: enforcer.executionRounds,
       verdict: enforcer.verdict,
-      checklist: enforcer.checklist,
-      evidenceSatisfied: allEvidenceSatisfied(updatedEvidence),
-      consecutiveFailures
+      checklist: enforcer.checklist
     });
+
+    // ─── Enforcer Loop (with self-heal, evidence, oracle) ────────────────────
+
+    let consecutiveFailures = 0;
+    const failureHistory: string[] = [];
+
+    while (!isEnforcerDone(enforcer)) {
+    // Stop continuation guard (OMO)
+      const enforcerMaxRounds = options.maxEnforcerRounds ?? 8;
+      const stopCheck = shouldStop(enforcer.executionRounds, enforcerMaxRounds, review.verdict, consecutiveFailures);
+      if (stopCheck.stop) {
+        await eventBus.fire("enforcer.checklist", "engine", session.id, { round: enforcer.executionRounds, verdict: "stop-guard", checklist: [stopCheck.reason!] });
+        break;
+      }
+
+      // Check if stuck (OpenHands-inspired loop detection)
+      if (stuckDetector.isStuck()) {
+        await eventBus.fire("enforcer.stuck", "engine", session.id, {
+          reason: stuckDetector.getStuckReason(),
+          rounds: enforcer.executionRounds
+        });
+        break;
+      }
+
+      // Budget guard — stop if cost exceeds budget
+      if (costTracker.isOverBudget()) {
+        await eventBus.fire("error.fatal", "engine", session.id, {
+          message: `Cost budget exceeded: $${costTracker.getSummary().totalEstimatedCostUsd.toFixed(4)}`
+        });
+        break;
+      }
+
+      // Oracle escalation — consult strategic advisor after repeated failures
+      if (review.verdict === "fail") {
+        consecutiveFailures++;
+        failureHistory.push(`Round ${enforcer.executionRounds}: ${(executionOutput.summary || "").slice(0, 200)}`);
+
+        const oracle = checkOracleEscalation(consecutiveFailures);
+        if (oracle.shouldEscalate) {
+          await eventBus.fire("enforcer.checklist", "engine", session.id, {
+            round: enforcer.executionRounds,
+            verdict: "oracle-escalation",
+            checklist: [oracle.reason]
+          });
+          // Build oracle prompt and inject into next execution
+          const oraclePrompt = buildOraclePrompt(options.task, failureHistory, stuckDetector.getStuckReason() ?? `${consecutiveFailures} failures`);
+          // Oracle guidance becomes part of the follow-up context
+          failureHistory.push(`[Oracle consulted at round ${enforcer.executionRounds}]`);
+        }
+      } else {
+        consecutiveFailures = 0;
+      }
+
+      // Self-healing: detect errors in execution output and generate recovery prompt
+      let selfHealContext = "";
+      if (review.verdict === "fail") {
+        const detectedErrors = detectErrorsInOutput(executionOutput.summary);
+        if (detectedErrors.length > 0) {
+          const primaryError = detectedErrors[0];
+          if (shouldSelfHeal(primaryError, consecutiveFailures, config.retry.maxParseRetries + 2)) {
+            selfHealContext = buildRecoveryPrompt(primaryError, options.task);
+            await eventBus.fire("error.retriable", "engine", session.id, {
+              message: primaryError.message,
+              category: primaryError.category,
+              strategy: primaryError.strategy,
+              attempt: consecutiveFailures
+            });
+          }
+        }
+      }
+
+      await transitionPhase(session, "executing", sessionStore, eventBus);
+
+      // Fire before.execute for each round
+      await hooks.fire("before.execute", { sessionId: session.id, task: options.task, event: "before.execute", data: { round: enforcer.executionRounds } });
+
+      const enforcerFollowUp = getEnforcerFollowUp(enforcer);
+      const reviewFollowUp = review.verdict === "fail" ? (review.followUp ?? []) : [];
+      const combinedFollowUp = [...reviewFollowUp, ...enforcerFollowUp];
+      if (selfHealContext) combinedFollowUp.push(selfHealContext);
+
+      const followUpTask = buildFollowUpPrompt(options.task, combinedFollowUp);
+
+      // ═══ PREEMPTIVE COMPACTION — actually compact context before overflow ═══
+      let effectiveContext = executionContext;
+      const compactionResult = preemptiveCompact(effectiveContext, contextMonitor, tokenBudget.maxTokens);
+      if (compactionResult.compacted) {
+        const { compacted } = compactContext(effectiveContext, Math.floor(tokenBudget.maxTokens * 0.4));
+        effectiveContext = compacted;
+        await eventBus.fire("error.retriable", "engine", session.id, {
+          message: compactionResult.summary,
+          category: "preemptive-compaction",
+          attempt: contextMonitor.compactionCount
+        });
+      }
+
+      executionOutput = await executeRoleTaskWithRetry({
+        ...roleTaskCtx,
+        role: executorRole, mode: options.mode,
+        prompt: buildExecutorPrompt(
+          followUpTask, plannerOutput.summary, researchOutput?.summary,
+          delegationSummary, effectiveContext, repoMap
+        ),
+        retryConfig: config.retry, maxRetries
+      }) as ExecutorArtifact;
+      // Defensive: ensure executionOutput always has safe defaults
+      if (!executionOutput || typeof executionOutput !== "object") executionOutput = {} as ExecutorArtifact;
+      if (!executionOutput.summary) executionOutput.summary = "";
+      if (!Array.isArray(executionOutput.changes)) executionOutput.changes = [];
+      executionOutput = mergeDelegationExecutionEvidence(executionOutput, delegationOutcomes);
+      enforcer = updateEnforcerAfterExecution(enforcer, executionOutput);
+
+      // Update evidence from execution
+      updatedEvidence = updateEvidence(updatedEvidence, executionOutput.summary);
+
+      // Fire after.execute
+      await hooks.fire("after.execute", { sessionId: session.id, task: options.task, event: "after.execute", data: { execution: executionOutput.summary, round: enforcer.executionRounds } });
+
+      // Checkpoint each round + durable checkpoint for crash recovery
+      await checkpointSaver.save(createCheckpoint(session.id, "executing", enforcer.executionRounds, {
+        round: enforcer.executionRounds, costs: costTracker.getSummary(),
+        evidence: updatedEvidence
+      }));
+      try {
+        const { saveDurableCheckpoint } = await import("./durable-execution.js");
+        await saveDurableCheckpoint(options.cwd, config.sessions.localDirName, {
+          sessionId: session.id, phase: "executing", round: enforcer.executionRounds,
+          timestamp: new Date().toISOString(), state: { verdict: enforcer.verdict },
+          modifiedFiles: (executionOutput.changes ?? []).filter((c: string) => c.includes(":")),
+          resumable: true
+        });
+      } catch { /* durable save failed — non-critical */ }
+
+      await transitionPhase(session, "reviewing", sessionStore, eventBus);
+
+      // Fire before.review
+      await hooks.fire("before.review", { sessionId: session.id, task: options.task, event: "before.review", data: { round: enforcer.executionRounds } });
+
+      review = await executeRoleTaskWithRetry({
+        ...roleTaskCtx,
+        role: reviewerRole, mode: options.mode,
+        prompt: buildReviewerPrompt(options.task, executionOutput, delegationSummary, executionContext),
+        retryConfig: config.retry, maxRetries
+      }) as ReviewResult;
+      // Defensive: ensure review always has safe defaults
+      if (!review || typeof review !== "object") review = {} as ReviewResult;
+      if (!review.verdict) review.verdict = "fail";
+      if (!review.summary) review.summary = "";
+      if (!Array.isArray(review.followUp)) review.followUp = [];
+      enforcer = updateEnforcerAfterReview(enforcer, review);
+
+      // Update evidence from review
+      updatedEvidence = updateEvidence(updatedEvidence, review.summary);
+
+      // Fire after.review
+      await hooks.fire("after.review", { sessionId: session.id, task: options.task, event: "after.review", data: { verdict: review.verdict, round: enforcer.executionRounds } });
+
+      // Record round for stuck detection
+      stuckDetector.recordRound(enforcer.executionRounds, review.verdict, executionOutput.summary);
+
+      await eventBus.fire("enforcer.checklist", "engine", session.id, {
+        round: enforcer.executionRounds,
+        verdict: enforcer.verdict,
+        checklist: enforcer.checklist,
+        evidenceSatisfied: allEvidenceSatisfied(updatedEvidence),
+        consecutiveFailures
+      });
+    }
   }
 
-  // ─── Sandbox Apply/Revert ────────────────────────────────────────────────
+  return finalizeEngineRun({
+    options,
+    session,
+    sessionStore,
+    eventBus,
+    checkpointSaver,
+    costTracker,
+    projectMemory,
+    hooks,
+    browserHealth,
+    config,
+    sandbox,
+    review,
+    checkpointRound: enforcer.executionRounds + 2,
+    enforcerVerdict: executionOnlyStep ? `${executionOnlyStep}-only` : enforcer.verdict,
+    updatedEvidence,
+    undoManager,
+    intent,
+    learnedPatterns
+  });
+}
 
-  // OMO style: always apply sandbox changes. Revert is manual via undo.
-  // Rationale: reviewer may be overly strict, but code was still written correctly.
-  // Better to keep the work and let the user decide than to silently delete everything.
-  if (sandbox && sandbox.hasChanges()) {
-    try {
-      const result = await sandbox.apply();
-      // [FIX #8] Verify files actually exist on disk after apply
-      const missingFiles: string[] = [];
-      for (const p of result.paths) {
-        try { await fs.access(path.resolve(options.cwd, p)); } catch { missingFiles.push(p); }
+function parseAgiStep(task: string): ParsedAgiStep {
+  const match = task.match(/^\[STEP\s+\d+:\s+([A-Z]+)\]/m);
+  if (!match) {
+    return { isAgiStep: false };
+  }
+  return {
+    isAgiStep: true,
+    stepType: match[1]?.toLowerCase()
+  };
+}
+
+function isPreludeOnlyStep(stepType: string | undefined): stepType is AgiPreludeStepType {
+  return stepType === "analyze" || stepType === "debate" || stepType === "design";
+}
+
+function isExecutionOnlyStep(stepType: string | undefined): stepType is AgiExecutionOnlyStepType {
+  return stepType === "build" || stepType === "fix" || stepType === "improve" || stepType === "deploy" || stepType === "custom";
+}
+
+function isVerifyOnlyStep(stepType: string | undefined): stepType is AgiVerifyOnlyStepType {
+  return stepType === "verify";
+}
+
+function isReviewOnlyStep(stepType: string | undefined): stepType is AgiReviewOnlyStepType {
+  return stepType === "review";
+}
+
+function buildPreludeStepReview(params: {
+  stepType: AgiPreludeStepType;
+  plannerSummary: string;
+  researchSummary?: string;
+  delegationSummary?: string;
+  factcheckWarnings: string[];
+}): ReviewResult {
+  const headline = params.stepType === "analyze"
+    ? "Analysis completed."
+    : params.stepType === "debate"
+      ? "Debate preparation completed."
+      : "Design preparation completed.";
+
+  const details = [
+    params.plannerSummary.trim(),
+    params.researchSummary?.trim(),
+    params.delegationSummary?.trim(),
+    params.factcheckWarnings.length > 0 ? `Factcheck warnings:\n- ${params.factcheckWarnings.join("\n- ")}` : ""
+  ].filter((value): value is string => Boolean(value));
+
+  return {
+    verdict: "pass",
+    summary: [headline, ...details].join("\n\n"),
+    followUp: []
+  };
+}
+
+function buildExecutionOnlyReview(stepType: AgiExecutionOnlyStepType, executionOutput: ExecutorArtifact): ReviewResult {
+  const toolResults = Array.isArray(executionOutput.toolResults) ? executionOutput.toolResults : [];
+  const successfulTools = toolResults.filter((result) => result.ok);
+  const failedTools = toolResults.filter((result) => !result.ok);
+  const fileWriteTools = successfulTools.filter((result) => result.name === "write" || result.name === "apply_patch");
+  const reportedChanges = Array.isArray(executionOutput.changes) ? executionOutput.changes.filter((entry) => entry.trim().length > 0) : [];
+  const summary = executionOutput.summary ?? "";
+  const explicitNoOp = /no fixes required|nothing to fix|no changes needed|verify passed with no issues/i.test(summary);
+  const stepLabel = stepType.toUpperCase();
+
+  // Don't fail BUILD just because some tool calls were blocked/failed.
+  // If files were written successfully, that's what matters — VERIFY will catch real issues.
+  if (failedTools.length > 0 && fileWriteTools.length === 0 && reportedChanges.length === 0) {
+    return {
+      verdict: "fail",
+      summary: `${stepLabel} step encountered ${failedTools.length} blocked or failed tool call(s) and produced no file changes.`,
+      followUp: failedTools.map((result) => `${result.name}: ${result.error ?? "tool failed"}`)
+    };
+  }
+
+  if (successfulTools.length === 0) {
+    return {
+      verdict: "fail",
+      summary: `${stepLabel} step finished without any successful tool execution. Verification was not run because ${stepLabel} is execution-only.`,
+      followUp: [`${stepLabel} must produce concrete code or file changes before VERIFY can run.`]
+    };
+  }
+
+  if (stepType === "build" && fileWriteTools.length === 0 && reportedChanges.length === 0) {
+    return {
+      verdict: "fail",
+      summary: "BUILD finished without creating or modifying any project files. BUILD only passes after concrete write/apply_patch activity.",
+      followUp: ["Write the planned source files before advancing to VERIFY."]
+    };
+  }
+
+  if (stepType === "fix") {
+    if (fileWriteTools.length === 0 && reportedChanges.length === 0) {
+      if (explicitNoOp) {
+        return {
+          verdict: "pass",
+          summary: "FIX confirmed that no source changes were required because VERIFY reported no actionable failures.",
+          followUp: []
+        };
       }
-      await eventBus.fire("sandbox.applied", "engine", session.id, {
-        applied: result.applied, paths: result.paths, reviewVerdict: review.verdict,
-        verified: missingFiles.length === 0, missingFiles
+      return {
+        verdict: "fail",
+        summary: "FIX finished without applying any file changes. FIX must either modify files to address VERIFY findings or explicitly state that no fixes were required.",
+        followUp: ["Apply the necessary fixes or state clearly that VERIFY found nothing actionable."]
+      };
+    }
+  }
+
+  return {
+    verdict: "pass",
+    summary: `${stepLabel} step completed with ${successfulTools.length} successful tool call(s) and ${Math.max(fileWriteTools.length, reportedChanges.length)} concrete file change(s). Verification and quality review are intentionally deferred to later steps.`,
+    followUp: []
+  };
+}
+
+function mergeDelegationExecutionEvidence(executionOutput: ExecutorArtifact, delegationOutcomes: DelegationOutcome[]): ExecutorArtifact {
+  if (delegationOutcomes.length === 0) {
+    return executionOutput;
+  }
+
+  const delegatedChanges = delegationOutcomes.flatMap((outcome) => {
+    const artifact = outcome.artifact as Partial<ExecutorArtifact>;
+    return Array.isArray(artifact.changes) ? artifact.changes.filter((entry) => entry.trim().length > 0) : [];
+  });
+
+  if (delegatedChanges.length > 0) {
+    executionOutput.changes = Array.from(new Set([...(executionOutput.changes ?? []), ...delegatedChanges]));
+  }
+
+  const delegatedToolResults = delegationOutcomes.flatMap((outcome) => {
+    const artifact = outcome.artifact as Partial<ExecutorArtifact>;
+    return Array.isArray(artifact.toolResults) ? artifact.toolResults : [];
+  });
+
+  if (delegatedToolResults.length > 0) {
+    const currentResults = Array.isArray(executionOutput.toolResults) ? executionOutput.toolResults : [];
+    const seen = new Set(currentResults.map((result) => getToolResultEvidenceKey(result)));
+    executionOutput.toolResults = [...currentResults];
+    for (const result of delegatedToolResults) {
+      const key = getToolResultEvidenceKey(result);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      executionOutput.toolResults.push(result);
+    }
+  }
+
+  return executionOutput;
+}
+
+function getToolResultEvidenceKey(result: ToolResult): string {
+  let serializedOutput = "";
+  try {
+    serializedOutput = JSON.stringify(result.output ?? null) ?? "";
+  } catch {
+    serializedOutput = String(result.output ?? "");
+  }
+  return [result.name, result.ok ? "ok" : "fail", result.reason, serializedOutput].join("::");
+}
+
+function normalizeShellCommand(entry: string): string | null {
+  const trimmed = entry.trim().replace(/^[-*]\s*/, "").replace(/^run\s+/i, "");
+  if (!trimmed) return null;
+  return /^(npm|npx|pnpm|yarn|bun|node|tsc|tsx|vitest|jest|pytest|python|uv|poetry|cargo|go|make|php|composer|gradle|mvn|dotnet)\b/i.test(trimmed)
+    ? trimmed
+    : null;
+}
+
+async function detectVerificationCommandsForStep(cwd: string, designArtifact?: DesignArtifact): Promise<string[]> {
+  const commands = new Set<string>();
+
+  for (const check of designArtifact?.acceptanceChecks ?? []) {
+    const command = normalizeShellCommand(check);
+    if (command) commands.add(command);
+  }
+
+  if (commands.size > 0) {
+    return Array.from(commands);
+  }
+
+  try {
+    await fs.access(path.join(cwd, "node_modules"));
+  } catch {
+    return [];
+  }
+
+  try {
+    const pkg = JSON.parse(await fs.readFile(path.join(cwd, "package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      dependencies?: Record<string, string>;
+    };
+    if (pkg.scripts?.typecheck) commands.add("npm run typecheck");
+    else if (pkg.devDependencies?.typescript || pkg.dependencies?.typescript) commands.add("npx tsc --noEmit");
+    if (pkg.scripts?.test) commands.add("npm test");
+    if (pkg.scripts?.lint) commands.add("npm run lint");
+    if (pkg.scripts?.build) commands.add("npm run build");
+  } catch {
+    try {
+      await fs.access(path.join(cwd, "tsconfig.json"));
+      commands.add("npx tsc --noEmit");
+    } catch {
+      // no local verification commands available
+    }
+  }
+
+  return Array.from(commands);
+}
+
+async function runVerificationCommands(cwd: string, commands: string[]): Promise<{
+  summary: string;
+  outputs: Array<{ command: string; exitCode: number; stdout: string; stderr: string }>;
+  result: ReturnType<typeof parseVerifyOutput>;
+  toolResults: ToolResult[];
+}> {
+  const outputs: Array<{ command: string; exitCode: number; stdout: string; stderr: string }> = [];
+  const toolResults: ToolResult[] = [];
+
+  if (commands.length === 0) {
+    return {
+      summary: "VERIFY step found no commands to run.",
+      outputs,
+      result: parseVerifyOutput([]),
+      toolResults
+    };
+  }
+
+  const { execSync } = await import("node:child_process");
+  for (const command of commands) {
+    try {
+      const stdout = execSync(command, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+      outputs.push({ command, exitCode: 0, stdout, stderr: "" });
+      toolResults.push({
+        name: "bash",
+        ok: true,
+        reason: "verification command succeeded",
+        approval: { action: "bash_side_effect", mode: "auto", approved: true, reason: "verify-only step" },
+        output: { command, stdout, stderr: "", exitCode: 0 }
+      });
+    } catch (error: unknown) {
+      const err = error as { stdout?: string; stderr?: string; status?: number; message?: string };
+      const stdout = err.stdout ?? "";
+      const stderr = err.stderr ?? err.message ?? "";
+      const exitCode = err.status ?? 1;
+      outputs.push({ command, exitCode, stdout, stderr });
+      toolResults.push({
+        name: "bash",
+        ok: false,
+        reason: "verification command failed",
+        approval: { action: "bash_side_effect", mode: "auto", approved: true, reason: "verify-only step" },
+        output: { command, stdout, stderr, exitCode },
+        error: stderr || `Command exited with code ${exitCode}`
+      });
+    }
+  }
+
+  const result = parseVerifyOutput(outputs);
+  const failedCommands = outputs.filter((output) => output.exitCode !== 0).map((output) => output.command);
+  const summary = failedCommands.length === 0
+    ? `Verification passed. ${commands.length} command(s) succeeded: ${commands.join(", ")}.`
+    : `Verification failed. ${failedCommands.length}/${commands.length} command(s) failed: ${failedCommands.join(", ")}.`;
+
+  return { summary, outputs, result, toolResults };
+}
+
+function normalizeVerificationReview(
+  review: ReviewResult,
+  verifyResult: ReturnType<typeof parseVerifyOutput>,
+  commands: string[]
+): ReviewResult {
+  const failedOutputs = verifyResult.outputs.filter((output) => output.exitCode !== 0);
+  if (commands.length === 0) {
+    return {
+      verdict: "fail",
+      summary: "VERIFY could not run because no verification commands were available.",
+      followUp: ["Add explicit acceptance checks or install the project dependencies before re-running VERIFY."]
+    };
+  }
+
+  if (failedOutputs.length === 0) {
+    return {
+      verdict: "pass",
+      summary: review.summary || `All ${commands.length} verification commands passed.`,
+      followUp: []
+    };
+  }
+
+  const commandFailures = failedOutputs.map((output) => {
+    const excerpt = (output.stderr || output.stdout).trim().split("\n")[0] ?? "";
+    return `${output.command}${excerpt ? ` — ${excerpt}` : ""}`;
+  });
+
+  return {
+    verdict: "fail",
+    summary: review.summary || `Verification failed for ${failedOutputs.length} command(s).`,
+    followUp: review.followUp.length > 0 ? review.followUp : commandFailures
+  };
+}
+
+async function persistSyntheticTask(params: {
+  session: SessionRecord;
+  sessionStore: SessionStore;
+  roleId: string;
+  category: import("../core/types.js").RoleCategory;
+  prompt: string;
+  output: Record<string, unknown>;
+}): Promise<void> {
+  const taskRecord = await params.sessionStore.createTask(
+    params.session.id,
+    params.roleId,
+    params.category,
+    "mock",
+    params.prompt,
+    "inline"
+  );
+  taskRecord.status = "completed";
+  taskRecord.output = params.output;
+  await params.sessionStore.saveTask(taskRecord);
+  params.session.tasks.push(taskRecord);
+  await params.sessionStore.saveSnapshot(params.session);
+}
+
+async function finalizeEngineRun(params: {
+  options: RunEngineOptions;
+  session: SessionRecord;
+  sessionStore: SessionStore;
+  eventBus: AgentEventBus;
+  checkpointSaver: FileCheckpointSaver;
+  costTracker: CostTracker;
+  projectMemory: ProjectMemoryStore;
+  hooks: HookRegistry;
+  browserHealth: Awaited<ReturnType<typeof getBrowserHealth>>;
+  config: Awaited<ReturnType<typeof loadConfig>>;
+  sandbox?: DiffSandbox;
+  review: ReviewResult;
+  checkpointRound: number;
+  enforcerVerdict: string;
+  updatedEvidence: import("./sisyphus.js").EvidenceRequirement[];
+  undoManager: UndoManager;
+  intent: IntentAnalysis;
+  learnedPatterns: LearnedPattern[];
+}): Promise<RunEngineResult> {
+  if (params.sandbox && params.sandbox.hasChanges()) {
+    try {
+      const result = await params.sandbox.apply();
+      const missingFiles: string[] = [];
+      for (const filePath of result.paths) {
+        try {
+          await fs.access(path.resolve(params.options.cwd, filePath));
+        } catch {
+          missingFiles.push(filePath);
+        }
+      }
+      await params.eventBus.fire("sandbox.applied", "engine", params.session.id, {
+        applied: result.applied,
+        paths: result.paths,
+        reviewVerdict: params.review.verdict,
+        verified: missingFiles.length === 0,
+        missingFiles
       });
       if (missingFiles.length > 0) {
-        await eventBus.fire("error.retriable", "engine", session.id, {
+        await params.eventBus.fire("error.retriable", "engine", params.session.id, {
           message: `Sandbox apply: ${missingFiles.length} files failed to write: ${missingFiles.join(", ")}`,
-          category: "sandbox-verify", attempt: 1
+          category: "sandbox-verify",
+          attempt: 1
         });
       }
     } catch (sandboxErr) {
-      await eventBus.fire("error.fatal", "engine", session.id, {
+      await params.eventBus.fire("error.fatal", "engine", params.session.id, {
         message: `Sandbox apply failed: ${sandboxErr instanceof Error ? sandboxErr.message : String(sandboxErr)}`
       });
     }
   }
 
-  // ─── Phase: Done ─────────────────────────────────────────────────────────
+  params.session.lastReview = params.review;
+  params.session.status = params.review.verdict === "pass" ? "completed" : "failed";
+  params.session.updatedAt = nowIso();
+  await transitionPhase(params.session, "done", params.sessionStore, params.eventBus);
+  await params.sessionStore.saveSnapshot(params.session);
 
-  session.lastReview = review;
-  // Session is "completed" if execution produced meaningful work (tool calls
-  // succeeded), regardless of the reviewer's quality verdict. The reviewer
-  // verdict is a quality signal, not a success/failure gate. Only mark
-  // "failed" when the executor itself errored (no tool calls, all blocked).
-  const executorTasks = session.tasks.filter(t => t.role === "executor" || t.category === "execution");
-  const hasSuccessfulWork = executorTasks.some(t => {
-    const output = t.output as Record<string, unknown> | undefined;
-    const toolResults = output?.toolResults as Array<{ ok?: boolean }> | undefined;
-    return toolResults?.some(r => r.ok) ?? false;
-  });
-  session.status = hasSuccessfulWork || review.verdict === "pass" ? "completed" : "failed";
-  session.updatedAt = nowIso();
-  await transitionPhase(session, "done", sessionStore, eventBus);
-  await sessionStore.saveSnapshot(session);
-
-  await eventBus.fire(
-    review.verdict === "pass" ? "review.pass" : "review.fail",
-    "engine", session.id, { review }
+  await params.eventBus.fire(
+    params.review.verdict === "pass" ? "review.pass" : "review.fail",
+    "engine",
+    params.session.id,
+    { review: params.review }
   );
 
-  // Final checkpoint
-  await checkpointSaver.save(createCheckpoint(session.id, "completed", enforcer.executionRounds + 2, {
-    status: session.status,
-    review,
-    costs: costTracker.getSummary(),
-    enforcerVerdict: enforcer.verdict
+  await params.checkpointSaver.save(createCheckpoint(params.session.id, "completed", params.checkpointRound, {
+    status: params.session.status,
+    review: params.review,
+    costs: params.costTracker.getSummary(),
+    enforcerVerdict: params.enforcerVerdict
   }));
 
-  // Save project memory (learns from this session)
-  await projectMemory.save();
+  await params.projectMemory.save();
 
-  // Mark durable checkpoint as complete (OMO session-recovery)
   try {
     const { markCheckpointComplete } = await import("./durable-execution.js");
-    await markCheckpointComplete(options.cwd, config.sessions.localDirName);
+    await markCheckpointComplete(params.options.cwd, params.config.sessions.localDirName);
   } catch { /* non-critical */ }
 
-  // Save learned patterns (RALPH-style persistence)
   try {
     const { saveRalphState, createRalphState: createRS } = await import("./ralph.js");
     const ralphState = createRS();
-    ralphState.learnedPatterns = learnedPatterns;
-    await saveRalphState(options.cwd, config.sessions.localDirName, ralphState);
+    ralphState.learnedPatterns = params.learnedPatterns;
+    await saveRalphState(params.options.cwd, params.config.sessions.localDirName, ralphState);
   } catch { /* first run, no patterns yet */ }
 
-  // Phase 1 memory extraction: extract learnings from this session's events
-  const sessionEvents = await sessionStore.readEvents(session.id);
-  await extractSessionMemories(options.cwd, config.sessions.localDirName, session.id, sessionEvents);
+  const sessionEvents = await params.sessionStore.readEvents(params.session.id);
+  await extractSessionMemories(params.options.cwd, params.config.sessions.localDirName, params.session.id, sessionEvents);
 
-  // Fire session.end hook
-  await hooks.fire("session.end", {
-    sessionId: session.id, task: options.task,
+  await params.hooks.fire("session.end", {
+    sessionId: params.session.id,
+    task: params.options.task,
     event: "session.end",
-    data: { status: session.status, costs: costTracker.getSummary() }
+    data: { status: params.session.status, costs: params.costTracker.getSummary() }
   });
 
-  await eventBus.fire("session.completed", "engine", session.id, {
-    status: session.status,
-    browserAvailable: browserHealth.available,
-    costs: costTracker.getSummary()
+  await params.eventBus.fire("session.completed", "engine", params.session.id, {
+    status: params.session.status,
+    browserAvailable: params.browserHealth.available,
+    costs: params.costTracker.getSummary()
   });
 
-  return { session, review, intent, costs: costTracker.getSummary(), eventBus, evidence: updatedEvidence, undoManager };
+  return {
+    session: params.session,
+    review: params.review,
+    intent: params.intent,
+    costs: params.costTracker.getSummary(),
+    eventBus: params.eventBus,
+    evidence: params.updatedEvidence,
+    undoManager: params.undoManager,
+    analysisArtifact: undefined,
+    debateArtifact: undefined,
+    designArtifact: undefined
+  };
 }
 
 // ─── Phase Transitions ───────────────────────────────────────────────────────
@@ -1289,49 +2006,80 @@ async function executeRoleTask(params: {
     `${buildSystemPrompt(params.role)}\n\n${params.prompt}`
   );
 
-  let artifact: RoleArtifact | null;
+  let artifact: RoleArtifact | null = null;
 
   // Apply model variant to prompt if available
   const effectivePrompt = params.modelVariant
     ? applyVariantToPrompt(`${buildSystemPrompt(params.role)}\n\n${params.prompt}`, params.modelVariant)
     : `${buildSystemPrompt(params.role)}\n\n${params.prompt}`;
 
-  if (transport === "inline") {
-    artifact = await runWorkerInline({
-      cwd: params.session.cwd,
-      sessionId: params.session.id,
-      taskId: taskRecord.id,
-      roleId: params.role.id,
-      providerId: providerSelection.providerId,
-      prompt: effectivePrompt,
-      costTracker: params.costTracker,
-      projectMemory: params.projectMemory,
-      rulesEngine: params.rulesEngine,
-      hooks: params.hooks,
-      sandbox: params.sandbox,
-      eventBus: params.eventBus,
-      undoManager: params.undoManager
-    }) as RoleArtifact;
-  } else if (transport === "subprocess") {
-    const lease = await params.workerManager.runSubprocess({
-      sessionId: params.session.id,
-      taskId: taskRecord.id,
-      role: params.role.id,
-      provider: providerSelection.providerId,
-      promptFile,
-      cwd: params.session.cwd
-    });
-    artifact = await params.sessionStore.readArtifact(taskRecord.id) as RoleArtifact | null;
-  } else {
-    const lease = await params.workerManager.runTmux({
-      sessionId: params.session.id,
-      taskId: taskRecord.id,
-      role: params.role.id,
-      provider: providerSelection.providerId,
-      promptFile,
-      cwd: params.session.cwd
-    });
-    artifact = await pollArtifact(params.sessionStore, taskRecord.id) as RoleArtifact | null;
+  try {
+    if (transport === "inline") {
+      artifact = await runWorkerInline({
+        cwd: params.session.cwd,
+        sessionId: params.session.id,
+        taskId: taskRecord.id,
+        roleId: params.role.id,
+        providerId: providerSelection.providerId,
+        prompt: effectivePrompt,
+        costTracker: params.costTracker,
+        projectMemory: params.projectMemory,
+        rulesEngine: params.rulesEngine,
+        hooks: params.hooks,
+        sandbox: params.sandbox,
+        eventBus: params.eventBus,
+        undoManager: params.undoManager
+      }) as RoleArtifact;
+    } else if (transport === "subprocess") {
+      await params.workerManager.runSubprocess({
+        sessionId: params.session.id,
+        taskId: taskRecord.id,
+        role: params.role.id,
+        provider: providerSelection.providerId,
+        promptFile,
+        cwd: params.session.cwd
+      });
+      artifact = await pollArtifact(params.sessionStore, taskRecord.id) as RoleArtifact | null;
+    } else {
+      try {
+        await params.workerManager.runTmux({
+          sessionId: params.session.id,
+          taskId: taskRecord.id,
+          role: params.role.id,
+          provider: providerSelection.providerId,
+          promptFile,
+          cwd: params.session.cwd
+        });
+        artifact = await pollArtifact(params.sessionStore, taskRecord.id) as RoleArtifact | null;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!shouldFallbackFromTmuxError(message)) {
+          throw error;
+        }
+        artifact = await runWorkerInline({
+          cwd: params.session.cwd,
+          sessionId: params.session.id,
+          taskId: taskRecord.id,
+          roleId: params.role.id,
+          providerId: providerSelection.providerId,
+          prompt: effectivePrompt,
+          costTracker: params.costTracker,
+          projectMemory: params.projectMemory,
+          rulesEngine: params.rulesEngine,
+          hooks: params.hooks,
+          sandbox: params.sandbox,
+          eventBus: params.eventBus,
+          undoManager: params.undoManager
+        }) as RoleArtifact;
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    taskRecord.output = { error: message };
+    taskRecord.status = "failed";
+    await params.sessionStore.saveTask(taskRecord);
+    await params.sessionStore.saveSnapshot(params.session);
+    throw error;
   }
 
   taskRecord.output = artifact ?? { error: "artifact missing" };
@@ -1346,12 +2094,22 @@ async function executeRoleTask(params: {
 }
 
 async function pollArtifact(sessionStore: SessionStore, taskId: string): Promise<unknown> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  const timeoutMs = Number(process.env.AGENT40_WORKER_ARTIFACT_TIMEOUT_MS || 300000);
+  const intervalMs = Number(process.env.AGENT40_WORKER_ARTIFACT_POLL_INTERVAL_MS || 250);
+  const maxAttempts = Math.max(1, Math.ceil(timeoutMs / intervalMs));
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const artifact = await sessionStore.readArtifact(taskId);
     if (artifact) return artifact;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   return null;
+}
+
+function shouldFallbackFromTmuxError(message: string): boolean {
+  return /tmux worker failed to start/i.test(message)
+    || /no space for new pane/i.test(message)
+    || /no current client/i.test(message)
+    || /can't find pane/i.test(message);
 }
 
 /** Walk top-level files for Sisyphus codebase assessment */
@@ -1385,15 +2143,7 @@ function wireAllEventsToStdout(bus: AgentEventBus): void {
     const now = new Date();
     const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
 
-    // Rate-limit provider.stream to avoid flooding stdout
-    // Only emit every 10th chunk or chunks with newlines
-    if (event.type === "provider.stream") {
-      const chunk = (event.payload.chunk as string) ?? "";
-      if (!chunk.includes("\n")) {
-        streamCounter++;
-        if (streamCounter % 10 !== 0) return;
-      }
-    }
+    // provider.stream — emit all chunks so Activity Log shows full AI output
 
     try {
       const payload = JSON.stringify(event.payload ?? {});

@@ -36,21 +36,21 @@ const MODEL_TIERS: Record<string, ModelTier> = {
   fast: {
     id: "fast",
     tier: "fast",
-    models: ["claude-haiku-4-5", "gpt-4o-mini"],
+    models: ["gpt-4o-mini", "gpt-4.1-mini"],
     maxOutputTokens: 4096,
     useThinking: false
   },
   balanced: {
     id: "balanced",
     tier: "balanced",
-    models: ["claude-sonnet-4-5", "gpt-4o", "gpt-5.4"],
+    models: ["gpt-4o", "gpt-4.1", "gpt-5.4"],
     maxOutputTokens: 8192,
     useThinking: false
   },
   powerful: {
     id: "powerful",
     tier: "powerful",
-    models: ["claude-opus-4-6", "gpt-5.4", "claude-sonnet-4-5"],
+    models: ["gpt-5.4", "gpt-4.1", "gpt-4o"],
     maxOutputTokens: 16384,
     useThinking: true
   }

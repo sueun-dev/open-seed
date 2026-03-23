@@ -16,6 +16,8 @@ export interface CostEntry {
   providerId: string;
   model: string;
   usage: TokenUsage;
+  authMode?: "api_key" | "oauth";
+  billable: boolean;
   estimatedCostUsd: number;
   timestamp: string;
 }
@@ -27,6 +29,9 @@ export interface CostSummary {
   byProvider: Record<string, { input: number; output: number; costUsd: number }>;
   byRole: Record<string, { input: number; output: number; costUsd: number }>;
   entries: number;
+  billableEntries: number;
+  nonBillableEntries: number;
+  hasBillableCost: boolean;
 }
 
 // Approximate costs per 1M tokens (2026 pricing)
@@ -54,10 +59,13 @@ export class CostTracker {
     providerId: string;
     model: string;
     usage: TokenUsage;
+    authMode?: "api_key" | "oauth";
   }): CostEntry {
-    const cost = estimateCost(params.model, params.usage);
+    const billable = params.authMode !== "oauth";
+    const cost = billable ? estimateCost(params.model, params.usage) : 0;
     const entry: CostEntry = {
       ...params,
+      billable,
       estimatedCostUsd: cost,
       timestamp: new Date().toISOString()
     };
@@ -72,13 +80,18 @@ export class CostTracker {
       totalEstimatedCostUsd: 0,
       byProvider: {},
       byRole: {},
-      entries: this.entries.length
+      entries: this.entries.length,
+      billableEntries: 0,
+      nonBillableEntries: 0,
+      hasBillableCost: false
     };
 
     for (const entry of this.entries) {
       summary.totalInputTokens += entry.usage.inputTokens;
       summary.totalOutputTokens += entry.usage.outputTokens;
       summary.totalEstimatedCostUsd += entry.estimatedCostUsd;
+      if (entry.billable) summary.billableEntries += 1;
+      else summary.nonBillableEntries += 1;
 
       if (!summary.byProvider[entry.providerId]) {
         summary.byProvider[entry.providerId] = { input: 0, output: 0, costUsd: 0 };
@@ -95,6 +108,7 @@ export class CostTracker {
       summary.byRole[entry.roleId].costUsd += entry.estimatedCostUsd;
     }
 
+    summary.hasBillableCost = summary.billableEntries > 0;
     return summary;
   }
 
