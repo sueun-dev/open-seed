@@ -67,10 +67,14 @@ class QAGateConfig(BaseModel):
         "security-auditor",
         "test-automator",
         "performance-engineer",
+        "code-reviewer",
+        "architect-reviewer",
+        "qa-expert",
     ])
     synthesizer: str = "knowledge-synthesizer"
     block_on_critical: bool = True
-    max_parallel_agents: int = 4
+    max_parallel_agents: int = 6
+    enforce_output_contract: bool = True
 
 
 # ─── Sisyphus ─────────────────────────────────────────────────────────────────

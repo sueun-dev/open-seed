@@ -18,10 +18,17 @@ from openseed_body.types import ChannelResult
 
 def create_channels(config: BodyConfig) -> list[DeployChannel]:
     """Create deploy channel instances from config."""
+    from openseed_body.channels.npm import NpmChannel
+    from openseed_body.channels.docker import DockerChannel
+
     channels: list[DeployChannel] = []
     for name in config.channels:
         if name == "git":
             channels.append(GitChannel(config.git))
+        elif name == "npm":
+            channels.append(NpmChannel())
+        elif name == "docker":
+            channels.append(DockerChannel())
         elif name == "webhook" and config.webhook_url:
             channels.append(WebhookChannel(config.webhook_url))
     return channels

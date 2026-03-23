@@ -1,10 +1,8 @@
 """
 Open Seed v2 — Conditional routing functions.
 
-These are the "decision points" in the graph. Every routing decision
-is based on pipeline state — NOT regex, NOT hardcoded rules.
-
-Pattern from: LangGraph add_conditional_edges
+Every routing decision is based on pipeline state.
+No regex, no hardcoded rules — AI decides via structured data.
 """
 
 from __future__ import annotations
@@ -15,22 +13,66 @@ from openseed_brain.state import PipelineState
 from openseed_core.types import Verdict
 
 
-def route_after_qa(state: PipelineState) -> Literal["deploy", "fix", "end"]:
+def route_after_intake(state: PipelineState) -> Literal["plan", "implement"]:
+    """
+    After intake, decide: full planning or skip to implement.
+
+    - If intake detected trivial task (single file, obvious) → skip planning
+    - Otherwise → full plan
+    """
+    messages = state.get("messages", [])
+    # Check if intake flagged it as trivial/simple
+    for msg in messages:
+        msg_lower = str(msg).lower()
+        if "complexity: simple" in msg_lower or "complexity: trivial" in msg_lower:
+            # Simple tasks can skip planning if the task is very specific
+            task_lower = state["task"].lower()
+            # Only skip if the task mentions a specific file
+            if any(ext in task_lower for ext in [".py", ".js", ".ts", ".html", ".css", ".json"]):
+                return "implement"
+    return "plan"
+
+
+def route_after_qa(state: PipelineState) -> Literal["deploy", "fix", "user_escalate", "end"]:
     """
     After QA + Sisyphus check, decide next step.
 
-    - QA passed (verdict=PASS) → deploy
-    - QA failed but retries left → fix
-    - Retries exhausted → end (escalate to user)
+    - QA passed → deploy
+    - QA failed, retries left → fix
+    - Stagnated or max retries → user_escalate
+    - Explicit abort → end
     """
     qa_result = state.get("qa_result")
     retry_count = state.get("retry_count", 0)
     max_retries = state.get("max_retries", 10)
+    errors = state.get("errors", [])
 
+    # Check if passed
     if qa_result and qa_result.verdict == Verdict.PASS:
         return "deploy"
 
+    # Check for explicit abort signals
+    for e in errors:
+        if "abort" in e.message.lower() or "abandon" in e.message.lower():
+            return "end"
+
+    # Check for user escalation signals
+    for e in errors:
+        if "user" in e.message.lower() and ("help" in e.message.lower() or "escalat" in e.message.lower()):
+            return "user_escalate"
+
+    # Stagnation check — 3+ retries with same error pattern
+    if retry_count >= 3:
+        # Check if errors are repeating (same message)
+        error_msgs = [e.message for e in errors[-6:]]
+        if len(error_msgs) >= 4:
+            unique = set(error_msgs[-4:])
+            if len(unique) <= 2:  # Same 1-2 errors repeating
+                return "user_escalate"
+
+    # Still have retries
     if retry_count < max_retries:
         return "fix"
 
-    return "end"
+    # Max retries exhausted
+    return "user_escalate"

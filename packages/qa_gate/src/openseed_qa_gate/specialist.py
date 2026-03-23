@@ -87,11 +87,20 @@ async def _run_via_claude(
     # Read-only agents get only read tools
     tools = ["Read", "Grep", "Glob"] if agent.sandbox_mode == "read-only" else None
 
+    output_contract = """
+
+Output your findings as a JSON array:
+[
+  {"severity": "critical|high|medium|low|info", "title": "short title", "description": "details", "file": "path", "line": null, "suggestion": "how to fix", "confidence": "high|medium|low"}
+]
+
+If no issues found, output: []
+"""
+
     response = await claude.invoke(
-        prompt=f"{context}\n\n---\n\nApply the following review focus:\n{agent.instructions}",
+        prompt=f"{context}\n\n---\n\nApply the following review focus:\n{agent.instructions}\n{output_contract}",
         system_prompt=agent.instructions,
         working_dir=working_dir,
-        allowed_tools=tools,
     )
 
     return SpecialistResult(

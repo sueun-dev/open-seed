@@ -48,9 +48,11 @@ class ClaudeAgent:
         self,
         config: ClaudeConfig | None = None,
         event_bus: EventBus | None = None,
+        hooks: dict[str, Any] | None = None,
     ) -> None:
         self.config = config or ClaudeConfig()
         self.event_bus = event_bus
+        self.hooks = hooks or {}  # {"PreToolUse": callback, "PostToolUse": callback}
         self._cli_path: str | None = None
         self._last_session_id: str | None = None
 
@@ -116,7 +118,11 @@ class ClaudeAgent:
         resolved_model = self._resolve_model(model)
 
         cmd = [cli, "--print", "--dangerously-skip-permissions"]
-        # Session support: continue previous conversation
+
+        # 1M context is GA (not beta) — always available with Opus/Sonnet
+        # No --betas flag needed. Claude CLI uses 1M context by default.
+
+        # Session support
         if continue_session and self._last_session_id:
             cmd.extend(["--resume", self._last_session_id])
         elif session_id:
@@ -127,9 +133,8 @@ class ClaudeAgent:
             cmd.extend(["--append-system-prompt", system_prompt])
         if max_turns:
             cmd.extend(["--max-turns", str(max_turns)])
-        # Note: --allowedTools can interfere with positional prompt parsing
-        # Skip for now — --dangerously-skip-permissions grants all tools
-        # Claude CLI takes prompt as positional argument (after all flags)
+
+        # Prompt as positional argument (after all flags)
         cmd.append(prompt)
 
         text_parts: list[str] = []
@@ -140,6 +145,20 @@ class ClaudeAgent:
             # --print mode outputs plain text (not JSON)
             if line.source == "stdout" and line.text.strip():
                 text_parts.append(line.text)
+
+                # Hooks: intercept tool calls in output
+                text_lower = line.text.lower()
+                if self.hooks.get("PreToolUse") and ("tool_use" in text_lower or "writing" in text_lower or "executing" in text_lower):
+                    try:
+                        await self.hooks["PreToolUse"](line.text, {})
+                    except Exception:
+                        pass
+                if self.hooks.get("PostToolUse") and ("created" in text_lower or "wrote" in text_lower or "executed" in text_lower):
+                    try:
+                        await self.hooks["PostToolUse"](line.text, {})
+                    except Exception:
+                        pass
+
             if self.event_bus:
                 await self.event_bus.emit_simple(
                     EventType.AGENT_TEXT, node="claude",
