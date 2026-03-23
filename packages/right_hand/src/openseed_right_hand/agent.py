@@ -72,7 +72,7 @@ class CodexAgent:
         cmd = [cli]
         if use_auto:
             cmd.append("--full-auto")
-        cmd.extend(["--quiet", prompt])
+        cmd.append(prompt)
 
         files_created: list[str] = []
         files_modified: list[str] = []

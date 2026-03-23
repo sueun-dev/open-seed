@@ -247,6 +247,6 @@ async def _execute_pipeline(task: str, working_dir: str, config_path: str | None
         if _current_run:
             _current_run["status"] = "failed"
             _current_run["error"] = str(e)
-        await _broadcast({"type": "pipeline.fail", "error": str(e)})
+        await _broadcast({"type": "pipeline.fail", "node": "brain", "data": {"error": str(e), "message": str(e)}})
     finally:
         await event_bus.close()
