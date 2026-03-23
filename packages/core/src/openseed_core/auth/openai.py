@@ -58,7 +58,7 @@ def check_openai_auth(cli_path: str | None = None) -> OpenAIAuthStatus:
 
     try:
         result = subprocess.run(
-            [path, "auth", "status"],
+            [path, "login", "status"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -96,5 +96,5 @@ def require_openai_auth(cli_path: str | None = None) -> str:
     if not status.installed:
         raise AuthError("Codex CLI not installed. Run: npm install -g @openai/codex")
     if not status.authenticated:
-        raise AuthError(f"Codex not authenticated. Run: {status.cli_path} auth login")
+        raise AuthError(f"Codex not authenticated. Run: {status.cli_path} login")
     return status.cli_path
