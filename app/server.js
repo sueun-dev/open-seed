@@ -1122,10 +1122,15 @@ Output ONLY valid JSON:
       });
     }
 
-    // ── Git init (now safe — we know git is installed) ──
+    // ── Git init (now safe — preflight verified git is installed) ──
     if (!fs.existsSync(path.join(childCwd, ".git"))) {
-      cp.execSync("git init", { cwd: childCwd, stdio: "ignore" });
-      cp.execSync("git commit --allow-empty -m 'init'", { cwd: childCwd, stdio: "ignore", env: { ...process.env, GIT_AUTHOR_NAME: "AGI", GIT_AUTHOR_EMAIL: "agi@local", GIT_COMMITTER_NAME: "AGI", GIT_COMMITTER_EMAIL: "agi@local" } });
+      try {
+        cp.execSync("git init", { cwd: childCwd, stdio: "ignore" });
+        cp.execSync("git commit --allow-empty -m 'init'", { cwd: childCwd, stdio: "ignore", env: { ...process.env, GIT_AUTHOR_NAME: "AGI", GIT_AUTHOR_EMAIL: "agi@local", GIT_COMMITTER_NAME: "AGI", GIT_COMMITTER_EMAIL: "agi@local" } });
+      } catch (gitErr) {
+        sendPreflight("agi.preflight.check", { name: "git-init", status: "failed", error: gitErr.message || String(gitErr) });
+        // Non-fatal — pipeline can proceed without git, just log the issue
+      }
     }
 
     // Strip the [Previous Run: ...] tag from task for downstream use
@@ -1313,6 +1318,70 @@ Output ONLY valid JSON:
     req.on("close", () => { aborted = true; });
     traceJson("Run Setup", "request", { task, targetDir: targetDir || null, childCwd, projName });
     sendAgi("agi.trace.ready", { tracePath });
+
+    // ═══ Shared AI Healer — used by ALL sections when errors occur ═══
+    // Calls LLM to diagnose an error and suggest/execute fixes.
+    // Returns { healed: boolean, response: string, commands: string[] }
+    async function aiHeal(section, error, context, opts = {}) {
+      const { autoExecute = false, maxCommands = 5 } = opts;
+      sendAgi("agi.heal.start", { section, error });
+      try {
+        const { ProviderRegistry } = require(path.join(PROJECT_DIR, "dist", "providers", "registry.js"));
+        const { loadConfig } = require(path.join(PROJECT_DIR, "dist", "core", "config.js"));
+        const healConfig = await loadConfig(CWD);
+        const healRegistry = new ProviderRegistry();
+        const healProv = selectedProvider === "both" ? "anthropic" : selectedProvider;
+
+        const healResponse = await healRegistry.invokeWithFailover(healConfig, healProv, {
+          role: "planner", category: "planning",
+          systemPrompt: "You are an AGI self-healing system. Diagnose errors and provide solutions. Be concise. Match the user's language.",
+          prompt: `## Error in: ${section}\n\nError: ${error}\n\nContext: ${context || "none"}\n\nTask: ${task.slice(0, 200)}\nWorking directory: ${childCwd}\nPlatform: ${process.platform}\n\n${autoExecute ? 'Output JSON: {"diagnosis":"what went wrong","commands":["bash cmd to fix"],"userMessage":"explanation for user"}' : 'Output JSON: {"diagnosis":"what went wrong","suggestion":"how to fix","userMessage":"explanation for user"}'}`,
+          responseFormat: "json"
+        }, {});
+
+        let parsed = null;
+        try {
+          const raw = healResponse.text.trim();
+          const s = raw.indexOf("{"), e = raw.lastIndexOf("}");
+          if (s !== -1 && e > s) parsed = JSON.parse(raw.slice(s, e + 1));
+        } catch {}
+
+        if (!parsed) {
+          sendAgi("agi.heal.result", { section, healed: false, message: healResponse.text.slice(0, 500) });
+          return { healed: false, response: healResponse.text, commands: [] };
+        }
+
+        sendAgi("agi.heal.diagnosis", { section, diagnosis: parsed.diagnosis || "", suggestion: parsed.suggestion || "", userMessage: parsed.userMessage || "" });
+
+        // Execute fix commands if auto-execute enabled
+        if (autoExecute && Array.isArray(parsed.commands) && parsed.commands.length > 0) {
+          const dangerousPatterns = ["rm -rf /", "rm -rf ~", "mkfs", "dd if=", "> /dev/sd", "chmod 777 /", ":(){ :|:& };:"];
+          let allOk = true;
+          for (const cmd of parsed.commands.slice(0, maxCommands)) {
+            if (typeof cmd !== "string" || !cmd.trim()) continue;
+            if (dangerousPatterns.some(d => cmd.toLowerCase().includes(d))) {
+              sendAgi("agi.heal.command", { command: cmd, success: false, error: "BLOCKED — dangerous" });
+              continue;
+            }
+            try {
+              const output = cp.execSync(cmd, { encoding: "utf8", timeout: 60000, cwd: childCwd, stdio: ["ignore", "pipe", "pipe"] });
+              sendAgi("agi.heal.command", { command: cmd, success: true, output: (output || "").slice(0, 300) });
+            } catch (cmdErr) {
+              sendAgi("agi.heal.command", { command: cmd, success: false, error: (cmdErr.stderr || cmdErr.message || "").toString().slice(0, 300) });
+              allOk = false;
+            }
+          }
+          sendAgi("agi.heal.result", { section, healed: allOk, message: parsed.userMessage || parsed.diagnosis || "" });
+          return { healed: allOk, response: parsed.userMessage || "", commands: parsed.commands };
+        }
+
+        sendAgi("agi.heal.result", { section, healed: false, message: parsed.userMessage || parsed.diagnosis || "" });
+        return { healed: false, response: parsed.userMessage || parsed.suggestion || "", commands: [] };
+      } catch (healErr) {
+        sendAgi("agi.heal.result", { section, healed: false, message: `AI healer failed: ${healErr.message || healErr}` });
+        return { healed: false, response: `AI healer failed: ${healErr.message}`, commands: [] };
+      }
+    }
 
     // Initial complexity — set to "complex" as safe default.
     // The AI ANALYZE step will determine real complexity and we adjust BUILD turns dynamically.
@@ -3472,9 +3541,24 @@ ${prompt}`
           const errMsg = e instanceof Error ? e.message : String(e);
           const errStack = e instanceof Error ? e.stack : undefined;
           sendAgi("agi.step.error", { stepId: step.id, stepType: step.type, error: errMsg, stack: errStack });
+
+          // AI diagnoses the CLI crash
+          const crashHeal = await aiHeal(
+            `CLI crash in ${step.type}`,
+            errMsg,
+            `Stack: ${(errStack || "").slice(0, 500)}\nStep: ${step.title}\nAttempt: ${attempts}/${maxRetries + 1}`,
+            { autoExecute: true }
+          );
+
+          if (crashHeal.healed && attempts <= maxRetries) {
+            sendAgi("agi.debug", { message: `AI fixed CLI crash — retrying attempt ${attempts + 1}` });
+            continue; // Retry the step
+          }
+
           result = {
             stepId: step.id, type: step.type, status: "failed",
-            summary: `Step failed: ${errMsg}`, changes: [], toolResults: [],
+            summary: `Step failed: ${errMsg}${crashHeal.response ? ` | AI: ${crashHeal.response.slice(0, 200)}` : ""}`,
+            changes: [], toolResults: [],
             durationMs: Date.now() - start, tokensUsed: 0, errors: [errMsg],
           };
           ctx.errorLog.push({ stepId: step.id, error: errMsg, category: "runtime", resolved: false });
@@ -3690,21 +3774,40 @@ ${prompt}`
           totalTokens: ctx.totalTokens
         });
 
-        if (step.type === "analyze" && result.status !== "completed") {
-          sendAgi("agi.pipeline.fail", { error: result.errors?.[0] || "AnalyzeArtifact generation failed." });
-          break;
-        }
-        if (step.type === "debate" && result.status !== "completed") {
-          sendAgi("agi.pipeline.fail", { error: result.errors?.[0] || "DebateArtifact generation failed." });
-          break;
-        }
-        if (step.type === "design" && result.status !== "completed") {
-          sendAgi("agi.pipeline.fail", { error: result.errors?.[0] || "DesignArtifact generation failed." });
-          break;
-        }
-        if (step.type === "build" && result.status !== "completed") {
-          sendAgi("agi.pipeline.fail", { error: result.errors?.[0] || "Build step failed." });
-          break;
+        // Any prelude/build step failure → AI diagnoses, then offers discussion
+        if (["analyze", "debate", "design", "build"].includes(step.type) && result.status !== "completed") {
+          const stepError = result.errors?.[0] || `${step.type.toUpperCase()} step failed.`;
+
+          // Try AI self-healing first
+          const healResult = await aiHeal(
+            `${step.type.toUpperCase()} step`,
+            stepError,
+            `Step: ${step.title}\nErrors: ${(result.errors || []).join("; ")}\nSummary: ${(result.summary || "").slice(0, 500)}`,
+            { autoExecute: step.type === "build" } // Only auto-execute commands for BUILD failures
+          );
+
+          if (healResult.healed) {
+            sendAgi("agi.debug", { message: `AI healed ${step.type.toUpperCase()} failure — retrying step` });
+            // Don't increment stepIdx — retry the same step
+            continue;
+          }
+
+          // AI couldn't fix it — offer discussion to user
+          sendAgi("agi.pipeline.awaiting_input", {
+            stepId: step.id,
+            stepType: step.type,
+            nextStep: step.type,
+            reason: "needs_user_help",
+            summary: `${step.type.toUpperCase()} failed: ${stepError}`,
+            errors: result.errors || [],
+            aiDiagnosis: healResult.response,
+            discussionTopic: `${step.type.toUpperCase()} step failed. ${stepError}`,
+            discussionContext: `Task: ${task}\nStep: ${step.title}\nAI diagnosis: ${healResult.response}`,
+            allowDiscussion: true,
+          });
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
         }
         // VERIFY failure → continue to FIX step (don't stop the pipeline)
         // FIX failure → continue to next step (VERIFY will run again if pipeline has more iterations)
@@ -3830,7 +3933,10 @@ ${prompt}`
       const summaryDir = path.join(childCwd, ".agent");
       if (!fs.existsSync(summaryDir)) fs.mkdirSync(summaryDir, { recursive: true });
       fs.writeFileSync(path.join(summaryDir, "run-summary.json"), JSON.stringify(runSummary, null, 2), "utf8");
-    } catch {}
+    } catch (saveErr) {
+      // Non-critical — try AI to diagnose, but don't block pipeline completion
+      try { await aiHeal("run-summary save", saveErr.message || String(saveErr), `Dir: ${childCwd}`, { autoExecute: true }); } catch {}
+    }
 
     sendAgi("agi.pipeline.complete", {
       success,
