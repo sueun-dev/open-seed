@@ -68,7 +68,7 @@ Be brief — this plan will be fed directly to an automated fix agent."""
 
     response = await agent.invoke(
         prompt=prompt,
-        model="haiku",
+        model="sonnet",
         working_dir=working_dir,
         max_turns=1,
     )

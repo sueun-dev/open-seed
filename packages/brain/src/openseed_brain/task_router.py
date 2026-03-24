@@ -91,7 +91,7 @@ Tasks to route:
 
 Assign each task to exactly one domain. Output ONLY valid JSON.""",
         system_prompt=ROUTING_SYSTEM_PROMPT,
-        model="haiku",
+        model="sonnet",  # Sonnet for accurate domain routing
         max_turns=1,
     )
 
