@@ -111,10 +111,16 @@ async def run_streaming(
             timeout=timeout_seconds,
         )
         await process.wait()
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, asyncio.CancelledError):
         timed_out = True
-        process.kill()
-        await process.wait()
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await process.wait()
+        except Exception:
+            pass
 
     return SubprocessResult(
         exit_code=process.returncode if process.returncode is not None else -1,

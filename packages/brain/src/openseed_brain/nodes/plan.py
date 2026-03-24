@@ -56,6 +56,18 @@ Rules:
     plan = Plan(summary=f"Plan for: {task[:100]}")
     try:
         text = response.text
+        # Strip markdown code fences if present (```json ... ```)
+        if "```" in text:
+            lines = text.split("\n")
+            cleaned = []
+            in_fence = False
+            for line in lines:
+                if line.strip().startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if in_fence or not line.strip().startswith("```"):
+                    cleaned.append(line)
+            text = "\n".join(cleaned)
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end > start:
