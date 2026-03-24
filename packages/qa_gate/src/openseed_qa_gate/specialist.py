@@ -100,8 +100,8 @@ If no issues found, output: []
     response = await claude.invoke(
         prompt=f"{context}\n\n---\n\nApply the following review focus:\n{agent.instructions}\n{output_contract}",
         system_prompt=agent.instructions,
-        model="haiku",  # Fast + cheap for QA review
-        max_turns=1,    # Single-pass review, no tool use needed
+        model="sonnet",   # Sonnet for thorough review (reads files, runs checks)
+        max_turns=5,      # Enough turns to: read files → analyze → output findings
         working_dir=working_dir,
     )
 
