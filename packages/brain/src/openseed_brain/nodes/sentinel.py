@@ -65,7 +65,15 @@ async def sentinel_check_node(state: PipelineState) -> dict:
             if verify.get("passed", False):
                 return {"messages": [f"Sentinel: PASSED — QA clean + evidence verified ({retry_count} retries)"]}
             else:
+                # Evidence failed — override QA verdict to WARN so route_after_qa sends to fix
+                from openseed_core.types import QAResult
+                failed_qa = QAResult(
+                    verdict=Verdict.WARN,
+                    synthesis=f"Evidence check failed: {verify.get('summary', '')}",
+                    findings=qa_result.findings if qa_result else [],
+                )
                 return {
+                    "qa_result": failed_qa,
                     "retry_count": retry_count + 1,
                     "messages": [f"Sentinel: QA passed but evidence FAILED — {verify.get('summary', '')}. Retry #{retry_count + 1}"],
                 }
@@ -178,9 +186,17 @@ Rules:
         prompt=prompt,
         model="sonnet",
         working_dir=working_dir,
-        max_turns=5,
+        max_turns=10,  # Enough turns to read broken files + write complete fixes
     )
 
+    # Warn if fix output is suspiciously short (likely didn't actually edit files)
+    fix_len = len(response.text)
+    if fix_len < 100:
+        return {
+            "retry_count": retry_count + 1,
+            "messages": [f"Fix: output too short ({fix_len} chars) — likely no real changes. Attempt {retry_count}"],
+        }
+
     return {
-        "messages": [f"Fix: applied fixes ({len(response.text)} chars). Attempt {retry_count}"],
+        "messages": [f"Fix: applied fixes ({fix_len} chars). Attempt {retry_count}"],
     }
