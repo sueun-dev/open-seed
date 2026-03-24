@@ -90,7 +90,7 @@ Rules for SKIP_PLANNING:
 - no for everything else: new features, multi-file changes, refactors, research tasks
 
 Be concise. No extra prose outside the above structure.""",
-        model="sonnet",
+        model="opus",  # Top-level orchestration uses Opus for best judgment
         max_turns=1,
     )
 

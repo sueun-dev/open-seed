@@ -359,7 +359,7 @@ Output ONLY valid JSON, no markdown:
             cli,
             "--print",
             "--dangerously-skip-permissions",
-            "--model", "claude-haiku-4-5",
+            "--model", "claude-sonnet-4-6",
             "--max-turns", "1",
             prompt,
         ]

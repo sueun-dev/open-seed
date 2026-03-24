@@ -29,7 +29,7 @@ class Reranker:
     semantic relevance to the query, improving recall quality.
     """
 
-    def __init__(self, cli_path: str | None = None, model: str = "claude-haiku-4-5") -> None:
+    def __init__(self, cli_path: str | None = None, model: str = "claude-sonnet-4-6") -> None:
         self._cli_path = cli_path
         self._model = model
 

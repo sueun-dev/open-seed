@@ -347,9 +347,9 @@ class TestRouteTasksLLM:
             MockAgent.return_value.invoke = mock_invoke
             await route_tasks(plan, "Build something")
 
-        # Verify haiku was used
+        # Verify sonnet was used (upgraded from haiku for accuracy)
         call_kwargs = mock_invoke.call_args
-        assert call_kwargs.kwargs.get("model") == "haiku"
+        assert call_kwargs.kwargs.get("model") == "sonnet"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

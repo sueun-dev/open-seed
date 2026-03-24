@@ -48,7 +48,7 @@ Rules:
 - List EVERY file that needs to be created
 - Be specific about file paths
 - Output ONLY the JSON object, nothing else""",
-        model="sonnet",
+        model="opus",  # Planning uses Opus for thorough architecture decisions
         max_turns=1,
     )
 

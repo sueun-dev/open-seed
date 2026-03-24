@@ -110,7 +110,7 @@ async def classify_intent(
         task: The user's task description.
         codebase_context: Optional codebase summary to improve accuracy.
         model: Optional model name. Selects model-specific prompt prefix.
-               Defaults to claude-haiku-4-5 if not specified.
+               Defaults to claude-sonnet-4-6 if not specified.
 
     Returns:
         IntentClassification with type, confidence, reasoning, and approach.
@@ -132,7 +132,7 @@ async def classify_intent(
     )
     prompt = prefix + base_prompt
 
-    call_model = model or "claude-haiku-4-5"
+    call_model = model or "claude-sonnet-4-6"
     cmd = [
         cli_path,
         "--print",

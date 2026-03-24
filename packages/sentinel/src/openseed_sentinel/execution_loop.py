@@ -248,7 +248,7 @@ class ExecutionLoop:
             working_dir=working_dir,
             intent_summary=intent_summary,
         )
-        call_model = self.model or "claude-haiku-4-5"
+        call_model = self.model or "claude-sonnet-4-6"
         raw = await _call_claude(prompt, model=call_model, cli_path=cli_path, timeout_seconds=90)
         data = _parse_json_from_text(raw)
         if not data:
@@ -323,7 +323,7 @@ class ExecutionLoop:
             approach=approach,
             steps=steps[:5],
         )
-        call_model = self.model or "claude-haiku-4-5"
+        call_model = self.model or "claude-sonnet-4-6"
         raw = await _call_claude(prompt, model=call_model, cli_path=cli_path, timeout_seconds=60)
         data = _parse_json_from_text(raw)
         if not data:
