@@ -182,21 +182,50 @@ Rules:
 - Keep it simple — a minimal server does not need graceful shutdown or signal handlers
 - After fixing, read the file back to verify it's syntactically valid"""
 
+    # Snapshot files BEFORE fix
+    import os
+    import hashlib
+
+    def _snapshot_dir(d: str) -> dict[str, str]:
+        """Hash all files in directory (excluding node_modules/.git)."""
+        hashes = {}
+        try:
+            for root, dirs, files in os.walk(d):
+                dirs[:] = [x for x in dirs if x not in ("node_modules", ".git", "__pycache__", ".venv")]
+                for f in files:
+                    path = os.path.join(root, f)
+                    try:
+                        with open(path, "rb") as fh:
+                            hashes[os.path.relpath(path, d)] = hashlib.md5(fh.read()).hexdigest()
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        return hashes
+
+    before = _snapshot_dir(working_dir)
+
     response = await agent.invoke(
         prompt=prompt,
         model="sonnet",
         working_dir=working_dir,
-        max_turns=10,  # Enough turns to read broken files + write complete fixes
+        max_turns=10,
     )
 
-    # Warn if fix output is suspiciously short (likely didn't actually edit files)
-    fix_len = len(response.text)
-    if fix_len < 100:
+    # Verify files actually changed
+    after = _snapshot_dir(working_dir)
+    changed_files = [f for f in after if after[f] != before.get(f)]
+    new_files = [f for f in after if f not in before]
+    all_changes = changed_files + new_files
+
+    if not all_changes:
+        # Claude said "fixed" but changed nothing — force a more explicit retry
         return {
             "retry_count": retry_count + 1,
-            "messages": [f"Fix: output too short ({fix_len} chars) — likely no real changes. Attempt {retry_count}"],
+            "messages": [f"Fix: NO files changed on disk. Claude claimed fix but didn't edit anything. Attempt {retry_count}"],
+            "errors": [Error(step="fix", message="Fix produced no file changes — agent may need stronger instructions")],
         }
 
     return {
-        "messages": [f"Fix: applied fixes ({fix_len} chars). Attempt {retry_count}"],
+        "messages": [f"Fix: {len(all_changes)} files changed ({', '.join(all_changes[:5])}). Attempt {retry_count}"],
     }
