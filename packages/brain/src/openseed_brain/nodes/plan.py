@@ -28,18 +28,26 @@ Task: {task}
 Working directory: {working_dir}
 Analysis: {intake[:500]}
 
-Output valid JSON:
+You MUST respond with ONLY valid JSON (no markdown, no explanation before/after):
 {{
-  "summary": "one-line summary",
+  "summary": "one-line summary of the plan",
   "tasks": [
-    {{"id": "T1", "description": "what to do", "role": "executor", "files": ["file.py"]}}
+    {{"id": "T1", "description": "Set up project with package.json and dependencies", "role": "infra", "files": ["package.json"]}},
+    {{"id": "T2", "description": "Create Express API server with CRUD routes", "role": "backend", "files": ["server/index.js", "server/routes.js"]}},
+    {{"id": "T3", "description": "Create React components for the UI", "role": "frontend", "files": ["src/App.jsx", "src/components/List.jsx"]}}
   ],
   "file_manifest": [
-    {{"path": "file.py", "purpose": "what it does"}}
+    {{"path": "package.json", "purpose": "Dependencies and scripts"}},
+    {{"path": "server/index.js", "purpose": "Express server entry point"}}
   ]
 }}
 
-Be specific. List every file to create.""",
+Rules:
+- Each task MUST be an object with id, description, role, files fields
+- Each file_manifest item MUST be an object with path, purpose fields
+- List EVERY file that needs to be created
+- Be specific about file paths
+- Output ONLY the JSON object, nothing else""",
         model="sonnet",
         max_turns=1,
     )
@@ -53,20 +61,22 @@ Be specific. List every file to create.""",
         if start != -1 and end > start:
             data = json.loads(text[start:end + 1])
             plan.summary = data.get("summary", plan.summary)
-            plan.tasks = [
-                PlanTask(
+            for i, t in enumerate(data.get("tasks", [])):
+                if not isinstance(t, dict):
+                    continue
+                plan.tasks.append(PlanTask(
                     id=t.get("id", f"T{i}"),
-                    description=t.get("description", ""),
+                    description=t.get("description", str(t)),
                     role=t.get("role", "executor"),
                     files=t.get("files", []),
+                ))
+            for f in data.get("file_manifest", []):
+                if not isinstance(f, dict):
+                    continue
+                plan.file_manifest.append(
+                    FileEntry(path=f.get("path", ""), purpose=f.get("purpose", ""))
                 )
-                for i, t in enumerate(data.get("tasks", []))
-            ]
-            plan.file_manifest = [
-                FileEntry(path=f.get("path", ""), purpose=f.get("purpose", ""))
-                for f in data.get("file_manifest", [])
-            ]
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError, AttributeError):
         pass
 
     return {
