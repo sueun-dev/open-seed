@@ -11,11 +11,11 @@ authors = [{ name = "sueun-dev", email = "sueun@openseed.dev" }]
 members = [
     "packages/core",
     "packages/brain",
-    "packages/left_hand",
-    "packages/right_hand",
+    "packages/claude",
+    "packages/codex",
     "packages/qa_gate",
-    "packages/sentinel",
-    "packages/body",
+    "packages/guard",
+    "packages/deploy",
     "packages/memory",
     "packages/cli",
 ]
@@ -23,11 +23,11 @@ members = [
 [tool.uv.sources]
 openseed-core = { workspace = true }
 openseed-brain = { workspace = true }
-openseed-left-hand = { workspace = true }
-openseed-right-hand = { workspace = true }
+openseed-claude = { workspace = true }
+openseed-codex = { workspace = true }
 openseed-qa-gate = { workspace = true }
-openseed-sentinel = { workspace = true }
-openseed-body = { workspace = true }
+openseed-guard = { workspace = true }
+openseed-deploy = { workspace = true }
 openseed-memory = { workspace = true }
 openseed-cli = { workspace = true }
 

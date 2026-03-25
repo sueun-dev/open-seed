@@ -28,7 +28,15 @@ Rules:
 - No placeholders, no TODOs
 - If package.json is needed, create it with all deps
 - Run npm install after creating package.json if needed
-- src/ subfolder is OK for source files, but package.json/index.html must be at the root"""
+- src/ subfolder is OK for source files, but package.json/index.html must be at the root
+- CORS: In development, allow ALL localhost origins (e.g. use an env variable like \
+FRONTEND_ORIGIN or default to a pattern that accepts any localhost port). NEVER hardcode \
+a specific port like 5173 — the dev server port can change.
+- REST updates: Always implement BOTH PUT (full replace, all fields required) AND \
+PATCH (partial update, only changed fields required) for every resource. A CRUD API \
+without PATCH is incomplete.
+- Dev defaults: Every config value (ports, origins, DB paths) must work out-of-the-box \
+in a dev environment with zero env vars set. Use sensible defaults, not empty strings."""
 
 
 def _build_plan_text(state: PipelineState) -> str:
@@ -64,7 +72,7 @@ async def _run_specialist(
     Returns:
         Implementation result from the specialist.
     """
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
     from openseed_brain.specialists import get_specialist_prompt
 
     agent = ClaudeAgent()
@@ -109,7 +117,7 @@ async def _implement_fullstack(state: PipelineState) -> Implementation:
     Fullstack implementation — used when there is no plan or when the task
     is too simple to benefit from specialist splitting.
     """
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
     from openseed_brain.specialists import get_specialist_prompt
 
     agent = ClaudeAgent()
@@ -151,7 +159,7 @@ async def _integration_check(
     - Missing dependencies in package.json
     - Database schema not matching ORM models
     """
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
 
     agent = ClaudeAgent()
 
@@ -177,6 +185,12 @@ Read ALL the files that were just created in the working directory, then verify 
 5. package.json / pyproject.toml has ALL needed dependencies with correct names
 6. Environment variables are consistent across all config files
 7. Type definitions are shared correctly (no duplicate or conflicting types)
+8. CORS origin matches the actual frontend dev server port — if the frontend runs on a \
+different port than expected, the CORS config must accept it. Prefer env-var-based origin \
+or a permissive localhost default for dev.
+9. Every API call in the frontend code has a matching route handler in the backend. \
+Grep the frontend for fetch/axios calls and verify each URL path exists as a backend route.
+10. Every REST resource has both PUT and PATCH endpoints if the frontend performs updates.
 
 Fix any integration issues you find. If everything looks correct, confirm it.""",
         model="sonnet",
@@ -195,7 +209,7 @@ Fix any integration issues you find. If everything looks correct, confirm it."""
 
 async def _implement_codex(state: PipelineState) -> Implementation:
     """Fast parallel implementation via Codex (legacy mode)."""
-    from openseed_right_hand.agent import CodexAgent
+    from openseed_codex.agent import CodexAgent
 
     agent = CodexAgent()
     plan_text = _build_plan_text(state)
@@ -222,8 +236,8 @@ Write every file with complete code. No placeholders.""",
 
 async def _implement_both(state: PipelineState) -> Implementation:
     """Claude designs architecture, Codex implements in parallel (legacy mode)."""
-    from openseed_left_hand.agent import ClaudeAgent
-    from openseed_right_hand.agent import CodexAgent
+    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
     plan_text = _build_plan_text(state)
 

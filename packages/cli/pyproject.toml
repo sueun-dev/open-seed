@@ -11,11 +11,11 @@ dependencies = [
     "websockets>=13.0",
     "openseed-core",
     "openseed-brain",
-    "openseed-left-hand",
-    "openseed-right-hand",
+    "openseed-claude",
+    "openseed-codex",
     "openseed-qa-gate",
-    "openseed-sentinel",
-    "openseed-body",
+    "openseed-guard",
+    "openseed-deploy",
     "openseed-memory",
 ]
 

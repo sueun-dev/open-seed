@@ -44,7 +44,7 @@ async def diagnose_node(state: FixSubState) -> dict:
     Analyse the errors and produce a structured repair plan via LLM.
     Uses Claude Haiku for fast triage.
     """
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
 
     task = state.get("task", "")
     working_dir = state.get("working_dir", "")
@@ -82,7 +82,7 @@ async def fix_node(state: FixSubState) -> dict:
     Mirrors the logic of openseed_brain.nodes.sentinel.fix_node but is
     driven by the locally produced repair_plan rather than QA findings.
     """
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
 
     task = state.get("task", "")
     working_dir = state.get("working_dir", "")
@@ -122,14 +122,14 @@ Rules:
 async def verify_node(state: FixSubState) -> dict:
     """
     Evidence-based verification that the fix was applied correctly.
-    Uses openseed_sentinel.evidence.verify_implementation when available;
+    Uses openseed_guard.evidence.verify_implementation when available;
     falls back to a lightweight file-existence check.
     """
     working_dir = state.get("working_dir", "")
     task = state.get("task", "")
 
     try:
-        from openseed_sentinel.evidence import verify_implementation
+        from openseed_guard.evidence import verify_implementation
 
         result = await verify_implementation(
             working_dir=working_dir,

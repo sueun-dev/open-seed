@@ -1,6 +1,6 @@
 """
 Deploy node — Push verified code through deployment channels.
-REAL implementation — calls openseed_body.
+REAL implementation — calls openseed_deploy.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ async def deploy_node(state: PipelineState) -> dict:
     task = state["task"]
 
     try:
-        from openseed_body.deployer import deploy
+        from openseed_deploy.deployer import deploy
         result = await deploy(
             working_dir=working_dir,
             message=f"openseed: {task[:80]}",

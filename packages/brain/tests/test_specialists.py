@@ -264,7 +264,7 @@ class TestRouteTasksLLM:
             {"task_id": "T2", "domain": "frontend"},
         ]))
 
-        with patch("openseed_left_hand.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await route_tasks(plan, "Build a landing page")
 
@@ -292,7 +292,7 @@ class TestRouteTasksLLM:
             {"task_id": "T4", "domain": "infra"},
         ]))
 
-        with patch("openseed_left_hand.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await route_tasks(plan, "Build a todo app")
 
@@ -318,7 +318,7 @@ class TestRouteTasksLLM:
             {"task_id": "T2", "domain": "backend"},
         ]))
 
-        with patch("openseed_left_hand.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await route_tasks(plan, "Build a REST API")
 
@@ -342,7 +342,7 @@ class TestRouteTasksLLM:
             json.dumps([{"task_id": "T1", "domain": "fullstack"}])
         )
 
-        with patch("openseed_left_hand.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
             mock_invoke = AsyncMock(return_value=mock_response)
             MockAgent.return_value.invoke = mock_invoke
             await route_tasks(plan, "Build something")
@@ -369,7 +369,7 @@ class TestImplementNode:
 
         mock_response = _mock_claude_response("Built a calculator app.")
 
-        with patch("openseed_left_hand.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await implement_node(state)
 
@@ -388,7 +388,7 @@ class TestImplementNode:
         mock_response.files_created = ["app.py"]
         mock_response.files_modified = []
 
-        with patch("openseed_right_hand.agent.CodexAgent") as MockCodex:
+        with patch("openseed_codex.agent.CodexAgent") as MockCodex:
             MockCodex.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await implement_node(state)
 
@@ -420,7 +420,7 @@ class TestImplementNode:
 
         with (
             patch("openseed_brain.task_router.route_tasks", new_callable=AsyncMock) as mock_router,
-            patch("openseed_left_hand.agent.ClaudeAgent") as MockAgent,
+            patch("openseed_claude.agent.ClaudeAgent") as MockAgent,
         ):
             mock_router.return_value = routing_result
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_specialist_response)

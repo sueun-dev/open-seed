@@ -2,14 +2,14 @@
 Sentinel node — Zero-error guarantee loop.
 
 Uses the 7-step ExecutionLoop (EXPLORE→PLAN→ROUTE→EXECUTE→VERIFY→RETRY→DONE)
-for intelligent verification, plus the evaluate_loop for retry/oracle/escalate decisions.
+for intelligent verification, plus the evaluate_loop for retry/insight/escalate decisions.
 
 Integration:
   - ExecutionLoop._verify() checks evidence (files exist, tests pass)
-  - evaluate_loop() decides: pass / retry / oracle / user_escalate / abort
+  - evaluate_loop() decides: pass / retry / insight / user_escalate / abort
   - Memory is queried for similar past failures (in fix_node)
 
-Escalation chain: retry → retry (different approach) → Oracle → User
+Escalation chain: retry → retry (different approach) → Insight → User
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
 
     Flow:
     1. If QA passed → run ExecutionLoop._verify() to double-check with evidence
-    2. If QA failed → run evaluate_loop() for retry/oracle/escalate decision
+    2. If QA failed → run evaluate_loop() for retry/insight/escalate decision
     """
     qa_result = state.get("qa_result")
     retry_count = state.get("retry_count", 0)
@@ -48,7 +48,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
     # ── QA PASSED — evidence verification via ExecutionLoop ──
     if qa_result and qa_result.verdict == Verdict.PASS:
         try:
-            from openseed_sentinel.execution_loop import ExecutionLoop
+            from openseed_guard.execution_loop import ExecutionLoop
             loop = ExecutionLoop()
             # Run only the VERIFY step with the plan context
             verify = await loop._verify(
@@ -80,10 +80,10 @@ async def sentinel_check_node(state: PipelineState) -> dict:
         except Exception as e:
             return {"messages": [f"Sentinel: PASSED (evidence check skipped: {e})"]}
 
-    # ── QA FAILED — evaluate_loop for retry/oracle/escalate ──
+    # ── QA FAILED — evaluate_loop for retry/insight/escalate ──
     try:
-        from openseed_sentinel.loop import evaluate_loop, LoopState
-        from openseed_sentinel.evidence import verify_implementation
+        from openseed_guard.loop import evaluate_loop, LoopState
+        from openseed_guard.evidence import verify_implementation
 
         verification = await verify_implementation(working_dir=working_dir, expected_files=expected_files)
 
@@ -105,8 +105,8 @@ async def sentinel_check_node(state: PipelineState) -> dict:
 
         if decision.action == "pass":
             return {"messages": [f"Sentinel: {decision.reason}"]}
-        elif decision.action in ("retry", "oracle"):
-            label = "ORACLE consulted" if decision.action == "oracle" else "RETRY"
+        elif decision.action in ("retry", "insight"):
+            label = "INSIGHT consulted" if decision.action == "insight" else "RETRY"
             return {
                 "retry_count": retry_count + 1,
                 "messages": [f"Sentinel: {label} — {decision.reason}"],
@@ -131,16 +131,16 @@ async def sentinel_check_node(state: PipelineState) -> dict:
 
 async def fix_node(state: PipelineState) -> dict:
     """
-    Fix errors reported by QA gate — OmO Sisyphus Phase 2C implementation.
+    Fix errors reported by QA gate.
 
     Key behaviors:
     1. Session continuity — reuses Claude session across fix attempts
     2. Structured fix strategy — diagnose, fix, verify (not just "fix this")
-    3. Consecutive failure tracking — after 3 failures, consults Oracle
+    3. Consecutive failure tracking — after 3 failures, consults Insight
     4. Evidence-based verification — detects no-op "fixes"
     5. Git stash revert — reverts to pre-fix state after 3 consecutive failures
 
-    Escalation chain: retry → retry (different approach) → Oracle → User
+    Escalation chain: retry → retry (different approach) → Insight → User
     """
     task = state["task"]
     working_dir = state["working_dir"]
@@ -163,38 +163,38 @@ async def fix_node(state: PipelineState) -> dict:
     if retry_count == 0:
         await _git_stash_push(working_dir)
 
-    # ── After 3 consecutive failures: STOP, REVERT, CONSULT Oracle ──
-    oracle_advice = None
+    # ── After 3 consecutive failures: STOP, REVERT, CONSULT Insight ──
+    insight_advice = None
     if retry_count >= 3 and retry_count % 3 == 0:
-        # REVERT to pre-fix state before trying Oracle's approach
+        # REVERT to pre-fix state before trying Insight's approach
         await _git_stash_revert(working_dir)
 
-        oracle_advice = await _consult_oracle_for_fix(
+        insight_advice = await _consult_insight_for_fix(
             task, failure_history, qa_result,
         )
 
-        if oracle_advice and oracle_advice.should_abandon:
-            # Oracle says this is unfixable — escalate to user
+        if insight_advice and insight_advice.should_abandon:
+            # Insight says this is unfixable — escalate to user
             return {
                 "retry_count": retry_count + 1,
                 "messages": [
-                    f"Fix: Oracle advises ABANDON after {retry_count} failures. "
-                    f"Diagnosis: {oracle_advice.diagnosis}",
+                    f"Fix: Insight advises ABANDON after {retry_count} failures. "
+                    f"Diagnosis: {insight_advice.diagnosis}",
                 ],
                 "errors": [Error(
                     step="fix",
-                    message=f"Needs user help: {oracle_advice.reason}",
+                    message=f"Needs user help: {insight_advice.reason}",
                 )],
             }
 
-        # Re-stash so we have a clean revert point for Oracle's approach
+        # Re-stash so we have a clean revert point for Insight's approach
         await _git_stash_push(working_dir)
 
     # ── Main fix with session continuity ──
     import os
     import hashlib
 
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
 
     # Deterministic session key based on task content
@@ -207,7 +207,7 @@ async def fix_node(state: PipelineState) -> dict:
         memory_context=memory_context,
         retry_count=retry_count,
         failure_history=failure_history[-5:],
-        oracle_advice=oracle_advice,
+        insight_advice=insight_advice,
     )
 
     # Snapshot files BEFORE fix
@@ -280,12 +280,19 @@ async def fix_node(state: PipelineState) -> dict:
 
 
 def _build_findings_text(qa_result: object | None) -> str:
-    """Format QA findings into readable text."""
+    """Format QA findings into readable text, sorted by severity (critical first)."""
     if not qa_result or not getattr(qa_result, "findings", None):
         return ""
+    # Sort findings so the LLM sees the most severe issues first.
+    # The ordering itself is just data presentation — the LLM decides what to fix.
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    sorted_findings = sorted(
+        qa_result.findings,  # type: ignore[union-attr]
+        key=lambda f: severity_order.get(f.severity.value, 5),
+    )
     return "\n".join(
         f"- [{f.severity.value}] {f.title}: {f.description} (file: {f.file})"
-        for f in qa_result.findings[:10]  # type: ignore[union-attr]
+        for f in sorted_findings[:10]
     )
 
 
@@ -349,14 +356,14 @@ async def _git_stash_revert(working_dir: str) -> bool:
         return False
 
 
-async def _consult_oracle_for_fix(
+async def _consult_insight_for_fix(
     task: str,
     failure_history: list[str],
     qa_result: object | None,
 ) -> object | None:
-    """Consult Oracle (Opus with extended thinking) for a different strategy."""
+    """Consult Insight (Opus with extended thinking) for a different strategy."""
     try:
-        from openseed_sentinel.oracle import consult_oracle
+        from openseed_guard.insight import consult_insight
 
         current_errors = []
         if qa_result and getattr(qa_result, "findings", None):
@@ -364,7 +371,7 @@ async def _consult_oracle_for_fix(
                 f.description for f in qa_result.findings[:10]  # type: ignore[union-attr]
             ]
 
-        return await consult_oracle(
+        return await consult_insight(
             task=task,
             failure_history=failure_history[-10:],
             current_errors=current_errors,
@@ -407,24 +414,24 @@ def _build_fix_prompt(
     memory_context: str,
     retry_count: int,
     failure_history: list[str],
-    oracle_advice: object | None = None,
+    insight_advice: object | None = None,
 ) -> str:
     """
     Build a structured fix prompt. Strategy changes based on retry_count:
     - retry 0-2: Standard root-cause fix with 3-phase approach
-    - retry 3+:  Completely different strategy, informed by Oracle if available
+    - retry 3+:  Completely different strategy, informed by Insight if available
     """
-    # Oracle advice section
-    oracle_section = ""
-    if oracle_advice:
-        diagnosis = getattr(oracle_advice, "diagnosis", "")
-        approach = getattr(oracle_advice, "suggested_approach", "")
-        oracle_section = f"""
-## ORACLE GUIDANCE (from deeper analysis)
+    # Insight advice section
+    insight_section = ""
+    if insight_advice:
+        diagnosis = getattr(insight_advice, "diagnosis", "")
+        approach = getattr(insight_advice, "suggested_approach", "")
+        insight_section = f"""
+## INSIGHT GUIDANCE (from deeper analysis)
 Diagnosis: {diagnosis}
 Suggested approach: {approach}
 
-You MUST follow the Oracle's suggested approach. Your previous attempts failed.
+You MUST follow Insight's suggested approach. Your previous attempts failed.
 Do NOT repeat what was tried before.
 """
 
@@ -445,10 +452,14 @@ Do NOT repeat what was tried before.
 ## Retry Attempt
 {retry_count} (of max 10)
 
-## Issues Found by QA
+## Issues Found by QA (sorted by severity — fix from top to bottom)
 {findings_text or "No specific findings — general verification failed"}
 {memory_context}
 {history_section}
+
+PRIORITY: Fix CRITICAL and HIGH severity issues FIRST. A "non-functional feature" or \
+"crash-level bug" must be resolved before touching any MEDIUM or LOW issues. If you run \
+out of turns, it is better to have fixed 2 critical bugs than 5 low-severity ones.
 
 ## Your 3-Phase Approach
 
@@ -486,11 +497,14 @@ You MUST try a COMPLETELY DIFFERENT approach this time.
 ## Working Directory
 {working_dir}
 
-## Current Issues
+## Current Issues (sorted by severity — fix from top to bottom)
 {findings_text or "No specific findings — general verification failed"}
 {memory_context}
 {history_section}
-{oracle_section}
+{insight_section}
+
+PRIORITY: Fix CRITICAL and HIGH severity issues FIRST. A "non-functional feature" or \
+"crash-level bug" must be resolved before touching any MEDIUM or LOW issues.
 
 ## MANDATORY: Different Strategy
 

@@ -1,8 +1,7 @@
 """
 Claude OAuth — verify Claude CLI is installed and authenticated.
 
-Pattern from: claude-code-sdk-python SubprocessCLITransport
-The SDK spawns `claude` as subprocess. We just need to verify it exists
+We spawn `claude` as a subprocess. Just need to verify it exists
 and has valid OAuth. The CLI handles all auth internally.
 """
 
@@ -27,7 +26,7 @@ class ClaudeAuthStatus:
 def get_claude_cli_path() -> str | None:
     """
     Find the Claude CLI binary.
-    Search order (matching claude-agent-sdk SubprocessCLITransport):
+    Search order:
     1. PATH (shutil.which)
     2. Common npm global paths
     3. Common homebrew paths
