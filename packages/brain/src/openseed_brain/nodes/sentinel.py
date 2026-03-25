@@ -106,6 +106,10 @@ async def sentinel_check_node(state: PipelineState) -> dict:
         if decision.action == "pass":
             return {"messages": [f"Sentinel: {decision.reason}"]}
         elif decision.action in ("retry", "insight"):
+            # Actually apply backoff — wait before returning so the next node doesn't fire instantly
+            if decision.backoff_ms > 0:
+                import asyncio
+                await asyncio.sleep(decision.backoff_ms / 1000.0)
             label = "INSIGHT consulted" if decision.action == "insight" else "RETRY"
             return {
                 "retry_count": retry_count + 1,
