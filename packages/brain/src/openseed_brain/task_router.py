@@ -66,7 +66,7 @@ async def route_tasks(plan: Plan, task: str) -> dict[str, list[PlanTask]]:
         Dictionary mapping domain names to lists of PlanTasks.
         Example: {"frontend": [task1, task2], "backend": [task3]}
     """
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
 
     if not plan.tasks:
         return {}

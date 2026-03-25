@@ -81,7 +81,7 @@ async def _run_via_claude(
     working_dir: str,
 ) -> SpecialistResult:
     """Run specialist via Claude CLI."""
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
 
     claude = ClaudeAgent()
     # Read-only agents get only read tools
@@ -119,9 +119,9 @@ async def _run_via_codex(
 ) -> SpecialistResult:
     """Run specialist via Codex CLI."""
     try:
-        from openseed_right_hand.agent import CodexAgent
+        from openseed_codex.agent import CodexAgent
     except ImportError as exc:
-        # Codex (right_hand) package not installed — fall back to Claude
+        # Codex package not installed — fall back to Claude
         import logging
         logging.getLogger(__name__).debug("CodexAgent unavailable (%s); falling back to Claude", exc)
         return await _run_via_claude(agent, context, working_dir)

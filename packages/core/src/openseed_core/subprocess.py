@@ -2,7 +2,7 @@
 Open Seed v2 — Shared subprocess runner.
 
 Async subprocess execution with timeout, streaming, and OOM guard.
-Used by both left_hand (Claude CLI) and right_hand (Codex CLI).
+Used by both claude (Claude CLI) and codex (Codex CLI).
 """
 
 from __future__ import annotations

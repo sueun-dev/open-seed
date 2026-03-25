@@ -1,11 +1,10 @@
 [project]
-name = "openseed-qa-gate"
+name = "openseed-guard"
 version = "2.0.0-alpha.0"
-description = "QA gate — specialist reviewers for zero-bug verification"
+description = "Sentinel protocol — infinite retry loop until zero errors"
 requires-python = ">=3.11"
 dependencies = [
     "openseed-core",
-    "openseed-codex",
 ]
 
 [build-system]
@@ -13,4 +12,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/openseed_qa_gate"]
+packages = ["src/openseed_guard"]

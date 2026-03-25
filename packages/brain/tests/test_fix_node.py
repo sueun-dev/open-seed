@@ -1,10 +1,10 @@
 """
-Tests for the fix_node — OmO Sisyphus Phase 2C implementation.
+Tests for the fix_node — structured diagnose/fix/verify cycle.
 
 Covers:
   1. Session continuity — first attempt creates session, subsequent reuse
   2. Structured fix prompts — different prompts for retry 0-2 vs 3+
-  3. Oracle consultation — triggered at retry 3, 6, 9, ...
+  3. Insight consultation — triggered at retry 3, 6, 9, ...
   4. Evidence verification — detects no-op fixes, retries with explicit instruction
   5. Git stash — push on first attempt, revert on 3rd failure
   6. Helper functions — _build_findings_text, _build_fix_prompt, _snapshot_dir
@@ -27,7 +27,7 @@ from openseed_core.types import (
 )
 
 # The fix_node does local imports, so we patch at the source module level.
-# ClaudeAgent: patched at openseed_left_hand.agent.ClaudeAgent
+# ClaudeAgent: patched at openseed_claude.agent.ClaudeAgent
 # _recall_past_fixes, _git_stash_push, etc.: patched on the sentinel module
 
 
@@ -65,12 +65,12 @@ def _mock_agent_response(text: str = "Fixed.", session_id: str = "sess-1"):
     return resp
 
 
-def _patch_fix_node_deps(mock_agent, stash_push=None, stash_revert=None, oracle=None):
+def _patch_fix_node_deps(mock_agent, stash_push=None, stash_revert=None, insight=None):
     """Return a combined context manager that patches all fix_node dependencies."""
     import contextlib
 
     patches = [
-        patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+        patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
         patch(
             "openseed_brain.nodes.sentinel._recall_past_fixes",
             new_callable=AsyncMock,
@@ -85,12 +85,12 @@ def _patch_fix_node_deps(mock_agent, stash_push=None, stash_revert=None, oracle=
         patches.append(
             patch("openseed_brain.nodes.sentinel._git_stash_revert", stash_revert),
         )
-    if oracle is not None:
+    if insight is not None:
         patches.append(
             patch(
-                "openseed_brain.nodes.sentinel._consult_oracle_for_fix",
+                "openseed_brain.nodes.sentinel._consult_insight_for_fix",
                 new_callable=AsyncMock,
-                return_value=oracle,
+                return_value=insight,
             ),
         )
     return contextlib.ExitStack(), patches
@@ -121,7 +121,7 @@ class TestFixNodeSessionContinuity:
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -153,7 +153,7 @@ class TestFixNodeSessionContinuity:
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
         ):
             result = await fix_node(state)
@@ -200,13 +200,13 @@ class TestBuildFixPrompt:
         assert "previous" in prompt.lower()
         assert "DO NOT repeat" in prompt
 
-    def test_oracle_advice_included_when_present(self):
-        """Oracle advice should be embedded in the prompt."""
+    def test_insight_advice_included_when_present(self):
+        """Insight advice should be embedded in the prompt."""
         from openseed_brain.nodes.sentinel import _build_fix_prompt
 
-        oracle = MagicMock()
-        oracle.diagnosis = "The module structure is fundamentally wrong"
-        oracle.suggested_approach = "Rewrite using a flat module layout"
+        insight = MagicMock()
+        insight.diagnosis = "The module structure is fundamentally wrong"
+        insight.suggested_approach = "Rewrite using a flat module layout"
 
         prompt = _build_fix_prompt(
             task="build a web app",
@@ -215,9 +215,9 @@ class TestBuildFixPrompt:
             memory_context="",
             retry_count=3,
             failure_history=["attempt 1", "attempt 2", "attempt 3"],
-            oracle_advice=oracle,
+            insight_advice=insight,
         )
-        assert "ORACLE GUIDANCE" in prompt
+        assert "INSIGHT GUIDANCE" in prompt
         assert "flat module layout" in prompt
 
     def test_failure_history_included(self):
@@ -236,13 +236,13 @@ class TestBuildFixPrompt:
         assert "same error persists" in prompt
 
 
-# ─── 3. Oracle consultation ──────────────────────────────────────────────────
+# ─── 3. Insight consultation ──────────────────────────────────────────────────
 
 
-class TestOracleConsultation:
+class TestInsightConsultation:
     @pytest.mark.asyncio
-    async def test_oracle_consulted_at_retry_3(self, tmp_path):
-        """At retry_count=3, Oracle should be consulted."""
+    async def test_insight_consulted_at_retry_3(self, tmp_path):
+        """At retry_count=3, Insight should be consulted."""
         from openseed_brain.nodes.sentinel import fix_node
 
         (tmp_path / "app.py").write_text("broken")
@@ -253,38 +253,38 @@ class TestOracleConsultation:
             messages=["Fix: attempt 1", "Fix: attempt 2", "Fix: attempt 3"],
         )
 
-        mock_oracle = MagicMock()
-        mock_oracle.should_abandon = False
-        mock_oracle.diagnosis = "Root cause is X"
-        mock_oracle.suggested_approach = "Try Y instead"
+        mock_insight = MagicMock()
+        mock_insight.should_abandon = False
+        mock_insight.diagnosis = "Root cause is X"
+        mock_insight.suggested_approach = "Try Y instead"
 
         mock_agent = AsyncMock()
 
         async def invoke_and_modify(*args, **kwargs):
-            (tmp_path / "app.py").write_text("oracle-fixed")
+            (tmp_path / "app.py").write_text("insight-fixed")
             return _mock_agent_response()
 
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
 
-        oracle_mock = AsyncMock(return_value=mock_oracle)
+        insight_mock = AsyncMock(return_value=mock_insight)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
-            patch("openseed_brain.nodes.sentinel._consult_oracle_for_fix", oracle_mock),
+            patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", insight_mock),
             patch("openseed_brain.nodes.sentinel._git_stash_revert", new_callable=AsyncMock, return_value=True),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
             result = await fix_node(state)
 
-        # Oracle was consulted
-        oracle_mock.assert_awaited_once()
-        # Should not have errors (Oracle did not abandon)
+        # Insight was consulted
+        insight_mock.assert_awaited_once()
+        # Should not have errors (Insight did not abandon)
         assert not result.get("errors")
 
     @pytest.mark.asyncio
-    async def test_oracle_abandon_escalates_to_user(self, tmp_path):
-        """When Oracle says should_abandon=True, fix_node returns an error for escalation."""
+    async def test_insight_abandon_escalates_to_user(self, tmp_path):
+        """When Insight says should_abandon=True, fix_node returns an error for escalation."""
         from openseed_brain.nodes.sentinel import fix_node
 
         (tmp_path / "app.py").write_text("broken")
@@ -294,14 +294,14 @@ class TestOracleConsultation:
             retry_count=3,
         )
 
-        mock_oracle = MagicMock()
-        mock_oracle.should_abandon = True
-        mock_oracle.diagnosis = "Impossible without external API key"
-        mock_oracle.reason = "Missing credentials"
+        mock_insight = MagicMock()
+        mock_insight.should_abandon = True
+        mock_insight.diagnosis = "Impossible without external API key"
+        mock_insight.reason = "Missing credentials"
 
         with (
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
-            patch("openseed_brain.nodes.sentinel._consult_oracle_for_fix", new_callable=AsyncMock, return_value=mock_oracle),
+            patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", new_callable=AsyncMock, return_value=mock_insight),
             patch("openseed_brain.nodes.sentinel._git_stash_revert", new_callable=AsyncMock, return_value=True),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -312,8 +312,8 @@ class TestOracleConsultation:
         assert "ABANDON" in result["messages"][0]
 
     @pytest.mark.asyncio
-    async def test_oracle_not_consulted_at_retry_1(self, tmp_path):
-        """At retry_count=1, Oracle should NOT be consulted."""
+    async def test_insight_not_consulted_at_retry_1(self, tmp_path):
+        """At retry_count=1, Insight should NOT be consulted."""
         from openseed_brain.nodes.sentinel import fix_node
 
         (tmp_path / "app.py").write_text("broken")
@@ -331,20 +331,20 @@ class TestOracleConsultation:
 
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
 
-        oracle_mock = AsyncMock(return_value=None)
+        insight_mock = AsyncMock(return_value=None)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
-            patch("openseed_brain.nodes.sentinel._consult_oracle_for_fix", oracle_mock),
+            patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", insight_mock),
         ):
             await fix_node(state)
 
-        oracle_mock.assert_not_awaited()
+        insight_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_oracle_consulted_at_retry_6(self, tmp_path):
-        """At retry_count=6 (another multiple of 3), Oracle is consulted again."""
+    async def test_insight_consulted_at_retry_6(self, tmp_path):
+        """At retry_count=6 (another multiple of 3), Insight is consulted again."""
         from openseed_brain.nodes.sentinel import fix_node
 
         (tmp_path / "app.py").write_text("broken")
@@ -354,10 +354,10 @@ class TestOracleConsultation:
             retry_count=6,
         )
 
-        mock_oracle = MagicMock()
-        mock_oracle.should_abandon = False
-        mock_oracle.diagnosis = "New diagnosis"
-        mock_oracle.suggested_approach = "New approach"
+        mock_insight = MagicMock()
+        mock_insight.should_abandon = False
+        mock_insight.diagnosis = "New diagnosis"
+        mock_insight.suggested_approach = "New approach"
 
         mock_agent = AsyncMock()
 
@@ -367,18 +367,18 @@ class TestOracleConsultation:
 
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
 
-        oracle_mock = AsyncMock(return_value=mock_oracle)
+        insight_mock = AsyncMock(return_value=mock_insight)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
-            patch("openseed_brain.nodes.sentinel._consult_oracle_for_fix", oracle_mock),
+            patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", insight_mock),
             patch("openseed_brain.nodes.sentinel._git_stash_revert", new_callable=AsyncMock, return_value=True),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
             result = await fix_node(state)
 
-        oracle_mock.assert_awaited_once()
+        insight_mock.assert_awaited_once()
 
 
 # ─── 4. Evidence verification ────────────────────────────────────────────────
@@ -406,7 +406,7 @@ class TestEvidenceVerification:
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -440,7 +440,7 @@ class TestEvidenceVerification:
         mock_agent.invoke = AsyncMock(side_effect=invoke_side_effect)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -465,7 +465,7 @@ class TestEvidenceVerification:
         mock_agent.invoke = AsyncMock(return_value=_mock_agent_response())
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -503,7 +503,7 @@ class TestGitStash:
         stash_push = AsyncMock(return_value=True)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", stash_push),
         ):
@@ -534,7 +534,7 @@ class TestGitStash:
         stash_push = AsyncMock(return_value=True)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", stash_push),
         ):
@@ -554,15 +554,15 @@ class TestGitStash:
             retry_count=3,
         )
 
-        mock_oracle = MagicMock()
-        mock_oracle.should_abandon = False
-        mock_oracle.diagnosis = "Try X"
-        mock_oracle.suggested_approach = "Do Y"
+        mock_insight = MagicMock()
+        mock_insight.should_abandon = False
+        mock_insight.diagnosis = "Try X"
+        mock_insight.suggested_approach = "Do Y"
 
         mock_agent = AsyncMock()
 
         async def invoke_and_modify(*args, **kwargs):
-            (tmp_path / "app.py").write_text("oracle-fixed")
+            (tmp_path / "app.py").write_text("insight-fixed")
             return _mock_agent_response()
 
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
@@ -571,9 +571,9 @@ class TestGitStash:
         stash_push = AsyncMock(return_value=True)
 
         with (
-            patch("openseed_left_hand.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
-            patch("openseed_brain.nodes.sentinel._consult_oracle_for_fix", new_callable=AsyncMock, return_value=mock_oracle),
+            patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", new_callable=AsyncMock, return_value=mock_insight),
             patch("openseed_brain.nodes.sentinel._git_stash_revert", stash_revert),
             patch("openseed_brain.nodes.sentinel._git_stash_push", stash_push),
         ):

@@ -86,7 +86,7 @@ class SentinelConfig(BaseModel):
     backoff_base_ms: int = 5_000
     backoff_max_ms: int = 160_000
     backoff_cap_exponent: int = 5
-    oracle_enabled: bool = True
+    insight_enabled: bool = True
     continuation_cooldown_ms: int = 5_000
 
 
@@ -147,8 +147,8 @@ class LoggingConfig(BaseModel):
 class OpenSeedConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     brain: BrainConfig = Field(default_factory=BrainConfig)
-    left_hand: ClaudeConfig = Field(default_factory=ClaudeConfig)
-    right_hand: CodexConfig = Field(default_factory=CodexConfig)
+    claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
+    codex: CodexConfig = Field(default_factory=CodexConfig)
     qa_gate: QAGateConfig = Field(default_factory=QAGateConfig)
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     body: BodyConfig = Field(default_factory=BodyConfig)

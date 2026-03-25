@@ -4,7 +4,7 @@ Open Seed v2 — Event bus for real-time pipeline streaming.
 asyncio.Queue-based. Zero dependencies. Fire-and-forget events
 for CLI HUD and web UI. Does NOT affect pipeline state.
 
-Pattern from: OmO todo-continuation-enforcer handler.ts
+Fire-and-forget events for CLI HUD and web UI.
 """
 
 from __future__ import annotations

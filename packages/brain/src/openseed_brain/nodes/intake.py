@@ -29,7 +29,7 @@ async def intake_node(state: PipelineState) -> dict:
     # ── Step 1: Classify intent via Sentinel Intent Gate ──
     intent_info = ""
     try:
-        from openseed_sentinel.intent_gate import classify_intent
+        from openseed_guard.intent_gate import classify_intent
         intent = await classify_intent(task)
         intent_info = (
             f"\nIntent classification: {intent.intent_type.value} "
@@ -64,7 +64,7 @@ async def intake_node(state: PipelineState) -> dict:
         logger.debug("Memory unavailable, proceeding without it: %s", exc)
 
     # ── Step 3: Analyse task via Claude ──
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
 
     response = await agent.invoke(

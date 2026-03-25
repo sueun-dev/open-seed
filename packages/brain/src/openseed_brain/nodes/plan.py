@@ -17,7 +17,7 @@ async def plan_node(state: PipelineState) -> dict:
     working_dir = state["working_dir"]
     intake = "\n".join(state.get("messages", []))
 
-    from openseed_left_hand.agent import ClaudeAgent
+    from openseed_claude.agent import ClaudeAgent
 
     agent = ClaudeAgent()
 
@@ -47,6 +47,11 @@ Rules:
 - Each file_manifest item MUST be an object with path, purpose fields
 - List EVERY file that needs to be created
 - Be specific about file paths
+- CROSS-CHECK: If the frontend calls an API endpoint (e.g. PATCH /bookmarks/:id/favorite), \
+the backend MUST have a corresponding task and route for it. Walk through every UI action \
+(button click, form submit, toggle) and verify the backend plan covers the endpoint it needs.
+- CROSS-CHECK: If the backend exposes an endpoint, the frontend must have code that calls it. \
+No orphan endpoints, no orphan UI actions.
 - Output ONLY the JSON object, nothing else""",
         model="opus",  # Planning uses Opus for thorough architecture decisions
         max_turns=1,
