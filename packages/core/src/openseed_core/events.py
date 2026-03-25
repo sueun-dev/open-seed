@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Awaitable
+from uuid import uuid4
 
 
 class EventType(str, Enum):
@@ -44,6 +45,13 @@ class EventType(str, Enum):
     SENTINEL_RETRY = "sentinel.retry"
     SENTINEL_STAGNATION = "sentinel.stagnation"
     SENTINEL_ESCALATE = "sentinel.escalate"
+    SENTINEL_STUCK = "sentinel.stuck"
+
+    # Security
+    SECURITY_CHECK = "security.check"
+
+    # Metrics
+    METRICS_UPDATE = "metrics.update"
 
     # Healing
     HEAL_START = "heal.start"
@@ -65,11 +73,18 @@ class EventType(str, Enum):
 
 @dataclass
 class Event:
-    """A pipeline event for real-time streaming."""
+    """A pipeline event for real-time streaming.
+
+    Causality tracking (OpenHands pattern): each event has a unique id
+    and an optional cause_id linking to the event that triggered it.
+    This enables post-hoc causal chain analysis for debugging.
+    """
     type: EventType
     node: str = ""
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
+    id: str = field(default_factory=lambda: str(uuid4()))
+    cause_id: str | None = None
 
 
 # Type alias for event handlers
@@ -118,9 +133,11 @@ class EventBus:
         # Push to stream queue
         await self._queue.put(event)
 
-    async def emit_simple(self, event_type: EventType, node: str = "", **data: Any) -> None:
-        """Convenience: emit an event with keyword data."""
-        await self.emit(Event(type=event_type, node=node, data=data))
+    async def emit_simple(
+        self, event_type: EventType, node: str = "", cause_id: str | None = None, **data: Any
+    ) -> None:
+        """Convenience: emit an event with keyword data and optional causality."""
+        await self.emit(Event(type=event_type, node=node, data=data, cause_id=cause_id))
 
     async def stream(self) -> asyncio.AsyncIterator[Event]:
         """Yield events as they arrive. Ends when close() is called."""
