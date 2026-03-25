@@ -139,12 +139,20 @@ def compile_graph(
     if checkpoint_dir:
         import os
         os.makedirs(checkpoint_dir, exist_ok=True)
+        db_path = os.path.join(checkpoint_dir, "checkpoints.db")
         try:
-            # InMemorySaver is always available and works with astream()
-            from langgraph.checkpoint.memory import InMemorySaver
-            kwargs["checkpointer"] = InMemorySaver()
-        except ImportError:
-            pass
+            # SqliteSaver for persistent checkpoints (survives crash/restart)
+            import sqlite3
+            from langgraph.checkpoint.sqlite import SqliteSaver
+            conn = sqlite3.connect(db_path, check_same_thread=False)
+            kwargs["checkpointer"] = SqliteSaver(conn)
+        except (ImportError, Exception):
+            try:
+                # Fallback to InMemorySaver (no persistence but always works)
+                from langgraph.checkpoint.memory import InMemorySaver
+                kwargs["checkpointer"] = InMemorySaver()
+            except ImportError:
+                pass
 
     # Human-in-the-loop: pause before user_escalate so CLI/UI can get input
     if interrupt_on_escalation:
