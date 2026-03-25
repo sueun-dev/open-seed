@@ -245,18 +245,13 @@ def compile_graph(
     if checkpoint_dir:
         import os
         os.makedirs(checkpoint_dir, exist_ok=True)
-        db_path = os.path.join(checkpoint_dir, "checkpoints.db")
-        try:
-            # SqliteSaver for persistent checkpoints (survives crash/restart)
-            import sqlite3
-            from langgraph.checkpoint.sqlite import SqliteSaver
-            conn = sqlite3.connect(db_path, check_same_thread=False)
-            kwargs["checkpointer"] = SqliteSaver(conn)
-        except (ImportError, Exception):
+        # MemorySaver works with both sync and async — always safe.
+        # For persistent checkpoints, the CLI runner sets up AsyncSqliteSaver
+        # in its own async context and passes it via kwargs["checkpointer"].
+        if "checkpointer" not in kwargs:
             try:
-                # Fallback to InMemorySaver (no persistence but always works)
-                from langgraph.checkpoint.memory import InMemorySaver
-                kwargs["checkpointer"] = InMemorySaver()
+                from langgraph.checkpoint.memory import MemorySaver
+                kwargs["checkpointer"] = MemorySaver()
             except ImportError:
                 pass
 

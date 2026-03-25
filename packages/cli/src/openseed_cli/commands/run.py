@@ -77,9 +77,26 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
     # Build and run graph
     state = initial_state(task=task, working_dir=str(wd))
 
-    # Checkpointer required for astream + state tracking
-    checkpoint_dir = str(Path("~/.openseed/checkpoints").expanduser())
-    graph = compile_graph(checkpoint_dir=checkpoint_dir)
+    # Set up persistent async checkpointer
+    checkpoint_dir = Path("~/.openseed/checkpoints").expanduser()
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    db_path = str(checkpoint_dir / "checkpoints.db")
+
+    checkpointer = None
+    try:
+        import aiosqlite
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+        aiosqlite_conn = await aiosqlite.connect(db_path)
+        checkpointer = AsyncSqliteSaver(aiosqlite_conn)
+        await checkpointer.setup()
+    except (ImportError, Exception):
+        from langgraph.checkpoint.memory import MemorySaver
+        checkpointer = MemorySaver()
+
+    graph = compile_graph(
+        checkpoint_dir=str(checkpoint_dir),
+        checkpointer=checkpointer,
+    )
 
     console.print("\n[bold]Pipeline starting...[/bold]\n")
 
@@ -151,3 +168,9 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
         console.print(f"\n[red]Pipeline error: {e}[/red]")
     finally:
         await event_bus.close()
+        # Clean up async sqlite connection
+        if checkpointer and hasattr(checkpointer, "conn"):
+            try:
+                await checkpointer.conn.close()
+            except Exception:
+                pass

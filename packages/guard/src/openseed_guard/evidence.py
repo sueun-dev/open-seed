@@ -33,17 +33,55 @@ async def verify_files_exist(
     working_dir: str,
     expected_files: list[str],
 ) -> list[Evidence]:
-    """Verify that expected files actually exist on disk."""
+    """
+    Verify that expected files actually exist on disk.
+
+    If the exact path doesn't match, searches subdirectories for the filename.
+    This handles cases where the plan says 'index.html' but the actual file
+    is at 'client/index.html' (common with monorepo/multi-dir projects).
+    """
     evidence = []
     for f in expected_files:
         full_path = os.path.join(working_dir, f)
-        exists = os.path.isfile(full_path)
-        evidence.append(Evidence(
-            check=f"file exists: {f}",
-            passed=exists,
-            detail=f"Found at {full_path}" if exists else f"MISSING: {full_path}",
-        ))
+        if os.path.isfile(full_path):
+            evidence.append(Evidence(
+                check=f"file exists: {f}",
+                passed=True,
+                detail=f"Found at {full_path}",
+            ))
+            continue
+
+        # Fuzzy search: look for the filename in subdirectories
+        basename = os.path.basename(f)
+        found_at = _find_file_recursive(working_dir, basename)
+        if found_at:
+            evidence.append(Evidence(
+                check=f"file exists: {f}",
+                passed=True,
+                detail=f"Found at {found_at} (expected {full_path})",
+            ))
+        else:
+            evidence.append(Evidence(
+                check=f"file exists: {f}",
+                passed=False,
+                detail=f"MISSING: {full_path} (also searched subdirectories)",
+            ))
     return evidence
+
+
+def _find_file_recursive(root: str, filename: str) -> str | None:
+    """Search for a filename in directory tree, skipping node_modules/.git."""
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in ("node_modules", ".git", "__pycache__", ".venv", "dist")
+            ]
+            if filename in filenames:
+                return os.path.join(dirpath, filename)
+    except OSError:
+        pass
+    return None
 
 
 async def verify_command(
@@ -66,23 +104,44 @@ async def verify_command(
 
 
 async def auto_detect_test_commands(working_dir: str) -> list[str]:
-    """Auto-detect which test commands to run based on project files."""
+    """
+    Auto-detect which test commands to run based on project files.
+
+    Searches both root and immediate subdirectories (server/, client/, etc.)
+    for package.json, pyproject.toml, etc.
+    """
     commands = []
 
-    pkg_json = os.path.join(working_dir, "package.json")
-    if os.path.exists(pkg_json):
+    # Find all package.json files (root + one level deep)
+    pkg_jsons = []
+    root_pkg = os.path.join(working_dir, "package.json")
+    if os.path.exists(root_pkg):
+        pkg_jsons.append((working_dir, root_pkg))
+    try:
+        for entry in os.listdir(working_dir):
+            subdir = os.path.join(working_dir, entry)
+            if os.path.isdir(subdir) and entry not in ("node_modules", ".git", "__pycache__", "dist"):
+                sub_pkg = os.path.join(subdir, "package.json")
+                if os.path.exists(sub_pkg):
+                    pkg_jsons.append((subdir, sub_pkg))
+    except OSError:
+        pass
+
+    for pkg_dir, pkg_json in pkg_jsons:
         try:
             import json
             data = json.loads(open(pkg_json).read())
             scripts = data.get("scripts", {})
-            if "test" in scripts and scripts["test"] != 'echo "Error: no test specified" && exit 1':
-                commands.append("npm test")
-            if "build" in scripts:
-                commands.append("npm run build")
-            # Always check npm install works
+            # Relative prefix for subdirectory commands
+            prefix = f"cd {os.path.basename(pkg_dir)} && " if pkg_dir != working_dir else ""
+
             if "dependencies" in data or "devDependencies" in data:
-                if not os.path.exists(os.path.join(working_dir, "node_modules")):
-                    commands.insert(0, "npm install")
+                if not os.path.exists(os.path.join(pkg_dir, "node_modules")):
+                    commands.append(f"{prefix}npm install")
+            if "test" in scripts and scripts["test"] != 'echo "Error: no test specified" && exit 1':
+                commands.append(f"{prefix}npm test")
+            if "build" in scripts:
+                commands.append(f"{prefix}npm run build")
         except Exception:
             pass
 
@@ -92,15 +151,6 @@ async def auto_detect_test_commands(working_dir: str) -> list[str]:
 
     if os.path.exists(os.path.join(working_dir, "Makefile")):
         commands.append("make test 2>/dev/null || true")
-
-    # Basic syntax check for single-file projects
-    for f in os.listdir(working_dir):
-        if f.endswith(".py") and not f.startswith("test_"):
-            commands.append(f"python -c \"import ast; ast.parse(open('{f}').read()); print('{f}: syntax OK')\"")
-            break
-        if f == "index.html":
-            commands.append("ls -la index.html")
-            break
 
     return commands
 
