@@ -198,3 +198,7 @@ class PipelineState(TypedDict):
     messages: Annotated[list[str], operator.add]
     step_results: Annotated[list[StepResult], operator.add]
     findings: Annotated[list[Finding], operator.add]
+
+    # ── OpenHands integrations ──────────────────────────────────────────────
+    # Microagent context — per-repo knowledge loaded from working_dir
+    microagent_context: list[str]

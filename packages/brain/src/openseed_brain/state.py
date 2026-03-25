@@ -42,6 +42,7 @@ def initial_state(task: str, working_dir: str, provider: str = "claude") -> Pipe
         messages=[],
         step_results=[],
         findings=[],
+        microagent_context=[],
     )
 
 

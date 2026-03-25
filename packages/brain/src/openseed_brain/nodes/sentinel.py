@@ -80,6 +80,30 @@ async def sentinel_check_node(state: PipelineState) -> dict:
         except Exception as e:
             return {"messages": [f"Sentinel: PASSED (evidence check skipped: {e})"]}
 
+    # ── Stuck detection (OpenHands pattern) — check BEFORE evaluate_loop ──
+    try:
+        from openseed_guard.stuck_detector import detect_stuck
+        stuck = await detect_stuck(
+            step_results=state.get("step_results", []),
+            messages=state.get("messages", []),
+            errors=state.get("errors", []),
+            retry_count=retry_count,
+        )
+        if stuck.is_stuck:
+            return {
+                "retry_count": retry_count + 1,
+                "messages": [
+                    f"Sentinel: STUCK ({stuck.pattern}) — {stuck.suggestion}. "
+                    f"Escalating after {retry_count} retries."
+                ],
+                "errors": [Error(
+                    step="sentinel",
+                    message=f"Stuck pattern: {stuck.pattern}. {stuck.suggestion}",
+                )],
+            }
+    except Exception:
+        pass  # Stuck detection is best-effort; don't block pipeline
+
     # ── QA FAILED — evaluate_loop for retry/insight/escalate ──
     try:
         from openseed_guard.loop import evaluate_loop, LoopState
@@ -151,11 +175,20 @@ async def fix_node(state: PipelineState) -> dict:
     qa_result = state.get("qa_result")
     retry_count = state.get("retry_count", 0)
 
-    # Collect failure context from previous attempts
+    # Collect failure context from previous attempts — condensed to prevent context explosion
+    all_messages = state.get("messages", [])
     failure_history = [
-        m for m in state.get("messages", [])
+        m for m in all_messages
         if "Fix:" in m or "RETRY" in m or "BLOCK" in m
     ]
+    # Condense if history is large (OpenHands pattern)
+    if len(failure_history) > 15:
+        try:
+            from openseed_memory.condenser import condense_for_prompt
+            condensed = await condense_for_prompt(failure_history, max_messages=10)
+            failure_history = [condensed]
+        except Exception:
+            failure_history = failure_history[-10:]  # Fallback: keep last 10
 
     # Build findings text
     findings_text = _build_findings_text(qa_result)

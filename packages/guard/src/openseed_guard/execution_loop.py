@@ -162,6 +162,30 @@ class ExecutionLoop:
         steps_completed.append("route")
         await self._emit(EventType.NODE_COMPLETE, node="route", decision=route.get("decision", "execute"))
 
+        # ── Step 3.5: SECURITY PRE-VALIDATION (OpenHands pattern) ──────────
+        try:
+            from openseed_guard.security import assess_risk, SecurityRisk
+            security = await assess_risk(
+                plan_summary=plan.get("summary", ""),
+                files=plan.get("files_to_create", []),
+                working_dir=working_dir,
+                task=task,
+            )
+            await self._emit(
+                EventType.SECURITY_CHECK, node="security",
+                risk=security.risk.value, reason=security.reason[:200],
+            )
+            if security.requires_approval:
+                # HIGH risk — abort the loop and escalate to user
+                steps_completed.append("security_block")
+                return ExecutionResult(
+                    success=False,
+                    summary=f"SECURITY BLOCK: {security.reason}",
+                    steps_completed=steps_completed,
+                )
+        except Exception:
+            pass  # Security check is best-effort
+
         # ── Step 4: EXECUTE ───────────────────────────────────────────────────
         await self._emit(EventType.NODE_START, node="execute")
         exec_result = await self._execute(task, working_dir, route, plan)

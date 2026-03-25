@@ -10,6 +10,8 @@ from openseed_guard.intent_gate import IntentType, IntentClassification, classif
 from openseed_guard.execution_loop import ExecutionLoop, ExecutionResult
 from openseed_guard.delegation import build_delegation_prompt
 from openseed_guard.prompts import ModelFamily, PromptVariant, detect_model_family
+from openseed_guard.stuck_detector import detect_stuck, StuckAnalysis
+from openseed_guard.security import assess_risk, SecurityCheck, SecurityRisk
 
 __all__ = [
     # Loop
@@ -30,4 +32,8 @@ __all__ = [
     "build_delegation_prompt",
     # Multi-model prompts
     "ModelFamily", "PromptVariant", "detect_model_family",
+    # Stuck Detection (OpenHands)
+    "detect_stuck", "StuckAnalysis",
+    # Security (OpenHands)
+    "assess_risk", "SecurityCheck", "SecurityRisk",
 ]

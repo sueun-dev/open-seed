@@ -63,7 +63,24 @@ async def intake_node(state: PipelineState) -> dict:
     except Exception as exc:
         logger.debug("Memory unavailable, proceeding without it: %s", exc)
 
-    # ── Step 3: Analyse task via Claude ──
+    # ── Step 3: Load microagents from working directory (OpenHands pattern) ──
+    microagent_context: list[str] = []
+    try:
+        from openseed_core.microagent import (
+            load_microagents,
+            select_relevant_microagents,
+            format_microagent_context,
+        )
+        all_agents = load_microagents(working_dir)
+        relevant_agents = await select_relevant_microagents(all_agents, task)
+        if relevant_agents:
+            formatted = format_microagent_context(relevant_agents)
+            microagent_context = [formatted]
+            logger.info("Loaded %d microagents from %s", len(relevant_agents), working_dir)
+    except Exception as exc:
+        logger.debug("Microagent loading skipped: %s", exc)
+
+    # ── Step 4: Analyse task via Claude ──
     from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
 
@@ -97,10 +114,13 @@ Be concise. No extra prose outside the above structure.""",
     analysis_text = response.text
     skip_planning = _parse_skip_planning(analysis_text)
 
-    return {
+    result: dict = {
         "skip_planning": skip_planning,
         "messages": [f"Intake: {analysis_text[:500]}"],
     }
+    if microagent_context:
+        result["microagent_context"] = microagent_context
+    return result
 
 
 def _parse_skip_planning(text: str) -> bool:
