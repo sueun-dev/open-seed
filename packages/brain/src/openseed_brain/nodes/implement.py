@@ -84,6 +84,12 @@ async def _run_specialist(
 
     plan_text = _build_plan_text(state)
 
+    # Inject microagent context if available (OpenHands pattern)
+    microagent_section = ""
+    micro_ctx = state.get("microagent_context", [])
+    if micro_ctx:
+        microagent_section = "\n\n" + "\n".join(micro_ctx) + "\n"
+
     response = await agent.invoke(
         prompt=f"""You are implementing the {domain} portion of this project.
 
@@ -95,7 +101,7 @@ Your assigned tasks:
 
 Full plan context:
 {plan_text}
-
+{microagent_section}
 {_IMPLEMENTATION_RULES}""",
         system_prompt=specialist_prompt,
         model="sonnet",
@@ -123,6 +129,12 @@ async def _implement_fullstack(state: PipelineState) -> Implementation:
     agent = ClaudeAgent()
     plan_text = _build_plan_text(state)
 
+    # Inject microagent context if available (OpenHands pattern)
+    microagent_section = ""
+    micro_ctx = state.get("microagent_context", [])
+    if micro_ctx:
+        microagent_section = "\n\n" + "\n".join(micro_ctx) + "\n"
+
     response = await agent.invoke(
         prompt=f"""Implement this project. Write ALL files with COMPLETE code.
 
@@ -130,7 +142,7 @@ Task: {state["task"]}
 Working directory: {state["working_dir"]}
 
 {f"Plan:{chr(10)}{plan_text}" if plan_text else "No plan provided — implement the task directly."}
-
+{microagent_section}
 {_IMPLEMENTATION_RULES}""",
         system_prompt=get_specialist_prompt("fullstack"),
         model="sonnet",

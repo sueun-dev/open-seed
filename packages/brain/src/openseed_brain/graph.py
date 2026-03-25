@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Send
 
 from openseed_brain.state import PipelineState
 from openseed_brain.nodes.intake import intake_node
@@ -29,6 +30,94 @@ from openseed_brain.routing import route_after_qa, route_after_intake
 from openseed_brain.retry import IMPLEMENT_RETRY, QA_RETRY, DEPLOY_RETRY
 from openseed_brain.subgraphs.qa_subgraph import build_qa_subgraph
 from openseed_brain.subgraphs.fix_subgraph import build_fix_subgraph
+
+
+def route_plan_to_specialists(state: PipelineState) -> list[Send] | Literal["implement"]:
+    """
+    After planning, dispatch tasks to specialists via LangGraph Send().
+
+    If the plan has routable tasks, each domain gets its own Send() —
+    LangGraph manages these as independent parallel branches with
+    per-branch checkpointing and crash recovery.
+
+    Falls back to the single 'implement' node when:
+    - No plan exists (skip_planning)
+    - Plan has no tasks
+    - Provider is legacy codex/both
+    - Task routing fails
+    """
+    plan = state.get("plan")
+    provider = state.get("provider", "claude")
+
+    # Legacy modes or no plan — use single implement node
+    if provider in ("codex", "both") or not plan or not plan.tasks:
+        return "implement"
+
+    try:
+        # Import here to avoid circular deps at module level
+        from openseed_brain.task_router import _parse_routing_response
+
+        # We can't await in a routing function, so we use Send() to dispatch
+        # each task as a separate parallel branch. The implement_task node
+        # will handle the actual specialist invocation.
+        sends = []
+        for task in plan.tasks:
+            sends.append(Send("implement_task", {
+                **state,
+                "_specialist_task": task,
+            }))
+
+        return sends if sends else "implement"
+    except Exception:
+        return "implement"
+
+
+async def implement_task_node(state: PipelineState) -> dict:
+    """
+    Implement a single specialist task dispatched via Send().
+
+    Each Send() branch receives the full state plus a _specialist_task field
+    identifying which PlanTask to implement. The specialist domain is determined
+    by LLM routing within this node.
+    """
+    from openseed_brain.nodes.implement import _run_specialist, _implement_fullstack
+    from openseed_brain.task_router import route_tasks
+
+    task_obj = state.get("_specialist_task")
+    if not task_obj:
+        # Fallback: no specific task, run fullstack
+        impl = await _implement_fullstack(state)
+        return {
+            "implementation": impl,
+            "messages": [f"Implement [fullstack-send]: {impl.summary[:300]}"],
+        }
+
+    plan = state.get("plan")
+    if not plan:
+        impl = await _implement_fullstack(state)
+        return {
+            "implementation": impl,
+            "messages": [f"Implement [fullstack-send]: {impl.summary[:300]}"],
+        }
+
+    # Route this single task to its domain
+    try:
+        from openseed_brain.specialists import VALID_DOMAINS
+        routed = await route_tasks(plan, state["task"])
+        # Find which domain this task was assigned to
+        domain = "fullstack"
+        for d, tasks in routed.items():
+            if any(t.id == task_obj.id for t in tasks):
+                domain = d
+                break
+        impl = await _run_specialist(domain, [task_obj], state)
+    except Exception:
+        impl = await _run_specialist("fullstack", [task_obj], state)
+
+    return {
+        "implementation": impl,
+        "messages": [f"Implement [send:{task_obj.id}]: {impl.summary[:200]}"],
+    }
 
 
 async def user_escalate_node(state: PipelineState) -> dict:
@@ -45,7 +134,7 @@ async def user_escalate_node(state: PipelineState) -> dict:
     }
 
 
-def build_graph(use_subgraphs: bool = False) -> StateGraph:
+def build_graph(use_subgraphs: bool = False, use_send: bool = False) -> StateGraph:
     """
     Build the Open Seed pipeline graph with advanced LangGraph features.
 
@@ -54,6 +143,9 @@ def build_graph(use_subgraphs: bool = False) -> StateGraph:
             compiled LangGraph subgraphs (build_qa_subgraph / build_fix_subgraph).
             When False (default), the original flat node functions are used —
             preserving full backward compatibility.
+        use_send: When True, plan dispatches tasks via LangGraph Send() for
+            per-branch checkpointing. When False (default), uses the single
+            implement node with asyncio.gather (backward compatible).
     """
     graph = StateGraph(PipelineState)
 
@@ -62,10 +154,11 @@ def build_graph(use_subgraphs: bool = False) -> StateGraph:
     graph.add_node("plan", plan_node)
     graph.add_node("implement", implement_node, retry_policy=IMPLEMENT_RETRY)
 
+    # Send() parallel dispatch node — each task gets its own branch
+    if use_send:
+        graph.add_node("implement_task", implement_task_node, retry_policy=IMPLEMENT_RETRY)
+
     if use_subgraphs:
-        # Compiled subgraphs act as drop-in replacements for the flat nodes.
-        # retry_policy is omitted here because each subgraph manages its own
-        # internal retry / error-handling logic.
         qa_sub = build_qa_subgraph().compile()
         graph.add_node("qa_gate", qa_sub)
         fix_sub = build_fix_subgraph().compile()
@@ -91,7 +184,18 @@ def build_graph(use_subgraphs: bool = False) -> StateGraph:
         },
     )
 
-    graph.add_edge("plan", "implement")
+    if use_send:
+        # Plan → Send() parallel dispatch → qa_gate
+        # route_plan_to_specialists returns list[Send] or "implement"
+        graph.add_conditional_edges(
+            "plan",
+            route_plan_to_specialists,
+            {"implement": "implement"},
+        )
+        graph.add_edge("implement_task", "qa_gate")
+    else:
+        graph.add_edge("plan", "implement")
+
     graph.add_edge("implement", "qa_gate")
     graph.add_edge("qa_gate", "sentinel_check")
 
@@ -123,6 +227,7 @@ def compile_graph(
     checkpoint_dir: str | None = None,
     interrupt_on_escalation: bool = True,
     use_subgraphs: bool = False,
+    use_send: bool = False,
     **kwargs: Any,
 ) -> Any:
     """
@@ -132,9 +237,10 @@ def compile_graph(
         checkpoint_dir: Path for SqliteSaver (crash recovery + resume)
         interrupt_on_escalation: If True, graph pauses at user_escalate for human input
         use_subgraphs: If True, use compiled subgraphs for qa_gate and fix nodes
+        use_send: If True, use LangGraph Send() for per-task parallel dispatch
         **kwargs: Additional compile options
     """
-    graph = build_graph(use_subgraphs=use_subgraphs)
+    graph = build_graph(use_subgraphs=use_subgraphs, use_send=use_send)
 
     if checkpoint_dir:
         import os

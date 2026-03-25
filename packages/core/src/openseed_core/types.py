@@ -202,3 +202,5 @@ class PipelineState(TypedDict):
     # ── OpenHands integrations ──────────────────────────────────────────────
     # Microagent context — per-repo knowledge loaded from working_dir
     microagent_context: list[str]
+    # Send() dispatch — set by route_plan_to_specialists for per-task branches
+    _specialist_task: PlanTask | None

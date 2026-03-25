@@ -61,8 +61,10 @@ class ClaudeAgent:
         event_bus: EventBus | None = None,
         hooks: HookRegistry | dict[str, Any] | None = None,
         mcp_config: MCPConfig | None = None,
+        metrics: Any | None = None,
     ) -> None:
         self.config = config or ClaudeConfig()
+        self.metrics = metrics  # openseed_core.metrics.Metrics instance (optional)
         self.event_bus = event_bus
         # Accept HookRegistry (new) or plain dict (legacy backward-compat).
         if isinstance(hooks, HookRegistry):
@@ -322,6 +324,22 @@ class ClaudeAgent:
                 cost_usd=cost.total_cost,
                 duration_ms=duration_ms,
             )
+
+        # ── Metrics aggregation (OpenHands pattern) ─────────────────────────
+        if self.metrics is not None:
+            try:
+                self.metrics.add(
+                    model=parsed.model or resolved_model,
+                    prompt_tokens=usage.input_tokens,
+                    completion_tokens=usage.output_tokens,
+                    cache_read_tokens=usage.cache_read_tokens,
+                    cache_write_tokens=usage.cache_write_tokens,
+                    cost_usd=cost.total_cost,
+                    latency_ms=duration_ms,
+                    node="claude",
+                )
+            except Exception:
+                pass  # Metrics collection must not crash the agent
 
         # --print mode text (from streaming on_line) is the canonical response text
         # when we're not in JSON mode. If the parser found structured text, prefer it.
