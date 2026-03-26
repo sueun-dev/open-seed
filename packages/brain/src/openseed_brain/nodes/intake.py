@@ -63,7 +63,16 @@ async def intake_node(state: PipelineState) -> dict:
     except Exception as exc:
         logger.debug("Memory unavailable, proceeding without it: %s", exc)
 
-    # ── Step 3: Load microagents from working directory (OpenHands pattern) ──
+    # ── Step 3: Scan existing codebase + detect tech stack ──
+    codebase_context = ""
+    try:
+        codebase_context = _scan_working_dir(working_dir)
+        if codebase_context:
+            logger.info("Codebase scan: %s", codebase_context[:100])
+    except Exception as exc:
+        logger.debug("Codebase scan skipped: %s", exc)
+
+    # ── Step 4: Load microagents from working directory (OpenHands pattern) ──
     microagent_context: list[str] = []
     try:
         from openseed_core.microagent import (
@@ -80,7 +89,7 @@ async def intake_node(state: PipelineState) -> dict:
     except Exception as exc:
         logger.debug("Microagent loading skipped: %s", exc)
 
-    # ── Step 4: Analyse task via Claude ──
+    # ── Step 5: Analyse task via Claude ──
     from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
 
@@ -90,11 +99,13 @@ async def intake_node(state: PipelineState) -> dict:
 Task: {task}
 Working directory: {working_dir}
 {intent_info}{memory_context}
+{codebase_context}
 
 Respond with EXACTLY this structure (fill in each line):
 INTENT: <build|fix|refactor|research>
 COMPLEXITY: <simple|moderate|complex>
 SKIP_PLANNING: <yes|no>
+EXISTING_PROJECT: <yes|no>
 REQUIREMENTS:
 - <requirement 1>
 - <requirement 2>
@@ -105,6 +116,11 @@ Rules for SKIP_PLANNING:
 - yes ONLY when: complexity is simple AND the task is a single, clearly scoped change
   (e.g. fix one bug in one file, add one small function, update one config value)
 - no for everything else: new features, multi-file changes, refactors, research tasks
+
+Rules for EXISTING_PROJECT:
+- If the working directory already has source files, treat this as MODIFICATION of
+  an existing project, not building from scratch.
+- Read the existing tech stack and adapt your approach to match it.
 
 Be concise. No extra prose outside the above structure.""",
         model="opus",  # Top-level orchestration uses Opus for best judgment
@@ -121,6 +137,125 @@ Be concise. No extra prose outside the above structure.""",
     if microagent_context:
         result["microagent_context"] = microagent_context
     return result
+
+
+def _scan_working_dir(working_dir: str) -> str:
+    """
+    Scan the working directory for existing files and detect tech stack.
+
+    Returns a context string describing:
+    - Whether the directory is empty or has existing code
+    - Detected tech stack (React, Vue, Express, Django, etc.)
+    - Key config files found
+    - File count and structure summary
+    """
+    import os
+    import json
+
+    if not os.path.isdir(working_dir):
+        return ""
+
+    # List top-level files/dirs (skip hidden, node_modules, etc.)
+    skip = {".git", "node_modules", "__pycache__", ".venv", "dist", ".next", "build"}
+    try:
+        entries = [e for e in os.listdir(working_dir) if e not in skip and not e.startswith(".")]
+    except OSError:
+        return ""
+
+    if not entries:
+        return "\nExisting codebase: EMPTY directory (building from scratch)\n"
+
+    # Count files recursively
+    file_count = 0
+    extensions: dict[str, int] = {}
+    for root, dirs, files in os.walk(working_dir):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for f in files:
+            file_count += 1
+            ext = os.path.splitext(f)[1].lower()
+            if ext:
+                extensions[ext] = extensions.get(ext, 0) + 1
+
+    # Detect tech stack from config files
+    tech_stack: list[str] = []
+    detected_configs: list[str] = []
+
+    # Node.js / JavaScript
+    pkg_json = os.path.join(working_dir, "package.json")
+    if os.path.exists(pkg_json):
+        detected_configs.append("package.json")
+        try:
+            data = json.loads(open(pkg_json).read())
+            deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+            if "react" in deps:
+                tech_stack.append("React")
+            if "vue" in deps:
+                tech_stack.append("Vue")
+            if "next" in deps:
+                tech_stack.append("Next.js")
+            if "express" in deps:
+                tech_stack.append("Express")
+            if "fastify" in deps:
+                tech_stack.append("Fastify")
+            if "vite" in deps:
+                tech_stack.append("Vite")
+            if "typescript" in deps:
+                tech_stack.append("TypeScript")
+            if "better-sqlite3" in deps or "sqlite3" in deps:
+                tech_stack.append("SQLite")
+            if "prisma" in deps or "@prisma/client" in deps:
+                tech_stack.append("Prisma")
+            if "tailwindcss" in deps:
+                tech_stack.append("Tailwind CSS")
+        except Exception:
+            tech_stack.append("Node.js")
+
+    # Python
+    if os.path.exists(os.path.join(working_dir, "pyproject.toml")):
+        detected_configs.append("pyproject.toml")
+        tech_stack.append("Python")
+    if os.path.exists(os.path.join(working_dir, "requirements.txt")):
+        detected_configs.append("requirements.txt")
+        tech_stack.append("Python")
+    if os.path.exists(os.path.join(working_dir, "manage.py")):
+        tech_stack.append("Django")
+    if os.path.exists(os.path.join(working_dir, "app.py")) or os.path.exists(os.path.join(working_dir, "main.py")):
+        # Check for Flask/FastAPI
+        for fname in ["app.py", "main.py"]:
+            fpath = os.path.join(working_dir, fname)
+            if os.path.exists(fpath):
+                try:
+                    content = open(fpath).read(500)
+                    if "flask" in content.lower():
+                        tech_stack.append("Flask")
+                    if "fastapi" in content.lower():
+                        tech_stack.append("FastAPI")
+                except Exception:
+                    pass
+
+    # Docker
+    if os.path.exists(os.path.join(working_dir, "Dockerfile")):
+        detected_configs.append("Dockerfile")
+        tech_stack.append("Docker")
+    if os.path.exists(os.path.join(working_dir, "docker-compose.yml")) or os.path.exists(os.path.join(working_dir, "docker-compose.yaml")):
+        tech_stack.append("Docker Compose")
+
+    # Build context string
+    top_exts = sorted(extensions.items(), key=lambda x: -x[1])[:5]
+    ext_summary = ", ".join(f"{ext}({cnt})" for ext, cnt in top_exts)
+
+    parts = ["\nExisting codebase analysis:"]
+    parts.append(f"- Files: {file_count} total ({ext_summary})")
+    parts.append(f"- Top-level: {', '.join(sorted(entries)[:15])}")
+    if tech_stack:
+        parts.append(f"- Tech stack detected: {', '.join(tech_stack)}")
+    if detected_configs:
+        parts.append(f"- Config files: {', '.join(detected_configs)}")
+    parts.append(
+        f"- Status: {'EXISTING PROJECT — modify/extend, do NOT rebuild from scratch' if file_count > 3 else 'Near-empty — build from scratch'}"
+    )
+
+    return "\n".join(parts) + "\n"
 
 
 def _parse_skip_planning(text: str) -> bool:
