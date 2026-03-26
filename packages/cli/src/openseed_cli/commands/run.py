@@ -117,30 +117,30 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
                 # Show node execution
                 console.print(f"  [bold cyan]▶[/] [bold]{node_name}[/bold]")
 
-                    # Show messages from this node
-                    node_messages = update.get("messages", [])
-                    for msg in node_messages:
-                        text = str(msg)[:200]
-                        console.print(f"    [dim]{text}[/dim]")
+                # Show messages from this node
+                node_messages = update.get("messages", [])
+                for msg in node_messages:
+                    text = str(msg)[:200]
+                    console.print(f"    [dim]{text}[/dim]")
 
-                    # Show errors
-                    node_errors = update.get("errors", [])
-                    for err in node_errors:
-                        console.print(f"    [red]✗ {err.message}[/red]")
+                # Show errors
+                node_errors = update.get("errors", [])
+                for err in node_errors:
+                    console.print(f"    [red]✗ {err.message}[/red]")
 
-                    # Show QA verdict
-                    qa = update.get("qa_result")
-                    if qa:
-                        color = {"pass": "green", "pass_with_warnings": "green", "warn": "yellow", "block": "red"}.get(qa.verdict.value, "white")
-                        console.print(f"    [bold {color}]QA: {qa.verdict.value.upper()}[/] — {qa.synthesis[:100]}")
+                # Show QA verdict
+                qa = update.get("qa_result")
+                if qa:
+                    color = {"pass": "green", "pass_with_warnings": "green", "warn": "yellow", "block": "red"}.get(qa.verdict.value, "white")
+                    console.print(f"    [bold {color}]QA: {qa.verdict.value.upper()}[/] — {qa.synthesis[:100]}")
 
-                    # Show deploy result
-                    deploy = update.get("deploy_result")
-                    if deploy:
-                        if deploy.success:
-                            console.print(f"    [green]✓ Deployed: {deploy.message}[/green]")
-                        else:
-                            console.print(f"    [red]✗ Deploy failed: {deploy.message}[/red]")
+                # Show deploy result
+                deploy = update.get("deploy_result")
+                if deploy:
+                    if deploy.success:
+                        console.print(f"    [green]✓ Deployed: {deploy.message}[/green]")
+                    else:
+                        console.print(f"    [red]✗ Deploy failed: {deploy.message}[/red]")
 
         # Get final state
         final_state = await graph.aget_state(config)
