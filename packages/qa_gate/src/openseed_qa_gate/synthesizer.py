@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 async def synthesize(
     results: list[SpecialistResult],
     event_bus=None,
-) -> tuple[list[Finding], str]:
+) -> tuple[list[Finding], str, str | None]:
     """
     LLM-driven synthesis of findings from multiple specialists.
 
@@ -48,7 +48,7 @@ async def synthesize(
     Falls back to basic deduplication if Claude is unavailable.
 
     Returns:
-        (findings, summary_text)
+        (findings, summary_text, llm_verdict_or_none)
     """
     stats = SynthesisStats()
 
@@ -76,7 +76,7 @@ async def synthesize(
     stats.total_raw_findings = len(all_raw)
 
     if not all_raw:
-        return [], "No findings from any specialist"
+        return [], "No findings from any specialist", None
 
     # Try LLM-driven synthesis via Claude Sonnet subprocess
     try:
@@ -100,7 +100,8 @@ async def synthesize(
             except Exception:
                 pass
 
-        return synth_findings, summary
+        llm_verdict = llm_stats.get("verdict")
+        return synth_findings, summary, llm_verdict
 
     except Exception as exc:
         logger.warning("LLM synthesis failed (%s), falling back to basic dedup", exc)
@@ -129,7 +130,7 @@ async def synthesize(
             for s, c in sorted(counts.items(), key=lambda x: severity_order.get(x[0], 5))
         )
     )
-    return deduped, summary
+    return deduped, summary, None
 
 
 async def _synthesize_with_llm(
@@ -280,6 +281,7 @@ Output ONLY valid JSON, no markdown, no explanation outside the JSON:
     llm_stats = {
         "conflicts_resolved": int(data.get("conflicts_resolved", 0)),
         "false_positives_removed": int(data.get("false_positives_removed", 0)),
+        "verdict": data.get("verdict"),
     }
 
     return findings, summary, llm_stats

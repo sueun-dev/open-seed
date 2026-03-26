@@ -78,19 +78,21 @@ class TestSynthesizeNoFindings:
         from openseed_qa_gate.synthesizer import synthesize
 
         results = [_make_specialist_result(agent_name="agent-a", findings=[])]
-        findings, summary = await synthesize(results)
+        findings, summary, llm_verdict = await synthesize(results)
 
         assert findings == []
         assert "No findings" in summary
+        assert llm_verdict is None
 
     async def test_synthesize_empty_results_list(self):
         """An empty results list should return empty findings immediately."""
         from openseed_qa_gate.synthesizer import synthesize
 
-        findings, summary = await synthesize([])
+        findings, summary, llm_verdict = await synthesize([])
 
         assert findings == []
         assert "No findings" in summary
+        assert llm_verdict is None
 
 
 class TestSynthesizeWithLLMSuccess:
@@ -126,12 +128,13 @@ class TestSynthesizeWithLLMSuccess:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, summary = await synthesize(results)
+            findings, summary, llm_verdict = await synthesize(results)
 
         assert len(findings) == 1
         assert findings[0].severity == Severity.MEDIUM
         assert findings[0].title == "Missing null check"
         assert "One medium issue found" in summary
+        assert llm_verdict == "warn"
 
     async def test_synthesize_llm_response_wrapped_in_markdown(self):
         """Claude sometimes wraps JSON in markdown fences — should still parse."""
@@ -152,10 +155,11 @@ class TestSynthesizeWithLLMSuccess:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, summary = await synthesize(results)
+            findings, summary, llm_verdict = await synthesize(results)
 
         assert findings == []
         assert "No issues" in summary
+        assert llm_verdict == "pass"
 
     async def test_synthesize_llm_skips_false_positives(self):
         """Findings with evidence_type=false_positive must be excluded from output."""
@@ -188,9 +192,10 @@ class TestSynthesizeWithLLMSuccess:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, summary = await synthesize(results)
+            findings, summary, llm_verdict = await synthesize(results)
 
         assert findings == []
+        assert llm_verdict == "pass"
 
     async def test_synthesize_llm_sorts_by_severity(self):
         """Output findings must be sorted critical → info."""
@@ -228,10 +233,11 @@ class TestSynthesizeWithLLMSuccess:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, _ = await synthesize(results)
+            findings, _, llm_verdict = await synthesize(results)
 
         assert len(findings) == 3
         assert findings[0].severity == Severity.CRITICAL
+        assert llm_verdict == "block"
         assert findings[1].severity == Severity.MEDIUM
         assert findings[2].severity == Severity.INFO
 
@@ -250,12 +256,13 @@ class TestSynthesizeFallback:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("subprocess failed")), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, summary = await synthesize(results)
+            findings, summary, llm_verdict = await synthesize(results)
 
         # Fallback path should still return the finding
         assert len(findings) == 1
         assert findings[0].severity == Severity.HIGH
         assert "LLM unavailable" in summary
+        assert llm_verdict is None
 
     async def test_synthesize_fallback_on_timeout(self):
         """A timed-out subprocess triggers the fallback path."""
@@ -271,10 +278,11 @@ class TestSynthesizeFallback:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, summary = await synthesize(results)
+            findings, summary, llm_verdict = await synthesize(results)
 
         assert len(findings) == 1
         assert "LLM unavailable" in summary
+        assert llm_verdict is None
 
     async def test_synthesize_fallback_on_invalid_json(self):
         """Malformed JSON in LLM output triggers the fallback path gracefully."""
@@ -290,10 +298,11 @@ class TestSynthesizeFallback:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, summary = await synthesize(results)
+            findings, summary, llm_verdict = await synthesize(results)
 
         assert len(findings) >= 1
         assert "LLM unavailable" in summary
+        assert llm_verdict is None
 
 
 class TestSynthesizeDeduplicate:
@@ -308,7 +317,7 @@ class TestSynthesizeDeduplicate:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, _ = await synthesize(results)
+            findings, _, _ = await synthesize(results)
 
         # After dedup, the same finding should appear only once
         titles = [f.title for f in findings]
@@ -324,7 +333,7 @@ class TestSynthesizeDeduplicate:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, _ = await synthesize(results)
+            findings, _, _ = await synthesize(results)
 
         assert len(findings) == 2
 
@@ -340,7 +349,7 @@ class TestSynthesizeAgentFailures:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, summary = await synthesize(results)
+            findings, summary, _ = await synthesize(results)
 
         # The fallback should have normalised the failure finding
         assert len(findings) == 1
@@ -362,7 +371,7 @@ class TestSynthesizeAgentFailures:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            findings, _ = await synthesize(results)
+            findings, _, _ = await synthesize(results)
 
         titles = {f.title for f in findings}
         assert "Real bug" in titles
@@ -442,7 +451,7 @@ class TestSynthesizeConflictResolution:
 
         with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=fake_run), \
              patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            await synthesize(results)
+            await synthesize(results)  # returns 3-tuple but we only care about the prompt
 
         # The prompt (last element of cmd) should contain both agent names
         prompt_text = " ".join(str(c) for c in captured_cmd)
@@ -572,7 +581,7 @@ class TestSelectAgentsValidatesNames:
 
 
 class TestDetermineVerdict:
-    """Unit tests for _determine_verdict — pure logic, no mocking needed."""
+    """Unit tests for verdict resolution — pure logic, no mocking needed."""
 
     def test_determine_verdict_pass(self):
         """No findings → PASS."""
@@ -623,6 +632,45 @@ class TestDetermineVerdict:
         assert _determine_verdict(findings, block_on_critical=True) == Verdict.BLOCK
 
 
+class TestResolveVerdict:
+    """Unit tests for _resolve_verdict — LLM verdict + safety floor."""
+
+    def test_llm_verdict_pass_trusted(self):
+        """LLM says pass with no critical findings → PASS."""
+        from openseed_qa_gate.gate import _resolve_verdict
+
+        findings = [Finding(severity=Severity.HIGH, title="High issue")]
+        assert _resolve_verdict("pass", findings, block_on_critical=True) == Verdict.PASS
+
+    def test_llm_verdict_overridden_by_critical(self):
+        """LLM says pass but critical finding exists → BLOCK (safety floor)."""
+        from openseed_qa_gate.gate import _resolve_verdict
+
+        findings = [Finding(severity=Severity.CRITICAL, title="RCE")]
+        assert _resolve_verdict("pass", findings, block_on_critical=True) == Verdict.BLOCK
+
+    def test_llm_verdict_block_without_critical(self):
+        """LLM says block with no critical findings → BLOCK (trust LLM)."""
+        from openseed_qa_gate.gate import _resolve_verdict
+
+        findings = [Finding(severity=Severity.HIGH, title="Pattern issue")]
+        assert _resolve_verdict("block", findings, block_on_critical=True) == Verdict.BLOCK
+
+    def test_llm_verdict_none_falls_back(self):
+        """No LLM verdict → fallback to severity-based logic."""
+        from openseed_qa_gate.gate import _resolve_verdict
+
+        findings = [Finding(severity=Severity.HIGH, title="High")]
+        assert _resolve_verdict(None, findings, block_on_critical=True) == Verdict.WARN
+
+    def test_llm_verdict_invalid_string_falls_back(self):
+        """Invalid LLM verdict string → fallback to severity-based logic."""
+        from openseed_qa_gate.gate import _resolve_verdict
+
+        findings = [Finding(severity=Severity.LOW, title="Low")]
+        assert _resolve_verdict("maybe", findings, block_on_critical=True) == Verdict.PASS
+
+
 class TestRunQAGateFullFlow:
     async def test_run_qa_gate_full_flow(self):
         """Full integration: load agents → select → run specialists → synthesize → verdict."""
@@ -641,6 +689,7 @@ class TestRunQAGateFullFlow:
              patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=(
                  [Finding(severity=Severity.LOW, title="Minor style", description="A style issue")],
                  "1 finding (low)",
+                 "pass",
              )):
             cfg = QAGateConfig(active_agents=["reviewer"])
             result = await run_qa_gate("Review this code", "/tmp/project", config=cfg)
@@ -680,7 +729,7 @@ class TestRunQAGateFullFlow:
              patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]), \
              patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=specialist_result), \
              patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=(
-                 [critical_finding], "Critical: RCE found"
+                 [critical_finding], "Critical: RCE found", "block"
              )):
             cfg = QAGateConfig(active_agents=["security-auditor"], block_on_critical=True)
             result = await run_qa_gate("Review auth code", "/tmp/project", config=cfg)
@@ -698,7 +747,7 @@ class TestRunQAGateFullFlow:
         with patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]), \
              patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]), \
              patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, side_effect=RuntimeError("crashed")), \
-             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "0 findings")):
+             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "0 findings", "pass")):
             cfg = QAGateConfig(active_agents=["flaky-agent"])
             result = await run_qa_gate("task", "/tmp/project", config=cfg)
 
@@ -716,7 +765,7 @@ class TestRunQAGateFullFlow:
         with patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]), \
              patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]), \
              patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=_make_specialist_result()), \
-             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "No issues")):
+             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "No issues", "pass")):
             cfg = QAGateConfig(active_agents=["reviewer"])
             result = await run_qa_gate("task", "/tmp/project", config=cfg)
 

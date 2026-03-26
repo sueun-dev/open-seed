@@ -114,10 +114,10 @@ async def run_qa_gate(
             specialist_results.append(r)
 
     # Synthesize via knowledge-synthesizer (Claude Sonnet)
-    findings, synthesis = await synthesize(specialist_results, event_bus)
+    findings, synthesis, llm_verdict = await synthesize(specialist_results, event_bus)
 
-    # Determine verdict — AI decides severity, we check thresholds
-    verdict = _determine_verdict(findings, cfg.block_on_critical)
+    # Use LLM verdict when available, fall back to severity-based logic
+    verdict = _resolve_verdict(llm_verdict, findings, cfg.block_on_critical)
 
     duration = int((time.monotonic() - start) * 1000)
 
@@ -241,13 +241,39 @@ async def _run_staged(
     )
 
 
+def _resolve_verdict(
+    llm_verdict: str | None,
+    findings: list[Finding],
+    block_on_critical: bool,
+) -> Verdict:
+    """
+    Resolve final verdict: trust LLM synthesis verdict when available,
+    but enforce BLOCK on critical findings as a safety floor.
+
+    The LLM has full context (conflicts, false positives, confidence)
+    so its verdict is more nuanced than pure severity counting.
+    The severity-based check acts as a safety net, not the primary logic.
+    """
+    verdict_map = {"pass": Verdict.PASS, "warn": Verdict.WARN, "block": Verdict.BLOCK}
+    base = verdict_map.get(llm_verdict, None) if llm_verdict else None
+
+    # Safety floor: BLOCK on critical findings regardless of LLM opinion
+    has_critical = any(f.severity == Severity.CRITICAL for f in findings)
+    if has_critical and block_on_critical:
+        return Verdict.BLOCK
+
+    # Trust LLM verdict if available
+    if base is not None:
+        return base
+
+    # Fallback: severity-based (LLM unavailable / parse failed)
+    return _determine_verdict(findings, block_on_critical)
+
+
 def _determine_verdict(findings: list[Finding], block_on_critical: bool) -> Verdict:
     """
-    Determine QA verdict based on findings.
-
-    BLOCK if any critical finding (when block_on_critical=True)
-    WARN if any high/medium findings
-    PASS if no findings or only low/info
+    Fallback verdict based on severity counts.
+    Used only when LLM synthesis verdict is unavailable.
     """
     has_critical = any(f.severity == Severity.CRITICAL for f in findings)
     has_high = any(f.severity == Severity.HIGH for f in findings)
