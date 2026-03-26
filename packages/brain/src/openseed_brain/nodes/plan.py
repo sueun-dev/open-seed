@@ -25,13 +25,29 @@ async def plan_node(state: PipelineState) -> dict:
         approach = intake_analysis.get("approach", "")
         existing = intake_analysis.get("existing_project", "no")
         complexity = intake_analysis.get("complexity", "moderate")
-        analysis_context = f"""
-Intake analysis:
-- Complexity: {complexity}
-- Existing project: {existing}
-- Approach: {approach}
-- Requirements: {', '.join(reqs) if isinstance(reqs, list) else reqs}
-"""
+        tech_stack = intake_analysis.get("tech_stack", "")
+        lessons = intake_analysis.get("lessons", "")
+        intent = intake_analysis.get("intent", "implementation")
+        parts = [
+            "\nIntake analysis:",
+            f"- Intent: {intent}",
+            f"- Complexity: {complexity}",
+            f"- Existing project: {existing}",
+        ]
+        if tech_stack:
+            parts.append(f"- Tech stack: {tech_stack}")
+        if approach:
+            parts.append(f"- Approach: {approach}")
+        if reqs:
+            parts.append(f"- Requirements: {', '.join(reqs) if isinstance(reqs, list) else reqs}")
+        if lessons and str(lessons).lower() != "none":
+            parts.append(f"- Lessons from past: {lessons}")
+        if existing.lower() == "yes":
+            parts.append(
+                "- IMPORTANT: This is an existing project. Plan should include BOTH "
+                "files to modify AND files to create. Do NOT plan to recreate files that already exist."
+            )
+        analysis_context = "\n".join(parts) + "\n"
 
     from openseed_claude.agent import ClaudeAgent
 
