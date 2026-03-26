@@ -200,6 +200,9 @@ class PipelineState(TypedDict):
     step_results: Annotated[list[StepResult], operator.add]
     findings: Annotated[list[Finding], operator.add]
 
+    # ── Intake analysis (saved for downstream nodes) ──────────────────────
+    intake_analysis: dict  # INTENT, COMPLEXITY, REQUIREMENTS, APPROACH, etc.
+
     # ── OpenHands integrations ──────────────────────────────────────────────
     # Microagent context — per-repo knowledge loaded from working_dir
     microagent_context: list[str]

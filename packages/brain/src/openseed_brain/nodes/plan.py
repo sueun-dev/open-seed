@@ -17,6 +17,22 @@ async def plan_node(state: PipelineState) -> dict:
     working_dir = state["working_dir"]
     intake = "\n".join(state.get("messages", []))
 
+    # Use structured intake analysis if available
+    intake_analysis = state.get("intake_analysis", {})
+    analysis_context = ""
+    if intake_analysis:
+        reqs = intake_analysis.get("requirements", [])
+        approach = intake_analysis.get("approach", "")
+        existing = intake_analysis.get("existing_project", "no")
+        complexity = intake_analysis.get("complexity", "moderate")
+        analysis_context = f"""
+Intake analysis:
+- Complexity: {complexity}
+- Existing project: {existing}
+- Approach: {approach}
+- Requirements: {', '.join(reqs) if isinstance(reqs, list) else reqs}
+"""
+
     from openseed_claude.agent import ClaudeAgent
 
     agent = ClaudeAgent()
@@ -27,6 +43,7 @@ async def plan_node(state: PipelineState) -> dict:
 Task: {task}
 Working directory: {working_dir}
 Analysis: {intake[:500]}
+{analysis_context}
 
 You MUST respond with ONLY valid JSON (no markdown, no explanation before/after):
 {{
