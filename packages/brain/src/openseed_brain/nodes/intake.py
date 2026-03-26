@@ -129,9 +129,11 @@ Be concise. No extra prose outside the above structure.""",
 
     analysis_text = response.text
     skip_planning = _parse_skip_planning(analysis_text)
+    intake_analysis = _parse_analysis(analysis_text)
 
     result: dict = {
         "skip_planning": skip_planning,
+        "intake_analysis": intake_analysis,
         "messages": [f"Intake: {analysis_text[:500]}"],
     }
     if microagent_context:
@@ -256,6 +258,40 @@ def _scan_working_dir(working_dir: str) -> str:
     )
 
     return "\n".join(parts) + "\n"
+
+
+def _parse_analysis(text: str) -> dict:
+    """
+    Parse Claude's structured intake response into a dict.
+    Extracts: INTENT, COMPLEXITY, REQUIREMENTS, APPROACH, LESSONS, EXISTING_PROJECT.
+    Downstream nodes (plan_node, implement_node) can read these.
+    """
+    analysis: dict = {}
+    requirements: list[str] = []
+    current_key = ""
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # Key: value lines
+        for key in ["INTENT", "COMPLEXITY", "SKIP_PLANNING", "EXISTING_PROJECT", "APPROACH", "LESSONS"]:
+            if stripped.upper().startswith(f"{key}:"):
+                value = stripped.split(":", 1)[1].strip()
+                analysis[key.lower()] = value
+                current_key = key.lower()
+                break
+        else:
+            if stripped.upper().startswith("REQUIREMENTS:"):
+                current_key = "requirements"
+            elif current_key == "requirements" and stripped.startswith("- "):
+                requirements.append(stripped[2:].strip())
+
+    if requirements:
+        analysis["requirements"] = requirements
+
+    return analysis
 
 
 def _parse_skip_planning(text: str) -> bool:
