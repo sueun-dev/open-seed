@@ -65,8 +65,9 @@ async def intake_node(state: PipelineState) -> dict:
 
     # ── Step 3: Scan existing codebase + detect tech stack ──
     codebase_context = ""
+    detected_tech_stack: list[str] = []
     try:
-        codebase_context = _scan_working_dir(working_dir)
+        codebase_context, detected_tech_stack = _scan_working_dir(working_dir)
         if codebase_context:
             logger.info("Codebase scan: %s", codebase_context[:100])
     except Exception as exc:
@@ -131,6 +132,10 @@ Be concise. No extra prose outside the above structure.""",
     skip_planning = _parse_skip_planning(analysis_text)
     intake_analysis = _parse_analysis(analysis_text)
 
+    # Inject detected tech stack into analysis for downstream nodes
+    if detected_tech_stack:
+        intake_analysis["tech_stack"] = ", ".join(detected_tech_stack)
+
     result: dict = {
         "skip_planning": skip_planning,
         "intake_analysis": intake_analysis,
@@ -141,31 +146,30 @@ Be concise. No extra prose outside the above structure.""",
     return result
 
 
-def _scan_working_dir(working_dir: str) -> str:
+def _scan_working_dir(working_dir: str) -> tuple[str, list[str]]:
     """
     Scan the working directory for existing files and detect tech stack.
 
-    Returns a context string describing:
-    - Whether the directory is empty or has existing code
-    - Detected tech stack (React, Vue, Express, Django, etc.)
-    - Key config files found
-    - File count and structure summary
+    Returns:
+        Tuple of (context_string, detected_tech_stack_list).
+        - context_string: human-readable summary for the LLM prompt
+        - detected_tech_stack_list: e.g. ["React", "Express", "TypeScript"]
     """
     import os
     import json
 
     if not os.path.isdir(working_dir):
-        return ""
+        return "", []
 
     # List top-level files/dirs (skip hidden, node_modules, etc.)
     skip = {".git", "node_modules", "__pycache__", ".venv", "dist", ".next", "build"}
     try:
         entries = [e for e in os.listdir(working_dir) if e not in skip and not e.startswith(".")]
     except OSError:
-        return ""
+        return "", []
 
     if not entries:
-        return "\nExisting codebase: EMPTY directory (building from scratch)\n"
+        return "\nExisting codebase: EMPTY directory (building from scratch)\n", []
 
     # Count files recursively
     file_count = 0
@@ -257,7 +261,7 @@ def _scan_working_dir(working_dir: str) -> str:
         f"- Status: {'EXISTING PROJECT — modify/extend, do NOT rebuild from scratch' if file_count > 3 else 'Near-empty — build from scratch'}"
     )
 
-    return "\n".join(parts) + "\n"
+    return "\n".join(parts) + "\n", tech_stack
 
 
 def _parse_analysis(text: str) -> dict:

@@ -21,11 +21,14 @@ from openseed_brain.state import PipelineState, Implementation, PlanTask
 
 # ─── Implementation Rules (shared across all specialists) ────────────────────
 
-_IMPLEMENTATION_RULES = """\
-Rules:
+_RULES_CORE = """\
 - Write ALL files DIRECTLY in the working directory — do NOT create a subdirectory/subfolder for the project
 - Each file must be COMPLETE and RUNNABLE
 - No placeholders, no TODOs
+- Dev defaults: Every config value (ports, origins, DB paths) must work out-of-the-box \
+in a dev environment with zero env vars set. Use sensible defaults, not empty strings."""
+
+_RULES_WEB = """\
 - If package.json is needed, create it with all deps
 - Run npm install after creating package.json if needed
 - src/ subfolder is OK for source files, but package.json/index.html must be at the root
@@ -34,9 +37,48 @@ FRONTEND_ORIGIN or default to a pattern that accepts any localhost port). NEVER 
 a specific port like 5173 — the dev server port can change.
 - REST updates: Always implement BOTH PUT (full replace, all fields required) AND \
 PATCH (partial update, only changed fields required) for every resource. A CRUD API \
-without PATCH is incomplete.
-- Dev defaults: Every config value (ports, origins, DB paths) must work out-of-the-box \
-in a dev environment with zero env vars set. Use sensible defaults, not empty strings."""
+without PATCH is incomplete."""
+
+_RULES_FIX = """\
+- Make MINIMAL, targeted changes — do NOT rewrite files that are not broken
+- Read the affected files FIRST before editing
+- Preserve existing code style, naming conventions, and architecture
+- Do NOT add unrelated improvements, refactors, or features"""
+
+# Web-related tech stacks (triggers _RULES_WEB inclusion)
+_WEB_INDICATORS = frozenset({
+    "react", "vue", "next.js", "nuxt", "svelte", "sveltekit", "angular",
+    "express", "fastify", "fastapi", "flask", "django",
+    "vite", "webpack", "tailwind css", "prisma",
+})
+
+
+def _build_rules(intake: dict) -> str:
+    """Build context-aware implementation rules from intake_analysis."""
+    intent = intake.get("intent", "implementation")
+    tech_stack_raw = intake.get("tech_stack", "")
+
+    parts = ["Rules:"]
+    parts.append(_RULES_CORE)
+
+    # Add fix-specific rules for bug fixes
+    if intent == "fix":
+        parts.append(_RULES_FIX)
+
+    # Add web rules only when the project involves web technologies
+    if tech_stack_raw:
+        detected = {t.strip().lower() for t in tech_stack_raw.split(",")}
+    else:
+        detected = set()
+    if detected & _WEB_INDICATORS or not detected:
+        # Include web rules when web tech detected OR when tech is unknown (safe default)
+        parts.append(_RULES_WEB)
+
+    return "\n".join(parts)
+
+
+# Legacy constant for backward compatibility (specialist runner, integration check)
+_IMPLEMENTATION_RULES = f"Rules:\n{_RULES_CORE}\n{_RULES_WEB}"
 
 
 def _build_plan_text(state: PipelineState) -> str:
@@ -77,12 +119,30 @@ async def _run_specialist(
 
     agent = ClaudeAgent()
     specialist_prompt = get_specialist_prompt(domain)
+    intake = state.get("intake_analysis") or {}
 
     task_descriptions = "\n".join(
         f"- {t.description} (files: {', '.join(t.files)})" for t in tasks
     )
 
     plan_text = _build_plan_text(state)
+
+    # Build intake context (requirements, approach, lessons)
+    intake_context = _build_intake_context(intake)
+
+    # Existing project awareness
+    existing = intake.get("existing_project", "").lower() == "yes"
+    existing_instruction = (
+        "\nThis is an EXISTING project. Read relevant existing files FIRST "
+        "before writing, and match the existing code style.\n"
+        if existing else ""
+    )
+
+    # Context-aware rules
+    rules = _build_rules(intake)
+
+    # Dynamic max_turns
+    max_turns = _resolve_max_turns(intake, has_plan=True)
 
     # Inject microagent context if available (OpenHands pattern)
     microagent_section = ""
@@ -95,24 +155,98 @@ async def _run_specialist(
 
 Original task: {state["task"]}
 Working directory: {state["working_dir"]}
-
+{existing_instruction}
 Your assigned tasks:
 {task_descriptions}
 
 Full plan context:
 {plan_text}
+{f"{chr(10)}{intake_context}" if intake_context else ""}\
 {microagent_section}
-{_IMPLEMENTATION_RULES}""",
+{rules}""",
         system_prompt=specialist_prompt,
         model="sonnet",
         working_dir=state["working_dir"],
-        max_turns=20,
+        max_turns=max_turns,
     )
 
     return Implementation(
         summary=f"[{domain}] {response.text[:400]}",
         raw_output=response.text,
     )
+
+
+# ─── Intake-Aware Prompt Builder ───────────────────────────────────────────
+
+
+def _build_action_instruction(intake: dict) -> str:
+    """Build the primary instruction based on intent and project status."""
+    intent = intake.get("intent", "implementation")
+    existing = intake.get("existing_project", "").lower() == "yes"
+
+    if intent == "fix":
+        return (
+            "Fix this issue. Read the affected files first, diagnose the root cause, "
+            "then apply minimal targeted changes. Do NOT rewrite unrelated code."
+        )
+    if intent == "research" or intent == "investigation":
+        return (
+            "Investigate this thoroughly. Read the relevant files, analyze the situation, "
+            "and report your findings with specific evidence. Write code only if needed."
+        )
+    if intent == "evaluation":
+        return (
+            "Evaluate this. Read the relevant code, assess quality/correctness, "
+            "and provide a structured assessment. Fix issues if requested."
+        )
+    if existing:
+        return (
+            "Modify this existing project. Read the relevant existing files FIRST to "
+            "understand the current architecture, then make your changes consistent "
+            "with the existing code style and patterns."
+        )
+    # New project — implementation or open_ended
+    return "Implement this project from scratch. Write ALL files with COMPLETE code."
+
+
+def _build_intake_context(intake: dict) -> str:
+    """Build context sections from intake_analysis."""
+    sections: list[str] = []
+
+    # Requirements
+    reqs = intake.get("requirements", [])
+    if reqs:
+        sections.append("Requirements:")
+        for r in reqs:
+            sections.append(f"- {r}")
+
+    # Approach
+    approach = intake.get("approach", "")
+    if approach:
+        sections.append(f"\nApproach: {approach}")
+
+    # Lessons from past
+    lessons = intake.get("lessons", "")
+    if lessons and lessons.lower() != "none":
+        sections.append(f"\nLessons from past tasks: {lessons}")
+
+    return "\n".join(sections)
+
+
+def _resolve_max_turns(intake: dict, has_plan: bool) -> int:
+    """Determine max_turns based on complexity and context."""
+    complexity = intake.get("complexity", "moderate")
+    intent = intake.get("intent", "implementation")
+
+    if intent in ("research", "investigation", "evaluation"):
+        return 8
+
+    if not has_plan:
+        # skip_planning path — simpler tasks
+        return {"simple": 10, "moderate": 20, "complex": 30}.get(complexity, 20)
+
+    # With plan — specialist path
+    return {"simple": 12, "moderate": 20, "complex": 25}.get(complexity, 20)
 
 
 # ─── Fullstack Fallback ─────────────────────────────────────────────────────
@@ -122,12 +256,28 @@ async def _implement_fullstack(state: PipelineState) -> Implementation:
     """
     Fullstack implementation — used when there is no plan or when the task
     is too simple to benefit from specialist splitting.
+
+    Uses intake_analysis to tailor the prompt to the specific intent,
+    complexity, and project context.
     """
     from openseed_claude.agent import ClaudeAgent
     from openseed_brain.specialists import get_specialist_prompt
 
     agent = ClaudeAgent()
     plan_text = _build_plan_text(state)
+    intake = state.get("intake_analysis") or {}
+
+    # Build intent-aware instruction
+    action = _build_action_instruction(intake)
+
+    # Build context from intake analysis (requirements, approach, lessons)
+    intake_context = _build_intake_context(intake)
+
+    # Build context-aware rules (web rules only for web projects, fix rules for fixes)
+    rules = _build_rules(intake)
+
+    # Dynamic max_turns based on complexity
+    max_turns = _resolve_max_turns(intake, has_plan=bool(plan_text))
 
     # Inject microagent context if available (OpenHands pattern)
     microagent_section = ""
@@ -136,18 +286,19 @@ async def _implement_fullstack(state: PipelineState) -> Implementation:
         microagent_section = "\n\n" + "\n".join(micro_ctx) + "\n"
 
     response = await agent.invoke(
-        prompt=f"""Implement this project. Write ALL files with COMPLETE code.
+        prompt=f"""{action}
 
 Task: {state["task"]}
 Working directory: {state["working_dir"]}
 
-{f"Plan:{chr(10)}{plan_text}" if plan_text else "No plan provided — implement the task directly."}
+{f"Plan:{chr(10)}{plan_text}" if plan_text else ""}\
+{f"{chr(10)}{intake_context}" if intake_context else ""}\
 {microagent_section}
-{_IMPLEMENTATION_RULES}""",
+{rules}""",
         system_prompt=get_specialist_prompt("fullstack"),
         model="sonnet",
         working_dir=state["working_dir"],
-        max_turns=25,
+        max_turns=max_turns,
     )
 
     return Implementation(summary=response.text[:500], raw_output=response.text)
