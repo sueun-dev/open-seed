@@ -187,6 +187,26 @@ async def verify_implementation(
         if not cmd_evidence.passed:
             failing.append(cmd)
 
+    # Browser-based UI verification (OpenHands pattern)
+    # Only runs if Playwright is installed and project has a dev server
+    try:
+        from openseed_guard.browser_verify import verify_ui
+        browser_result = await verify_ui(working_dir)
+        if browser_result.error and "not installed" not in browser_result.error:
+            evidence.append(Evidence(
+                check="browser: UI renders",
+                passed=browser_result.passed,
+                detail=browser_result.ai_verdict or browser_result.error,
+            ))
+        elif not browser_result.error:
+            evidence.append(Evidence(
+                check="browser: UI renders",
+                passed=browser_result.passed,
+                detail=browser_result.ai_verdict[:200],
+            ))
+    except Exception:
+        pass  # Browser verification is best-effort
+
     all_passed = all(e.passed for e in evidence) if evidence else False
 
     return VerificationResult(

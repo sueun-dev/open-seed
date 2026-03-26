@@ -12,6 +12,7 @@ from openseed_guard.delegation import build_delegation_prompt
 from openseed_guard.prompts import ModelFamily, PromptVariant, detect_model_family
 from openseed_guard.stuck_detector import detect_stuck, StuckAnalysis
 from openseed_guard.security import assess_risk, SecurityCheck, SecurityRisk
+from openseed_guard.browser_verify import verify_ui, BrowserEvidence
 
 __all__ = [
     # Loop
@@ -36,4 +37,6 @@ __all__ = [
     "detect_stuck", "StuckAnalysis",
     # Security (OpenHands)
     "assess_risk", "SecurityCheck", "SecurityRisk",
+    # Browser verification (OpenHands)
+    "verify_ui", "BrowserEvidence",
 ]

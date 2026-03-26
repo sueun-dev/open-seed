@@ -26,12 +26,14 @@ from openseed_cli.commands.auth import auth_cmd
 from openseed_cli.commands.doctor import doctor_cmd
 from openseed_cli.commands.serve import serve_cmd
 from openseed_cli.commands.memory import memory_cmd
+from openseed_cli.commands.resolve import resolve_cmd
 
 cli.add_command(run_cmd, "run")
 cli.add_command(auth_cmd, "auth")
 cli.add_command(doctor_cmd, "doctor")
 cli.add_command(serve_cmd, "serve")
 cli.add_command(memory_cmd, "memory")
+cli.add_command(resolve_cmd, "resolve")
 
 
 if __name__ == "__main__":
