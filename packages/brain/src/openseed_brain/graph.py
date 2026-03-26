@@ -122,16 +122,124 @@ async def implement_task_node(state: PipelineState) -> dict:
 
 async def user_escalate_node(state: PipelineState) -> dict:
     """
-    User escalation node — pipeline reaches here when Sentinel gives up.
-    If compiled with interrupt_before=["user_escalate"], the graph pauses
-    and waits for human input via Command(resume=...).
+    User escalation node — asks the user what to do and AI interprets the response.
+
+    When max retries are exhausted, instead of aborting:
+    1. Show the user current errors
+    2. Ask: "오류가 있는데 더 수정해볼까?"
+    3. AI interprets the user's free-form response (yes/no/specific instructions)
+    4. Returns appropriate action based on interpretation
     """
+    from openseed_core.types import Error
+
     retry_count = state.get("retry_count", 0)
     errors = state.get("errors", [])
+    qa_result = state.get("qa_result")
     error_summary = "; ".join(e.message for e in errors[:5]) if errors else "unknown"
-    return {
-        "messages": [f"USER ESCALATION: Pipeline needs help after {retry_count} retries. Errors: {error_summary}"],
-    }
+
+    # Build status message for the user
+    qa_text = ""
+    if qa_result and hasattr(qa_result, "synthesis"):
+        qa_text = qa_result.synthesis[:300]
+
+    status = (
+        f"\n{'='*60}\n"
+        f"Pipeline has attempted {retry_count} fixes.\n"
+        f"Current issues: {qa_text or error_summary}\n"
+        f"{'='*60}\n"
+        f"오류가 좀 있는데 더 수정해볼까? (응답을 자유롭게 입력하세요)\n"
+        f"> "
+    )
+
+    # Get user input
+    try:
+        import sys
+        print(status, end="", flush=True)
+        user_response = input().strip()
+    except (EOFError, KeyboardInterrupt):
+        user_response = ""
+
+    if not user_response:
+        return {
+            "messages": [f"USER ESCALATION: No response — stopping pipeline after {retry_count} retries."],
+            "errors": [Error(step="user_escalate", message="User did not respond. Pipeline stopped.")],
+        }
+
+    # AI interprets the user's response
+    action = await _interpret_user_response(user_response, error_summary, qa_text)
+
+    if action == "continue":
+        # Reset retry_count and send back to fix loop
+        return {
+            "retry_count": 0,
+            "messages": [f"USER: Continuing fixes. User said: {user_response[:200]}"],
+        }
+    elif action == "deploy":
+        # User says deploy as-is
+        from openseed_core.types import QAResult, Verdict
+        return {
+            "qa_result": QAResult(
+                verdict=Verdict.PASS_WITH_WARNINGS,
+                synthesis=f"User approved deployment: {user_response[:200]}",
+            ),
+            "messages": [f"USER: Deploy as-is. User said: {user_response[:200]}"],
+        }
+    else:
+        # User says stop
+        return {
+            "messages": [f"USER ESCALATION: User chose to stop. Response: {user_response[:200]}"],
+            "errors": [Error(step="user_escalate", message=f"User stopped: {user_response[:100]}")],
+        }
+
+
+async def _interpret_user_response(
+    user_response: str,
+    error_summary: str,
+    qa_text: str,
+) -> str:
+    """
+    Use AI to interpret the user's free-form response.
+
+    Returns: "continue" | "deploy" | "stop"
+
+    The user can say anything in any language:
+    - "ㅇㅇ 해" / "yes" / "계속" → continue
+    - "그냥 배포해" / "deploy it" → deploy
+    - "아니" / "stop" / "그만" → stop
+    - "저 에러 무시하고 나머지만 고쳐" → continue (with context)
+    """
+    try:
+        from openseed_claude.agent import ClaudeAgent
+        agent = ClaudeAgent()
+        response = await agent.invoke(
+            prompt=(
+                f"A coding pipeline asked the user if they want to continue fixing errors.\n\n"
+                f"Current errors: {error_summary[:300]}\n"
+                f"QA status: {qa_text[:300]}\n\n"
+                f"User's response: \"{user_response}\"\n\n"
+                f"Interpret the user's intent. Answer EXACTLY one word:\n"
+                f"- 'continue' if they want to keep fixing (yes, ㅇㅇ, 해, 계속, fix it, etc.)\n"
+                f"- 'deploy' if they want to deploy/ship as-is (배포해, ship it, deploy, 그냥 써, etc.)\n"
+                f"- 'stop' if they want to stop completely (아니, stop, 그만, 됐어, etc.)\n\n"
+                f"Answer:"
+            ),
+            model="haiku",
+            max_turns=1,
+        )
+        result = response.text.strip().lower()
+        if "continue" in result:
+            return "continue"
+        if "deploy" in result:
+            return "deploy"
+        return "stop"
+    except Exception:
+        # If AI fails, check for simple patterns as fallback
+        lower = user_response.lower()
+        if any(w in lower for w in ["ㅇㅇ", "yes", "응", "해", "계속", "fix", "고쳐"]):
+            return "continue"
+        if any(w in lower for w in ["배포", "deploy", "ship"]):
+            return "deploy"
+        return "stop"
 
 
 def build_graph(use_subgraphs: bool = False, use_send: bool = False) -> StateGraph:
@@ -213,8 +321,26 @@ def build_graph(use_subgraphs: bool = False, use_send: bool = False) -> StateGra
 
     graph.add_edge("fix", "qa_gate")  # Fix loops back
 
-    # User escalation → END (graph pauses here if interrupt_before is set)
-    graph.add_edge("user_escalate", END)
+    # User escalation → conditional: continue fixing, deploy, or stop
+    def route_after_user_escalation(state: PipelineState) -> Literal["fix", "deploy", "end"]:
+        """Route based on user's response (interpreted by AI)."""
+        messages = state.get("messages", [])
+        last = messages[-1] if messages else ""
+        if "Continuing fixes" in last:
+            return "fix"
+        if "Deploy as-is" in last:
+            return "deploy"
+        return "end"
+
+    graph.add_conditional_edges(
+        "user_escalate",
+        route_after_user_escalation,
+        {
+            "fix": "fix",
+            "deploy": "deploy",
+            "end": END,
+        },
+    )
 
     # Deploy → memorize → END
     graph.add_edge("deploy", "memorize")

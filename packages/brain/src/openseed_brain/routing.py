@@ -40,8 +40,8 @@ def route_after_qa(state: PipelineState) -> Literal["deploy", "fix", "user_escal
     max_retries = state.get("max_retries", 10)
     errors = state.get("errors", [])
 
-    # Check if passed
-    if qa_result and qa_result.verdict == Verdict.PASS:
+    # Check if passed (PASS or PASS_WITH_WARNINGS both deploy)
+    if qa_result and qa_result.verdict in (Verdict.PASS, Verdict.PASS_WITH_WARNINGS):
         return "deploy"
 
     # Check for explicit abort signals
@@ -67,5 +67,5 @@ def route_after_qa(state: PipelineState) -> Literal["deploy", "fix", "user_escal
     if retry_count < max_retries:
         return "fix"
 
-    # Max retries exhausted
+    # Max retries exhausted → ask user instead of aborting
     return "user_escalate"
