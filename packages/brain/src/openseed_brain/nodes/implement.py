@@ -106,7 +106,7 @@ Full plan context:
         system_prompt=specialist_prompt,
         model="sonnet",
         working_dir=state["working_dir"],
-        max_turns=10,
+        max_turns=20,
     )
 
     return Implementation(
@@ -147,7 +147,7 @@ Working directory: {state["working_dir"]}
         system_prompt=get_specialist_prompt("fullstack"),
         model="sonnet",
         working_dir=state["working_dir"],
-        max_turns=15,
+        max_turns=25,
     )
 
     return Implementation(summary=response.text[:500], raw_output=response.text)

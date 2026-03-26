@@ -108,10 +108,14 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
 
         console.print()
         async for chunk in graph.astream(state, config=config, stream_mode="updates"):
-            if isinstance(chunk, dict):
-                for node_name, update in chunk.items():
-                    # Show node execution
-                    console.print(f"  [bold cyan]▶[/] [bold]{node_name}[/bold]")
+            if not isinstance(chunk, dict):
+                continue
+            for node_name, update in chunk.items():
+                if not isinstance(update, dict):
+                    continue
+
+                # Show node execution
+                console.print(f"  [bold cyan]▶[/] [bold]{node_name}[/bold]")
 
                     # Show messages from this node
                     node_messages = update.get("messages", [])
@@ -127,7 +131,7 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
                     # Show QA verdict
                     qa = update.get("qa_result")
                     if qa:
-                        color = {"pass": "green", "warn": "yellow", "block": "red"}.get(qa.verdict.value, "white")
+                        color = {"pass": "green", "pass_with_warnings": "green", "warn": "yellow", "block": "red"}.get(qa.verdict.value, "white")
                         console.print(f"    [bold {color}]QA: {qa.verdict.value.upper()}[/] — {qa.synthesis[:100]}")
 
                     # Show deploy result

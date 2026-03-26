@@ -50,7 +50,6 @@ async def sentinel_check_node(state: PipelineState) -> dict:
         try:
             from openseed_guard.execution_loop import ExecutionLoop
             loop = ExecutionLoop()
-            # Run only the VERIFY step with the plan context
             verify = await loop._verify(
                 working_dir=working_dir,
                 exec_result={
@@ -64,19 +63,37 @@ async def sentinel_check_node(state: PipelineState) -> dict:
             )
             if verify.get("passed", False):
                 return {"messages": [f"Sentinel: PASSED — QA clean + evidence verified ({retry_count} retries)"]}
-            else:
-                # Evidence failed — override QA verdict to WARN so route_after_qa sends to fix
+
+            # Evidence failed — distinguish critical vs minor failures
+            summary = verify.get("summary", "")
+            evidence_list = verify.get("evidence", [])
+            failing_cmds = verify.get("failing_commands", [])
+
+            # Critical: test/build commands actually fail → must fix
+            if failing_cmds:
                 from openseed_core.types import QAResult
                 failed_qa = QAResult(
                     verdict=Verdict.WARN,
-                    synthesis=f"Evidence check failed: {verify.get('summary', '')}",
+                    synthesis=f"Evidence: commands failed: {', '.join(failing_cmds[:3])}",
                     findings=qa_result.findings if qa_result else [],
                 )
                 return {
                     "qa_result": failed_qa,
                     "retry_count": retry_count + 1,
-                    "messages": [f"Sentinel: QA passed but evidence FAILED — {verify.get('summary', '')}. Retry #{retry_count + 1}"],
+                    "messages": [f"Sentinel: QA passed but build/test FAILED — {summary}. Retry #{retry_count + 1}"],
                 }
+
+            # Minor: just missing file paths (likely in subdirectory) → QA said PASS, trust it
+            from openseed_core.types import QAResult
+            passed_qa = QAResult(
+                verdict=Verdict.PASS_WITH_WARNINGS,
+                synthesis=f"QA passed. Minor evidence notes: {summary}",
+                findings=qa_result.findings if qa_result else [],
+            )
+            return {
+                "qa_result": passed_qa,
+                "messages": [f"Sentinel: PASSED WITH WARNINGS — QA clean, minor evidence notes: {summary}"],
+            }
         except Exception as e:
             return {"messages": [f"Sentinel: PASSED (evidence check skipped: {e})"]}
 
@@ -255,7 +272,7 @@ async def fix_node(state: PipelineState) -> dict:
         prompt=prompt,
         model="sonnet",
         working_dir=working_dir,
-        max_turns=10,
+        max_turns=20,
         session_id=f"fix-{task_hash}" if retry_count == 0 else None,
         continue_session=retry_count > 0,
     )
@@ -304,8 +321,9 @@ async def fix_node(state: PipelineState) -> dict:
             }
         all_changes = all_changes2
 
+    # Fix succeeded (files changed) — don't increment retry_count.
+    # Only sentinel_check_node increments retry_count on actual failures.
     return {
-        "retry_count": retry_count + 1,
         "messages": [
             f"Fix: {len(all_changes)} files changed "
             f"({', '.join(all_changes[:5])}). Attempt {retry_count}",

@@ -28,6 +28,7 @@ class Severity(str, Enum):
 
 class Verdict(str, Enum):
     PASS = "pass"
+    PASS_WITH_WARNINGS = "pass_with_warnings"  # QA passed, minor evidence issues
     WARN = "warn"
     BLOCK = "block"
 
