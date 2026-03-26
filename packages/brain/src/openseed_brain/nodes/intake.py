@@ -102,7 +102,7 @@ Working directory: {working_dir}
 {codebase_context}
 
 Respond with EXACTLY this structure (fill in each line):
-INTENT: <build|fix|refactor|research>
+INTENT: <implementation|fix|research|investigation|evaluation|open_ended>
 COMPLEXITY: <simple|moderate|complex>
 SKIP_PLANNING: <yes|no>
 EXISTING_PROJECT: <yes|no>
