@@ -58,55 +58,73 @@ export default function App() {
     );
   };
 
-  // Resolve dropped folder name to absolute path, then add as project
+  // Resolve dropped folder to absolute path, then add as project
   const resolveAndAddFolder = async (folderName: string) => {
     let resolved = "";
+
+    // 1. Already absolute path → use directly
     if (folderName.startsWith("/")) {
       resolved = folderName;
     } else {
+      // 2. Just a name → try to resolve via backend
       try {
         const res = await fetch(`/api/resolve-folder?name=${encodeURIComponent(folderName)}`);
-        const data = await res.json();
-        if (data.matches?.length === 1) {
-          resolved = data.matches[0];
-        } else if (data.matches?.length > 1) {
-          const choice = window.prompt(
-            `Multiple folders found:\n\n${data.matches.map((m: string, i: number) => `${i + 1}. ${m}`).join("\n")}\n\nEnter number:`,
-            "1"
-          );
-          const idx = parseInt(choice || "1", 10) - 1;
-          if (idx >= 0 && idx < data.matches.length) resolved = data.matches[idx];
+        if (res.ok) {
+          const text = await res.text();
+          if (text) {
+            const data = JSON.parse(text);
+            if (data.matches?.length >= 1) {
+              // Auto-pick first match — no prompt popup
+              resolved = data.matches[0];
+            }
+          }
         }
       } catch {}
       if (!resolved) resolved = "/" + folderName;
     }
+
     addProject(resolved);
-    setActiveThreadId(null); // Show start screen for new project
+    setActiveThreadId(null);
   };
 
-  // Global drag & drop
+  // Global drag & drop — extract absolute path first, name as fallback
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDropHighlight(false);
 
-    let folderName = "";
-    const items = e.dataTransfer.items;
-    if (items?.length) {
-      for (let i = 0; i < items.length; i++) {
-        const entry = (items[i] as any).webkitGetAsEntry?.();
-        if (entry?.isDirectory) { folderName = entry.name; break; }
+    let folderPath = "";
+
+    // 1. Try to get absolute path from file (Electron/native apps set .path)
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const fp = (files[0] as any).path;
+      if (fp && fp.startsWith("/")) { folderPath = fp; }
+    }
+
+    // 2. Try text/plain (some file managers drop absolute paths as text)
+    if (!folderPath) {
+      const text = e.dataTransfer.getData("text/plain")?.trim();
+      if (text && text.startsWith("/")) { folderPath = text; }
+    }
+
+    // 3. Fallback: webkitGetAsEntry for directory name
+    if (!folderPath) {
+      const items = e.dataTransfer.items;
+      if (items?.length) {
+        for (let i = 0; i < items.length; i++) {
+          const entry = (items[i] as any).webkitGetAsEntry?.();
+          if (entry?.isDirectory) { folderPath = entry.name; break; }
+        }
       }
     }
-    if (!folderName) {
-      const files = e.dataTransfer.files;
-      if (files.length > 0) folderName = (files[0] as any).path || files[0].name;
+
+    // 4. Last fallback: file name
+    if (!folderPath && files.length > 0) {
+      folderPath = files[0].name;
     }
-    if (!folderName) {
-      const text = e.dataTransfer.getData("text/plain");
-      if (text) folderName = text.trim();
-    }
-    if (folderName) await resolveAndAddFolder(folderName);
+
+    if (folderPath) await resolveAndAddFolder(folderPath);
   };
 
   // No project selected — show onboarding
