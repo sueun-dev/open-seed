@@ -256,7 +256,10 @@ async def _execute_pipeline(task: str, working_dir: str, config_path: str | None
     cfg = load_config(Path(config_path) if config_path else None)
 
     state = initial_state(task=task, working_dir=str(Path(working_dir).resolve()), provider=provider)
-    graph = compile_graph()
+    state["max_retries"] = cfg.sentinel.max_retries
+    graph = compile_graph(
+        checkpoint_dir=str(Path(str(cfg.brain.checkpoint_dir)).expanduser()),
+    )
 
     await _broadcast({"type": "pipeline.start", "node": "brain", "data": {"task": task, "working_dir": working_dir}})
 
