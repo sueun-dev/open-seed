@@ -22,6 +22,12 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     if (activeThread) {
       setEvents(activeThread.events);
       threadIdRef.current = activeThread.id;
+    } else {
+      // New thread — reset everything
+      setEvents([]);
+      setTask("");
+      setRunning(false);
+      threadIdRef.current = null;
     }
   }, [activeThread?.id]);
 
