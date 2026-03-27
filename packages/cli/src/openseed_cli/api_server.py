@@ -263,10 +263,12 @@ async def _execute_pipeline(task: str, working_dir: str, config_path: str | None
 
     await _broadcast({"type": "pipeline.start", "node": "brain", "data": {"task": task, "working_dir": working_dir}})
 
+    config = {"configurable": {"thread_id": f"web-{id(state)}-{__import__('time').time()}"}}
+
     try:
         # Use astream to get node-by-node events in real time
         final_state = None
-        async for event in graph.astream(state):
+        async for event in graph.astream(state, config=config):
             for node_name, output in event.items():
                 # Broadcast node start
                 await _broadcast({"type": "node.start", "node": node_name, "data": {}})
