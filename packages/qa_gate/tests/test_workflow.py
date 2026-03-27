@@ -356,7 +356,7 @@ class TestWorkflowDefaultIsFlat:
         with patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]), \
              patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]), \
              patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=sr), \
-             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "no issues")), \
+             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "no issues", None)), \
              patch("openseed_qa_gate.gate._run_staged", new_callable=AsyncMock) as mock_staged:
             cfg = QAGateConfig(active_agents=["reviewer"])
             await run_qa_gate("context", "/tmp", config=cfg)  # staged defaults to False
