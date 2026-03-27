@@ -155,13 +155,80 @@ async def auto_detect_test_commands(working_dir: str) -> list[str]:
     return commands
 
 
+async def auto_detect_lint_commands(working_dir: str) -> list[str]:
+    """
+    Auto-detect available type checkers and linters.
+
+    Catches type errors, undefined variables, and missing imports
+    BEFORE tests run — faster feedback, no runtime needed.
+
+    Detects:
+      TypeScript: tsc --noEmit (type checking without build output)
+      Python: ruff check (fast linting) + mypy (type checking)
+      ESLint: npx eslint (if .eslintrc or eslint config exists)
+    """
+    import json
+
+    commands: list[str] = []
+
+    # ── TypeScript: tsc --noEmit ──
+    tsconfig = os.path.join(working_dir, "tsconfig.json")
+    if os.path.exists(tsconfig):
+        # Use npx to avoid global install requirement
+        commands.append("npx --yes tsc --noEmit 2>&1 | head -30")
+
+    # ── Python: ruff (fast, zero-config) ──
+    has_python = (
+        os.path.exists(os.path.join(working_dir, "pyproject.toml"))
+        or os.path.exists(os.path.join(working_dir, "setup.py"))
+        or os.path.exists(os.path.join(working_dir, "requirements.txt"))
+    )
+    if has_python:
+        # ruff is fast and catches syntax errors + undefined names
+        ruff_available = await run_simple(["bash", "-c", "command -v ruff"], timeout_seconds=5)
+        if ruff_available.exit_code == 0:
+            commands.append("ruff check --select E,F --no-fix --output-format concise . 2>&1 | head -20")
+        else:
+            # Fallback: python syntax check (always available)
+            commands.append("python3 -m py_compile $(find . -name '*.py' -not -path './node_modules/*' -not -path './.venv/*' | head -10) 2>&1")
+
+    # ── ESLint (if configured) ──
+    eslint_configs = [
+        ".eslintrc.json", ".eslintrc.js", ".eslintrc.yml",
+        ".eslintrc.cjs", ".eslintrc.mjs",
+    ]
+    has_eslint_config = any(
+        os.path.exists(os.path.join(working_dir, c)) for c in eslint_configs
+    )
+    # Also check package.json for eslintConfig
+    if not has_eslint_config:
+        pkg_json = os.path.join(working_dir, "package.json")
+        if os.path.exists(pkg_json):
+            try:
+                data = json.loads(open(pkg_json).read())
+                if "eslintConfig" in data:
+                    has_eslint_config = True
+            except Exception:
+                pass
+    if has_eslint_config:
+        commands.append("npx --yes eslint . --max-warnings 0 2>&1 | tail -10")
+
+    return commands
+
+
 async def verify_implementation(
     working_dir: str,
     expected_files: list[str] | None = None,
     test_commands: list[str] | None = None,
 ) -> VerificationResult:
     """
-    Full verification: check files exist + auto-detect + run test commands.
+    Full verification: check files exist + lint/type check + run test commands.
+
+    Verification order (fast → slow):
+    1. File existence checks (instant)
+    2. Lint / type checks (seconds — catches errors without runtime)
+    3. Test commands (may take minutes)
+    4. Browser UI verification (if applicable)
 
     This is the evidence gate — the Sentinel loop only advances
     if ALL evidence checks pass.
@@ -170,24 +237,34 @@ async def verify_implementation(
     missing: list[str] = []
     failing: list[str] = []
 
-    # Verify files
+    # 1. Verify files
     if expected_files:
         file_evidence = await verify_files_exist(working_dir, expected_files)
         evidence.extend(file_evidence)
         missing = [e.check.replace("file exists: ", "") for e in file_evidence if not e.passed]
 
-    # Auto-detect test commands if none provided
+    # 2. Lint / type checks (fast, catches errors before slow test runs)
+    lint_commands = await auto_detect_lint_commands(working_dir)
+    for cmd in lint_commands:
+        lint_evidence = await verify_command(cmd, working_dir)
+        # Prefix check name for clarity in output
+        lint_evidence.check = f"lint: {cmd.split()[0].split('/')[-1]}"
+        evidence.append(lint_evidence)
+        if not lint_evidence.passed:
+            failing.append(cmd)
+
+    # 3. Auto-detect test commands if none provided
     if not test_commands:
         test_commands = await auto_detect_test_commands(working_dir)
 
     # Run test commands
     for cmd in (test_commands or []):
         cmd_evidence = await verify_command(cmd, working_dir)
-        evidence.extend([cmd_evidence])
+        evidence.append(cmd_evidence)
         if not cmd_evidence.passed:
             failing.append(cmd)
 
-    # Browser-based UI verification (OpenHands pattern)
+    # 4. Browser-based UI verification (OpenHands pattern)
     # Only runs if Playwright is installed and project has a dev server
     try:
         from openseed_guard.browser_verify import verify_ui
