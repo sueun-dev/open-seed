@@ -71,12 +71,18 @@ class PRChannel(DeployChannel):
             timeout_seconds=10,
         )
         if result.exit_code != 0:
-            # Branch might already exist
-            await run_simple(
+            # Branch might already exist — try checking it out
+            fallback = await run_simple(
                 ["git", "checkout", branch],
                 cwd=working_dir,
                 timeout_seconds=10,
             )
+            if fallback.exit_code != 0:
+                return ChannelResult(
+                    channel="pr",
+                    success=False,
+                    message=f"Branch checkout failed: {fallback.stderr[:200]}",
+                )
 
         # 2. Stage and commit
         await run_simple(["git", "add", "."], cwd=working_dir)

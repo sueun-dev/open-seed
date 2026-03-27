@@ -41,9 +41,9 @@ class GitChannel(DeployChannel):
         # Stage all changes (use "." instead of "-A" to respect .gitignore)
         stage = await run_simple(["git", "add", "."], cwd=working_dir)
         if stage.exit_code != 0:
-            # Fallback: try adding only known file types
+            # Fallback: use bash -c for shell glob expansion
             stage = await run_simple(
-                ["git", "add", "*.js", "*.jsx", "*.ts", "*.tsx", "*.json", "*.html", "*.css", "*.py", "*.md"],
+                ["bash", "-c", "git add *.js *.jsx *.ts *.tsx *.json *.html *.css *.py *.md 2>/dev/null; git add -u"],
                 cwd=working_dir,
             )
             if stage.exit_code != 0:

@@ -89,7 +89,11 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
         aiosqlite_conn = await aiosqlite.connect(db_path)
         checkpointer = AsyncSqliteSaver(aiosqlite_conn)
         await checkpointer.setup()
-    except (ImportError, Exception):
+    except ImportError:
+        from langgraph.checkpoint.memory import MemorySaver
+        checkpointer = MemorySaver()
+    except Exception as exc:
+        console.print(f"  [yellow]Checkpoint DB unavailable ({exc}), using in-memory[/yellow]")
         from langgraph.checkpoint.memory import MemorySaver
         checkpointer = MemorySaver()
 
