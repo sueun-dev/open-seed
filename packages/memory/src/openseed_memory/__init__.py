@@ -7,6 +7,13 @@ from openseed_memory.types import MemoryEntry, MemoryType, FailurePattern, Searc
 from openseed_memory.fact_extractor import FactExtractor, MemoryDecision
 from openseed_memory.reranker import Reranker
 from openseed_memory.backends import MemoryBackend, SQLiteMemoryBackend, create_backend
+from openseed_memory.wisdom import (
+    Wisdom,
+    extract_wisdom,
+    store_wisdom,
+    recall_wisdom,
+    format_wisdom_for_prompt,
+)
 from openseed_memory.condenser import (
     Condenser,
     RecentCondenser,
@@ -23,6 +30,8 @@ __all__ = [
     "FactExtractor", "MemoryDecision", "Reranker",
     # backends
     "MemoryBackend", "SQLiteMemoryBackend", "create_backend",
+    # Wisdom (Oh-My-OpenAgent pattern)
+    "Wisdom", "extract_wisdom", "store_wisdom", "recall_wisdom", "format_wisdom_for_prompt",
     # Condenser (OpenHands pattern)
     "Condenser", "RecentCondenser", "LLMSummaryCondenser", "PipelineCondenser",
     "condense_for_prompt",
