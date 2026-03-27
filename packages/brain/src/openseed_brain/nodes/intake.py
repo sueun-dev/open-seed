@@ -60,6 +60,17 @@ async def intake_node(state: PipelineState) -> dict:
             memory_context += "\nKnown failure patterns for similar tasks:\n"
             for p in patterns:
                 memory_context += f"- {p.error_type[:200]} → fix: {p.successful_fix}\n"
+
+        # Recall structured wisdom from past runs
+        try:
+            from openseed_memory.wisdom import recall_wisdom, format_wisdom_for_prompt
+            wisdoms = await recall_wisdom(store, task, limit=5)
+            if wisdoms:
+                wisdom_text = format_wisdom_for_prompt(wisdoms)
+                if wisdom_text:
+                    memory_context += wisdom_text
+        except Exception:
+            pass  # Wisdom recall is best-effort
     except Exception as exc:
         logger.debug("Memory unavailable, proceeding without it: %s", exc)
 

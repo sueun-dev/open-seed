@@ -1,6 +1,9 @@
 """
 Memorize node — Store results and learnings in long-term memory.
-REAL implementation — calls openseed_memory.
+
+Two storage paths:
+1. Task outcome + failure patterns (existing)
+2. Structured wisdom extraction (conventions, successes, failures, gotchas, commands)
 """
 
 from __future__ import annotations
@@ -9,12 +12,13 @@ from openseed_brain.state import PipelineState
 
 
 async def memorize_node(state: PipelineState) -> dict:
-    """Store pipeline results in memory for future runs."""
+    """Store pipeline results and extract wisdom for future runs."""
     task = state["task"]
     retry_count = state.get("retry_count", 0)
     errors = state.get("errors", [])
     plan = state.get("plan")
     qa_result = state.get("qa_result")
+    intake = state.get("intake_analysis") or {}
 
     try:
         from openseed_memory.store import MemoryStore
@@ -23,7 +27,7 @@ async def memorize_node(state: PipelineState) -> dict:
         store = MemoryStore()
         await store.initialize()
 
-        # Store task outcome
+        # ── 1. Store task outcome (existing behavior) ──
         outcome = "success" if not errors else f"completed with {len(errors)} errors"
         summary = f"Task: {task[:200]}\nOutcome: {outcome}\nRetries: {retry_count}"
         if plan:
@@ -44,8 +48,33 @@ async def memorize_node(state: PipelineState) -> dict:
                 successful_fix="" if errors else "all resolved",
             )
 
+        # ── 2. Extract and store structured wisdom ──
+        wisdom_msg = ""
+        try:
+            from openseed_memory.wisdom import extract_wisdom, store_wisdom
+
+            tech_stack = intake.get("tech_stack", "")
+            wisdom = await extract_wisdom(
+                task=task,
+                plan_summary=plan.summary if plan else "",
+                qa_synthesis=qa_result.synthesis if qa_result else "",
+                retry_count=retry_count,
+                errors=[e.message for e in errors[:5]],
+                tech_stack=tech_stack,
+            )
+
+            total = (
+                len(wisdom.conventions) + len(wisdom.successes) +
+                len(wisdom.failures) + len(wisdom.gotchas) + len(wisdom.commands)
+            )
+            if total > 0:
+                await store_wisdom(store, task, wisdom, tech_stack=tech_stack)
+                wisdom_msg = f", {total} wisdom items"
+        except Exception:
+            pass  # Wisdom extraction is best-effort
+
         return {
-            "messages": [f"Memory: stored results ({outcome}, {retry_count} retries)"],
+            "messages": [f"Memory: stored results ({outcome}, {retry_count} retries{wisdom_msg})"],
         }
     except Exception as e:
         return {
