@@ -74,11 +74,17 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
     wd = Path(working_dir).resolve()
     wd.mkdir(parents=True, exist_ok=True)
 
-    # Build and run graph
-    state = initial_state(task=task, working_dir=str(wd))
+    # Build and run graph — apply config values
+    state = initial_state(
+        task=task,
+        working_dir=str(wd),
+        provider="claude",  # Default; could be overridden via CLI flag later
+    )
+    # Apply sentinel max_retries from config
+    state["max_retries"] = cfg.sentinel.max_retries
 
-    # Set up persistent async checkpointer
-    checkpoint_dir = Path("~/.openseed/checkpoints").expanduser()
+    # Set up persistent async checkpointer using config path
+    checkpoint_dir = Path(str(cfg.brain.checkpoint_dir)).expanduser()
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     db_path = str(checkpoint_dir / "checkpoints.db")
 
