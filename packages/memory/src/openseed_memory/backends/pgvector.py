@@ -198,6 +198,8 @@ class PgVectorMemoryBackend(MemoryBackend):
             # Register vector type for this connection
             if _PSYCOPG_VERSION == 2:
                 _register_vector_v2(conn)  # type: ignore[name-defined]
+            elif _PSYCOPG_VERSION == 3:
+                _register_vector_v3(conn)  # type: ignore[name-defined]
 
             with conn.cursor() as cur:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector")

@@ -130,7 +130,8 @@ async def auto_detect_test_commands(working_dir: str) -> list[str]:
     for pkg_dir, pkg_json in pkg_jsons:
         try:
             import json
-            data = json.loads(open(pkg_json).read())
+            with open(pkg_json) as f:
+                data = json.loads(f.read())
             scripts = data.get("scripts", {})
             # Relative prefix for subdirectory commands
             prefix = f"cd {os.path.basename(pkg_dir)} && " if pkg_dir != working_dir else ""
@@ -205,7 +206,8 @@ async def auto_detect_lint_commands(working_dir: str) -> list[str]:
         pkg_json = os.path.join(working_dir, "package.json")
         if os.path.exists(pkg_json):
             try:
-                data = json.loads(open(pkg_json).read())
+                with open(pkg_json) as f:
+                    data = json.loads(f.read())
                 if "eslintConfig" in data:
                     has_eslint_config = True
             except Exception:

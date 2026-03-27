@@ -9,7 +9,6 @@ Pattern from: mem0 procedural memory + SQLite history
 
 from __future__ import annotations
 
-from openseed_core.events import EventBus
 from openseed_memory.store import MemoryStore
 from openseed_memory.types import MemoryType, FailurePattern
 

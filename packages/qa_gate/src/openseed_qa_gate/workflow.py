@@ -277,7 +277,7 @@ class WorkflowOrchestrator:
             else:
                 specialist_results.append(r)
 
-        findings, _ = await synthesize(specialist_results, self._event_bus)
+        findings, _, _ = await synthesize(specialist_results, self._event_bus)
         return findings
 
     async def _evaluate_gate(

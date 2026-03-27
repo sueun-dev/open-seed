@@ -121,6 +121,17 @@ async def run_streaming(
             await process.wait()
         except Exception:
             pass
+    except Exception:
+        # Ensure process is always cleaned up (prevents zombie processes)
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await process.wait()
+        except Exception:
+            pass
+        raise
 
     return SubprocessResult(
         exit_code=process.returncode if process.returncode is not None else -1,
