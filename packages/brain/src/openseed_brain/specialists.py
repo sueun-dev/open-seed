@@ -105,6 +105,35 @@ TESTING APPROACH:
 - E2E critical paths with Playwright or Cypress
 - Snapshot tests only for stable, well-defined UI components
 
+VISUAL DESIGN PRINCIPLES:
+- Start with composition, not components — treat the first viewport as a poster
+- Full-bleed hero or full-canvas visual anchor as default; no boxed center-column \
+  heroes unless specifically requested
+- Brand/product name as the loudest text element; headline second, body third, CTA fourth
+- One dominant idea per section — never stack multiple competing elements
+- Max two typefaces, one accent color by default — restraint is premium
+- Whitespace, alignment, scale, and contrast before decorative chrome
+- Cards only when the card IS the interaction — avoid default card grids
+- Each section has one job: explain, prove, deepen, or convert. Delete sections \
+  that don't serve exactly one purpose
+- Mobile-first: design for the small screen first, enhance for larger
+- Handle all UI states: loading skeleton, error with retry, empty with guidance, \
+  success with clear feedback
+
+LANDING PAGE SEQUENCE (when building marketing/product pages):
+- Hero: brand + promise + CTA + dominant visual (full-bleed, edge-to-edge)
+- Support: one feature, offer, or proof point
+- Detail: atmosphere, workflow, product depth
+- Final CTA: convert, start, visit, contact
+- Copy is product language, not design commentary — headlines carry meaning
+
+APP UI PRINCIPLES (when building dashboards/tools):
+- Linear-style restraint: calm surface hierarchy, strong typography, few colors
+- Working surface first: KPIs, charts, filters, tables — not hero banners
+- Section headings describe what the area is and what the user can do
+- Dense but readable information layout — minimize chrome
+- No aspirational hero lines or marketing language in product UI
+
 COMMON PITFALLS TO AVOID:
 - Never use index as key in lists that can reorder
 - Never mutate state directly — always spread/copy
@@ -115,6 +144,9 @@ COMMON PITFALLS TO AVOID:
 - Never block the main thread with synchronous operations
 - Never ignore loading, error, and empty states — handle all three
 - Never make layout dependent on JavaScript loading — avoid layout shift
+- Never use a generic SaaS card grid as the first impression
+- Never overpower the brand name with a larger headline on branded pages
+- Never add carousel/slider without a narrative purpose
 """
 
 BACKEND_SPECIALIST = """\

@@ -14,6 +14,19 @@ Working mode:
 3. Implement or recommend the minimal intervention with highest risk reduction.
 4. Validate one normal path, one failure path, and one integration edge where possible.
 
+Framework-specific security references are available at config/agents/security-references/.
+Match the project's tech stack to the appropriate reference file:
+- Python + FastAPI → python-fastapi-web-server-security.md
+- Python + Flask → python-flask-web-server-security.md
+- Python + Django → python-django-web-server-security.md
+- JavaScript + Express → javascript-express-web-server-security.md
+- JavaScript/TypeScript + Next.js → javascript-typescript-nextjs-web-server-security.md
+- React frontend → javascript-typescript-react-web-frontend-security.md
+- Vue frontend → javascript-typescript-vue-web-frontend-security.md
+- Go backend → golang-general-backend-security.md
+- General web frontend → javascript-general-web-frontend-security.md
+Load ONLY the relevant reference(s) for the project's stack. Do NOT load all references.
+
 Focus on:
 - authentication/authorization boundaries and privilege-escalation opportunities
 - input validation and injection resistance in externally reachable paths
