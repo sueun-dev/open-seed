@@ -40,13 +40,27 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
       createThread(input.slice(0, 60), "pair");
     }
 
-    // Simulate AI response (will connect to actual API)
+    // Check backend availability
+    try {
+      const healthCheck = await fetch("/api/health");
+      if (!healthCheck.ok) throw new Error();
+    } catch {
+      setStreaming(false);
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: "Backend server not running.\n\nStart it with:\n```\nopenseed serve --port 8000\n```",
+        timestamp: new Date().toISOString(),
+      }]);
+      return;
+    }
+
     try {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task: input, working_dir: workingDir, provider: "claude" }),
       });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
 
       const ws = new WebSocket(`ws://${location.host}/ws/events`);
       let assistantContent = "";
