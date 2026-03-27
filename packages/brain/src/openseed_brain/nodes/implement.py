@@ -443,6 +443,93 @@ Read existing files, then write ALL missing files. No duplicates.""",
     )
 
 
+# ─── Self-Verify: lint/type check after implementation ─────────────────────
+
+
+async def _self_verify_and_fix(
+    state: PipelineState,
+    impl: Implementation,
+    label: str,
+) -> tuple[Implementation, list[str]]:
+    """
+    Run lint/type checks on the implementation output and auto-fix errors.
+
+    This catches basic mistakes (syntax errors, type errors, missing imports)
+    BEFORE the expensive QA Gate runs. If lint errors are found, asks Claude
+    to fix them immediately in the same working directory.
+
+    Returns:
+        (possibly_updated_implementation, extra_messages)
+    """
+    working_dir = state["working_dir"]
+    extra_messages: list[str] = []
+
+    try:
+        from openseed_guard.evidence import auto_detect_lint_commands, verify_command
+
+        lint_commands = await auto_detect_lint_commands(working_dir)
+        if not lint_commands:
+            return impl, extra_messages
+
+        # Run each lint command and collect failures
+        failures: list[str] = []
+        for cmd in lint_commands:
+            evidence = await verify_command(cmd, working_dir)
+            if not evidence.passed:
+                failures.append(f"{cmd}: {evidence.detail}")
+
+        if not failures:
+            extra_messages.append(f"Implement [{label}]: lint checks passed")
+            return impl, extra_messages
+
+        # Lint errors found — ask Claude to fix them immediately
+        extra_messages.append(
+            f"Implement [{label}]: {len(failures)} lint error(s) found, auto-fixing"
+        )
+
+        from openseed_claude.agent import ClaudeAgent
+        agent = ClaudeAgent()
+        error_text = "\n".join(f"- {f}" for f in failures[:10])
+
+        await agent.invoke(
+            prompt=f"""Lint/type checks found errors in the code you just wrote.
+Fix ALL of these errors NOW.
+
+Working directory: {working_dir}
+
+Errors:
+{error_text}
+
+Rules:
+- Read each file with errors, fix the issue, write the corrected file
+- Do NOT change any logic or features — only fix the lint/type errors
+- If an import is missing, add it. If a type is wrong, fix it.
+- Do NOT add new features or refactor""",
+            model="sonnet",
+            working_dir=working_dir,
+            max_turns=8,
+        )
+
+        # Re-check after fix
+        still_failing = 0
+        for cmd in lint_commands:
+            evidence = await verify_command(cmd, working_dir)
+            if not evidence.passed:
+                still_failing += 1
+
+        if still_failing == 0:
+            extra_messages.append(f"Implement [{label}]: all lint errors fixed")
+        else:
+            extra_messages.append(
+                f"Implement [{label}]: {still_failing}/{len(lint_commands)} lint issues remain"
+            )
+
+    except Exception:
+        pass  # Self-verify is best-effort — don't block implement
+
+    return impl, extra_messages
+
+
 # ─── Main Node ───────────────────────────────────────────────────────────────
 
 
@@ -455,6 +542,7 @@ async def implement_node(state: PipelineState) -> dict:
     2. If no plan or no tasks, use fullstack specialist directly
     3. Otherwise: route tasks to specialists via LLM, execute in parallel,
        then run integration check
+    4. Self-verify: run lint/type checks and auto-fix basic errors before QA
     """
     provider = state.get("provider", "claude")
 
@@ -479,9 +567,10 @@ async def implement_node(state: PipelineState) -> dict:
     # No plan or empty plan — use fullstack specialist directly
     if not plan or not plan.tasks:
         impl = await _implement_fullstack(state)
+        impl, extra = await _self_verify_and_fix(state, impl, "fullstack")
         return {
             "implementation": impl,
-            "messages": [f"Implement [fullstack]: {impl.summary[:300]}"],
+            "messages": [f"Implement [fullstack]: {impl.summary[:300]}"] + extra,
         }
 
     # Route tasks to domain specialists via LLM
@@ -492,9 +581,10 @@ async def implement_node(state: PipelineState) -> dict:
     if not routed:
         # Routing returned nothing — fall back to fullstack
         impl = await _implement_fullstack(state)
+        impl, extra = await _self_verify_and_fix(state, impl, "fullstack-fallback")
         return {
             "implementation": impl,
-            "messages": [f"Implement [fullstack-fallback]: {impl.summary[:300]}"],
+            "messages": [f"Implement [fullstack-fallback]: {impl.summary[:300]}"] + extra,
         }
 
     # Execute specialists in parallel
@@ -525,9 +615,13 @@ async def implement_node(state: PipelineState) -> dict:
         raw_output=combined_output,
     )
 
+    # Self-verify: lint/type check and auto-fix before QA Gate
+    label = f"specialists: {', '.join(domains_used)}"
+    impl, extra = await _self_verify_and_fix(state, impl, label)
+
     messages = [
-        f"Implement [specialists: {', '.join(domains_used)}]: {impl.summary[:300]}"
-    ]
+        f"Implement [{label}]: {impl.summary[:300]}"
+    ] + extra
 
     return {
         "implementation": impl,
