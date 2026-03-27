@@ -33,6 +33,21 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     const tid = createThread(task.slice(0, 60), "agi");
     threadIdRef.current = tid;
 
+    // Check if backend is reachable first
+    try {
+      const healthCheck = await fetch("/api/health");
+      if (!healthCheck.ok) throw new Error("Backend not responding");
+    } catch {
+      const errMsg = "Backend server not running. Start it with: openseed serve --port 8000";
+      setEvents((prev) => {
+        const next = [...prev, { type: "error", data: { message: errMsg } }];
+        updateThreadEvents(tid, next);
+        return next;
+      });
+      setRunning(false);
+      return;
+    }
+
     try {
       const ws = new WebSocket(`ws://${location.host}/ws/events`);
       ws.onmessage = (e) => {
@@ -62,11 +77,15 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task, working_dir: workingDir, provider }),
       });
-      const data = await res.json();
-      if (data.error) {
-        setEvents((prev) => [...prev, { type: "error", data: { message: data.error } }]);
-        setRunning(false);
-        ws.close();
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const text = await res.text();
+      if (text) {
+        const data = JSON.parse(text);
+        if (data.error) {
+          setEvents((prev) => [...prev, { type: "error", data: { message: data.error } }]);
+          setRunning(false);
+          ws.close();
+        }
       }
     } catch (err) {
       setEvents((prev) => [...prev, { type: "error", data: { message: String(err) } }]);
