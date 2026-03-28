@@ -16,6 +16,13 @@ export default function FolderBrowser({ onSelect, onClose }: Props) {
   const [manualPath, setManualPath] = useState("");
   const [serverAvailable, setServerAvailable] = useState(true);
 
+  // ESC to close
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   const browse = async (path: string) => {
     setLoading(true);
     setError("");
@@ -49,8 +56,8 @@ export default function FolderBrowser({ onSelect, onClose }: Props) {
 
   return (
     <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
-      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999,
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
     }} onClick={onClose}>
       <div style={{
         background: "#111", border: "1px solid #333", borderRadius: 12,

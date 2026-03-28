@@ -330,17 +330,25 @@ export default function Settings({ onClose }: Props) {
 
   const sectionsToRender = search ? filteredSections : [SECTIONS.find((s) => s.key === activeSection)!];
 
+  // ESC to close
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   return (
     <div style={{
-      position: "fixed", inset: 0, zIndex: 200,
-      background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center",
-    }}>
+      position: "fixed", inset: 0, zIndex: 1000,
+      background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }} onClick={onClose}>
       <div style={{
         width: "min(1100px, 92vw)", height: "min(750px, 88vh)",
         background: "#1e1e1e", borderRadius: 12, border: "1px solid #333",
         display: "flex", flexDirection: "column", overflow: "hidden",
         boxShadow: "0 16px 48px rgba(0,0,0,0.6)",
-      }}>
+      }} onClick={(e) => e.stopPropagation()}>
         {/* Title bar */}
         <div style={{
           height: 48, padding: "0 20px", display: "flex", alignItems: "center",
