@@ -1,9 +1,9 @@
 """
 Intake node — Analyze task, recall memories, classify intent, ask clarifications.
 
-Two-phase intake:
-  1. intake_node: analyze + generate clarification questions (always)
-  2. intake_with_answers_node: re-analyze with user's answers, then proceed
+Single function, two phases (controlled by has_answers flag):
+  Phase 1 (no answers): research + analyze + generate clarification questions
+  Phase 2 (with answers): re-analyze with user's answers + generate execution plan
 
 All routing decisions are made by the LLM — no regex, no hardcoded extension checks.
 """
@@ -310,7 +310,8 @@ def _scan_working_dir(working_dir: str) -> tuple[str, list[str]]:
     if os.path.exists(pkg_json):
         detected_configs.append("package.json")
         try:
-            data = json.loads(open(pkg_json).read())
+            with open(pkg_json) as f:
+                data = json.loads(f.read())
             deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
             if "react" in deps:
                 tech_stack.append("React")
@@ -350,7 +351,8 @@ def _scan_working_dir(working_dir: str) -> tuple[str, list[str]]:
             fpath = os.path.join(working_dir, fname)
             if os.path.exists(fpath):
                 try:
-                    content = open(fpath).read(500)
+                    with open(fpath) as ff:
+                        content = ff.read(500)
                     if "flask" in content.lower():
                         tech_stack.append("Flask")
                     if "fastapi" in content.lower():
@@ -392,24 +394,34 @@ def _parse_analysis(text: str) -> dict:
     analysis: dict = {}
     requirements: list[str] = []
     current_key = ""
+    # Sections that end the REQUIREMENTS list
+    _END_SECTIONS = {"INTENT", "COMPLEXITY", "SKIP_PLANNING", "EXISTING_PROJECT",
+                     "APPROACH", "LESSONS", "QUESTIONS", "PLAN", "SCOPE", "DONE_WHEN"}
 
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
 
-        # Key: value lines
+        # Check if this line starts a new known section
+        matched_section = False
         for key in ["INTENT", "COMPLEXITY", "SKIP_PLANNING", "EXISTING_PROJECT", "APPROACH", "LESSONS"]:
             if stripped.upper().startswith(f"{key}:"):
                 value = stripped.split(":", 1)[1].strip()
                 analysis[key.lower()] = value
                 current_key = key.lower()
+                matched_section = True
                 break
-        else:
+
+        if not matched_section:
             if stripped.upper().startswith("REQUIREMENTS:"):
                 current_key = "requirements"
-            elif current_key == "requirements" and stripped.startswith("- "):
-                requirements.append(stripped[2:].strip())
+            elif current_key == "requirements":
+                # Stop collecting requirements if we hit another section
+                if any(stripped.upper().startswith(f"{s}:") for s in _END_SECTIONS):
+                    current_key = ""
+                elif stripped.startswith("- "):
+                    requirements.append(stripped[2:].strip())
 
     if requirements:
         analysis["requirements"] = requirements
