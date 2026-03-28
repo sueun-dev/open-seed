@@ -100,13 +100,20 @@ def _convert_intake_plan(task: str, intake_analysis: dict) -> Plan:
 
     plan = Plan(summary=approach or f"Plan for: {task[:100]}")
 
-    # Convert plan steps to tasks
+    # Collect all file paths from scope for matching
+    modify_files = scope.get("modify", [])
+    create_files = scope.get("create", [])
+    do_not_touch = scope.get("do_not_touch", [])
+    all_scope_files = modify_files + create_files
+
+    # Convert plan steps to tasks with file assignment
     steps = [line.strip() for line in plan_text.splitlines() if line.strip()]
     for i, step in enumerate(steps):
         # Strip leading "1. ", "2. " etc.
         desc = step.lstrip("0123456789. ").strip() if step[0:1].isdigit() else step
-        # Guess role from content
         lower = desc.lower()
+
+        # Guess role from content
         if any(w in lower for w in ("frontend", "component", "ui", "css", "style", "react", "page")):
             role = "frontend"
         elif any(w in lower for w in ("backend", "api", "server", "endpoint", "route", "database", "model")):
@@ -117,38 +124,36 @@ def _convert_intake_plan(task: str, intake_analysis: dict) -> Plan:
             role = "infra"
         else:
             role = "fullstack"
+
+        # Match scope files to this task by keyword overlap
+        task_files = []
+        for fp in all_scope_files:
+            fp_lower = fp.lower()
+            # Check if any word from the step description appears in the file path
+            desc_words = [w for w in lower.split() if len(w) > 3]
+            if any(w in fp_lower for w in desc_words):
+                task_files.append(fp)
         plan.tasks.append(PlanTask(
             id=f"T{i + 1}",
             description=desc,
             role=role,
-            files=[],
+            files=task_files,
         ))
 
     # Build file manifest from scope
-    modify_files = scope.get("modify", [])
-    create_files = scope.get("create", [])
-    do_not_touch = scope.get("do_not_touch", [])
-
     for f in create_files:
         plan.file_manifest.append(FileEntry(path=f, purpose="Create new"))
     for f in modify_files:
         plan.file_manifest.append(FileEntry(path=f, purpose="Modify existing"))
 
-    # Attach scope and done_when as extra context for downstream nodes
+    # Inject constraints into plan summary (NOT as tasks, to avoid execution)
+    constraints = []
     if do_not_touch:
-        plan.tasks.append(PlanTask(
-            id="T-SCOPE",
-            description=f"DO NOT TOUCH: {', '.join(do_not_touch)}",
-            role="constraint",
-            files=[],
-        ))
+        constraints.append(f"DO NOT TOUCH: {', '.join(do_not_touch)}")
     if done_when:
-        plan.tasks.append(PlanTask(
-            id="T-DONE",
-            description="DONE WHEN: " + " | ".join(done_when),
-            role="constraint",
-            files=[],
-        ))
+        constraints.append(f"DONE WHEN: {' | '.join(done_when)}")
+    if constraints:
+        plan.summary += " [" + "; ".join(constraints) + "]"
 
     return plan
 
