@@ -58,6 +58,12 @@ class IntakeRequest(BaseModel):
     clarification_questions: list[dict] = []
 
 
+class ChatRequest(BaseModel):
+    message: str
+    working_dir: str = "."
+    session_id: str | None = None
+
+
 class MemorySearchRequest(BaseModel):
     query: str
     limit: int = 10
@@ -69,6 +75,49 @@ class MemorySearchRequest(BaseModel):
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok", "version": "2.0.0-alpha.0"}
+
+
+@app.post("/api/chat")
+async def chat(req: ChatRequest) -> dict:
+    """Pair Mode: direct Claude CLI call, no pipeline. Streaming via WebSocket."""
+    from openseed_claude.agent import ClaudeAgent
+
+    agent = ClaudeAgent()
+
+    await _broadcast({"type": "node.start", "node": "pair", "data": {}})
+
+    try:
+        response = await agent.invoke(
+            prompt=req.message,
+            model="sonnet",
+            working_dir=req.working_dir,
+            max_turns=20,
+            session_id=req.session_id,
+            continue_session=req.session_id is None and False,
+        )
+
+        # Broadcast response
+        await _broadcast({"type": "node.log", "node": "pair", "data": {"message": response.text}})
+
+        # Broadcast file changes if any
+        if response.files_created or response.files_modified:
+            await _broadcast({"type": "node.implementation", "node": "pair", "data": {
+                "summary": response.text[:300],
+                "files_created": response.files_created,
+                "files_modified": response.files_modified,
+            }})
+
+        await _broadcast({"type": "pipeline.complete", "node": "pair", "data": {"status": "completed"}})
+
+        return {
+            "response": response.text,
+            "session_id": response.session_id,
+            "files_created": response.files_created,
+            "files_modified": response.files_modified,
+        }
+    except Exception as e:
+        await _broadcast({"type": "pipeline.fail", "node": "pair", "data": {"error": str(e)}})
+        return {"response": f"Error: {e}", "session_id": None, "files_created": [], "files_modified": []}
 
 
 @app.post("/api/intake")
