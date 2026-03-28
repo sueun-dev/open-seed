@@ -181,8 +181,15 @@ async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
     await _broadcast({"type": "debate.start", "node": "pair", "data": {
         "step": "analyzing", "message": "Claude and Codex are both analyzing your request..."}})
 
+    analysis_prompt = (
+        f"Read the files in the working directory and analyze this request. "
+        f"Explore the codebase first, then propose your approach. "
+        f"Do NOT make changes yet, just analyze and suggest.\n\n"
+        f"Request: {req.message}"
+    )
+
     claude_task = claude_agent.invoke(
-        prompt=f"Analyze this and propose your approach (do NOT execute yet, just analyze):\n\n{req.message}",
+        prompt=analysis_prompt,
         model="sonnet",
         working_dir=req.working_dir,
         max_turns=5,
@@ -192,7 +199,7 @@ async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
     codex_text = ""
     try:
         codex_task = codex_agent.invoke(
-            prompt=f"Analyze this and propose your approach (do NOT execute yet, just analyze):\n\n{req.message}",
+            prompt=analysis_prompt,
             working_dir=req.working_dir,
         )
         claude_analysis, codex_analysis = await asyncio.gather(claude_task, codex_task)
