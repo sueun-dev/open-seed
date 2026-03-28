@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import Pipeline from "./Pipeline";
 import TaskLog from "./TaskLog";
+import { BrailleSpinner } from "./Spinner";
 import type { Thread, Mode } from "../App";
 
 type Props = {
@@ -209,7 +210,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       {/* Status badge */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         {running ? (
-          <span style={{ fontSize: 12, color: "#60a5fa", fontWeight: 600 }}>⠋ Pipeline running...</span>
+          <span style={{ fontSize: 12, color: "#60a5fa", fontWeight: 600 }}><BrailleSpinner /> Pipeline running...</span>
         ) : events.some((e) => e.type === "pipeline.complete") ? (
           <span style={{ fontSize: 12, color: "#4ade80", fontWeight: 600 }}>✓ Pipeline complete</span>
         ) : events.some((e) => e.type === "pipeline.fail") ? (
