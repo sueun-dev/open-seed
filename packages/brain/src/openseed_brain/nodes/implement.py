@@ -524,8 +524,9 @@ Rules:
                 f"Implement [{label}]: {still_failing}/{len(lint_commands)} lint issues remain"
             )
 
-    except Exception:
-        pass  # Self-verify is best-effort — don't block implement
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).debug("Self-verify skipped: %s", exc)
 
     return impl, extra_messages
 
@@ -549,15 +550,17 @@ async def implement_node(state: PipelineState) -> dict:
     # Legacy provider modes — backward compatibility
     if provider == "codex":
         impl = await _implement_codex(state)
+        impl, extra = await _self_verify_and_fix(state, impl, "codex")
         return {
             "implementation": impl,
-            "messages": [f"Implement [codex]: {impl.summary[:300]}"],
+            "messages": [f"Implement [codex]: {impl.summary[:300]}"] + extra,
         }
     if provider == "both":
         impl = await _implement_both(state)
+        impl, extra = await _self_verify_and_fix(state, impl, "both")
         return {
             "implementation": impl,
-            "messages": [f"Implement [both]: {impl.summary[:300]}"],
+            "messages": [f"Implement [both]: {impl.summary[:300]}"] + extra,
         }
 
     # ── Specialist-based implementation ──────────────────────────────────────
