@@ -92,6 +92,21 @@ async def get_config() -> dict:
     return cfg.model_dump()
 
 
+@app.post("/api/config")
+async def save_config(body: dict) -> dict:
+    """Save config to ~/.openseed/config.yaml."""
+    import os
+    config_dir = os.path.expanduser("~/.openseed")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.yaml")
+
+    import yaml
+    with open(config_path, "w") as f:
+        yaml.safe_dump(body, f, default_flow_style=False, sort_keys=False)
+
+    return {"status": "saved", "path": config_path}
+
+
 @app.get("/api/resolve-folder")
 async def resolve_folder(name: str, children: str = "") -> dict:
     """Resolve a folder name to its full absolute path by searching common locations.
