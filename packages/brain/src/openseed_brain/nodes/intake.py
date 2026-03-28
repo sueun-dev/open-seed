@@ -241,6 +241,7 @@ Be concise. No extra prose outside the structure."""
     intake_analysis = _parse_analysis(analysis_text)
 
     # Parse phase-specific outputs
+    questions: list[dict] = []
     if not has_answers:
         questions = _parse_questions_with_options(analysis_text)
     else:
@@ -436,7 +437,7 @@ def _parse_questions_with_options(text: str) -> list[dict]:
                 if "| OPTIONS:" in content or "|OPTIONS:" in content:
                     parts = content.split("| OPTIONS:" if "| OPTIONS:" in content else "|OPTIONS:", 1)
                     question_text = parts[0].strip()
-                    options = [o.strip() for o in parts[1].split(",") if o.strip()]
+                    options = _split_options(parts[1].strip())
                     questions.append({"question": question_text, "options": options})
                 else:
                     # No options provided, treat as open-ended
@@ -444,6 +445,18 @@ def _parse_questions_with_options(text: str) -> list[dict]:
             elif stripped and not stripped.startswith("-"):
                 break
     return questions
+
+
+def _split_options(raw: str) -> list[str]:
+    """
+    Split options string intelligently.
+    Handles: "A. foo (bar, baz), B. qux, C. Other"
+    Splits on ", <letter>." pattern instead of bare commas.
+    """
+    import re
+    # Split on ", " followed by a capital letter and period (e.g. ", B.")
+    parts = re.split(r',\s*(?=[A-Z]\.)', raw)
+    return [p.strip() for p in parts if p.strip()]
 
 
 def _parse_section(text: str, section_name: str) -> str:
@@ -501,7 +514,9 @@ def _parse_scope(text: str) -> dict:
             in_scope = True
             continue
         if in_scope:
-            if stripped.upper().startswith("DONE_WHEN:") or stripped.upper().startswith("QUESTIONS:"):
+            # Stop at any known section after SCOPE
+            if any(stripped.upper().startswith(f"{s}:") for s in
+                   ["DONE_WHEN", "QUESTIONS", "PLAN", "LESSONS", "INTENT"]):
                 break
             for key in ["MODIFY", "CREATE", "DO_NOT_TOUCH"]:
                 if stripped.upper().startswith(f"- {key}:") or stripped.upper().startswith(f"{key}:"):

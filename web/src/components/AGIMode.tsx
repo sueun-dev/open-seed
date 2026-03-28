@@ -34,6 +34,7 @@ type PlanState = {
   plan: PlanData;
   intakeAnalysis: Record<string, any>;
   answers: string[];
+  previousClarification: ClarificationState | null;
 };
 
 export default function AGIMode({ activeThread, workingDir, setWorkingDir, createThread, updateThreadEvents }: Props) {
@@ -140,6 +141,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             },
             intakeAnalysis: analysis,
             answers,
+            previousClarification: savedClarification,
           });
           setIntakeLoading(false);
           return;
@@ -411,7 +413,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
           {/* Actions */}
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <button
-              onClick={() => { setPlanReview(null); setClarification(null); }}
+              onClick={() => { setClarification(planReview.previousClarification); setPlanReview(null); }}
               style={{
                 padding: "10px 20px", borderRadius: 10, border: "1px solid #333",
                 background: "transparent", color: "#888", cursor: "pointer",
