@@ -75,13 +75,19 @@ async def intake_node(state: PipelineState) -> dict:
     except Exception as exc:
         logger.debug("Memory unavailable, proceeding without it: %s", exc)
 
-    # ── Step 3: Scan existing codebase + detect tech stack ──
+    # ── Step 3: Scan existing codebase + detect tech stack + read key files ──
     codebase_context = ""
     detected_tech_stack: list[str] = []
     try:
-        codebase_context, detected_tech_stack = _scan_working_dir(working_dir)
+        codebase_context, detected_tech_stack, all_paths = _scan_working_dir(working_dir)
         if codebase_context:
             logger.info("Codebase scan: %s", codebase_context[:100])
+        # Read key source files for existing projects
+        if len(all_paths) > 3:
+            file_contents = _read_key_files(working_dir, task, detected_tech_stack, all_paths)
+            if file_contents:
+                codebase_context += file_contents
+                logger.info("Read %d chars of key source files", len(file_contents))
     except Exception as exc:
         logger.debug("Codebase scan skipped: %s", exc)
 
@@ -265,38 +271,40 @@ Be concise. No extra prose outside the structure."""
     return result
 
 
-def _scan_working_dir(working_dir: str) -> tuple[str, list[str]]:
+def _scan_working_dir(working_dir: str) -> tuple[str, list[str], list[str]]:
     """
     Scan the working directory for existing files and detect tech stack.
 
     Returns:
-        Tuple of (context_string, detected_tech_stack_list).
-        - context_string: human-readable summary for the LLM prompt
-        - detected_tech_stack_list: e.g. ["React", "Express", "TypeScript"]
+        Tuple of (context_string, detected_tech_stack_list, all_relative_paths).
     """
     import os
     import json
 
     if not os.path.isdir(working_dir):
-        return "", []
+        return "", [], []
 
     # List top-level files/dirs (skip hidden, node_modules, etc.)
     skip = {".git", "node_modules", "__pycache__", ".venv", "dist", ".next", "build"}
     try:
         entries = [e for e in os.listdir(working_dir) if e not in skip and not e.startswith(".")]
     except OSError:
-        return "", []
+        return "", [], []
 
     if not entries:
-        return "\nExisting codebase: EMPTY directory (building from scratch)\n", []
+        return "\nExisting codebase: EMPTY directory (building from scratch)\n", [], []
 
-    # Count files recursively
+    # Count files recursively + collect all relative paths
     file_count = 0
     extensions: dict[str, int] = {}
+    all_paths: list[str] = []
     for root, dirs, files in os.walk(working_dir):
         dirs[:] = [d for d in dirs if d not in skip]
+        rel_root = os.path.relpath(root, working_dir)
         for f in files:
             file_count += 1
+            rel_path = f if rel_root == "." else os.path.join(rel_root, f)
+            all_paths.append(rel_path)
             ext = os.path.splitext(f)[1].lower()
             if ext:
                 extensions[ext] = extensions.get(ext, 0) + 1
@@ -382,7 +390,135 @@ def _scan_working_dir(working_dir: str) -> tuple[str, list[str]]:
         f"- Status: {'EXISTING PROJECT — modify/extend, do NOT rebuild from scratch' if file_count > 3 else 'Near-empty — build from scratch'}"
     )
 
-    return "\n".join(parts) + "\n", tech_stack
+    return "\n".join(parts) + "\n", tech_stack, all_paths
+
+
+# ─── Smart File Reading ──────────────────────────────────────────────────────
+
+MAX_FILE_CONTENT_CHARS = 12_000  # ~3000 tokens total budget
+MAX_SINGLE_FILE_CHARS = 3_000   # ~750 tokens per file
+MAX_FILES_TO_READ = 8
+
+_SOURCE_EXTENSIONS = {
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".vue", ".svelte",
+    ".go", ".rs", ".java", ".rb", ".php", ".swift", ".kt",
+    ".css", ".scss", ".html", ".sql", ".graphql",
+}
+
+_ENTRY_POINTS = {
+    "main.py", "app.py", "server.py", "manage.py", "wsgi.py", "asgi.py",
+    "index.ts", "index.js", "index.tsx", "index.jsx",
+    "main.ts", "main.tsx", "main.js",
+    "server.ts", "server.js",
+    "App.tsx", "App.jsx", "App.vue",
+}
+
+_STOPWORDS = {
+    "the", "a", "an", "is", "it", "to", "for", "in", "on", "of", "and", "or",
+    "fix", "add", "create", "build", "make", "update", "implement", "bug",
+    "issue", "please", "can", "you", "i", "my", "we", "should", "need",
+    "want", "would", "like", "this", "that", "with", "from", "into", "not",
+    "all", "some", "new", "use", "using", "help", "get", "set", "has", "have",
+}
+
+
+def _extract_task_keywords(task: str) -> list[str]:
+    """Extract meaningful keywords from task description."""
+    import re
+    words = re.findall(r'[a-zA-Z]{3,}', task.lower())
+    return [w for w in words if w not in _STOPWORDS]
+
+
+def _smart_truncate(content: str, max_chars: int) -> str:
+    """Truncate file content: keep head (imports) + key signatures."""
+    if len(content) <= max_chars:
+        return content
+    lines = content.splitlines()
+    head = lines[:20]
+    sig_patterns = ("def ", "async def ", "class ", "export ", "function ",
+                    "interface ", "type ", "const ", "router.", "@app.")
+    signatures = [
+        ln for ln in lines[20:]
+        if any(ln.lstrip().startswith(p) for p in sig_patterns)
+    ]
+    result = "\n".join(head)
+    if signatures:
+        result += "\n\n# ... (truncated) key signatures:\n" + "\n".join(signatures[:30])
+    return result[:max_chars]
+
+
+def _read_key_files(
+    working_dir: str, task: str, tech_stack: list[str], all_paths: list[str],
+) -> str:
+    """
+    Read the most relevant source files for the given task.
+
+    Uses a 3-tier scoring system:
+      Tier 1: Entry point files (App.tsx, main.py, etc.)
+      Tier 2: Files matching task keywords in their path
+      Tier 3: Structural files (models, schemas, routes, types)
+
+    Returns formatted file contents string for prompt injection.
+    """
+    import os
+
+    keywords = _extract_task_keywords(task)
+
+    scored: list[tuple[float, str]] = []
+    for rel_path in all_paths:
+        ext = os.path.splitext(rel_path)[1].lower()
+        if ext not in _SOURCE_EXTENSIONS:
+            continue
+        lower_path = rel_path.lower()
+        score = 0.0
+        # Tier 1: entry point bonus
+        basename = os.path.basename(rel_path)
+        if basename in _ENTRY_POINTS:
+            score += 5.0
+        # Tier 2: keyword match
+        for kw in keywords:
+            if kw in lower_path:
+                score += 3.0
+        # Tier 3: structural file bonus
+        for pattern in ("model", "schema", "types", "interface", "route", "url", "config"):
+            if pattern in lower_path:
+                score += 1.5
+                break
+        # Depth penalty
+        depth = rel_path.count(os.sep)
+        score -= depth * 0.3
+
+        if score > 0:
+            scored.append((score, rel_path))
+
+    if not scored:
+        return ""
+
+    scored.sort(key=lambda x: -x[0])
+    selected = scored[:MAX_FILES_TO_READ]
+
+    parts = ["\nKey source files (auto-selected for relevance):"]
+    budget_remaining = MAX_FILE_CONTENT_CHARS
+
+    for _score, rel_path in selected:
+        if budget_remaining <= 0:
+            break
+        full_path = os.path.join(working_dir, rel_path)
+        try:
+            with open(full_path, encoding="utf-8", errors="ignore") as f:
+                raw = f.read(MAX_SINGLE_FILE_CHARS + 500)
+            truncated = _smart_truncate(raw, min(MAX_SINGLE_FILE_CHARS, budget_remaining))
+            parts.append(f"\n--- {rel_path} ---\n{truncated}")
+            budget_remaining -= len(truncated)
+        except OSError:
+            continue
+
+    if len(parts) == 1:
+        return ""
+    return "\n".join(parts) + "\n"
+
+
+# ─── Parsers ─────────────────────────────────────────────────────────────────
 
 
 def _parse_analysis(text: str) -> dict:
