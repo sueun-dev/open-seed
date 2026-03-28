@@ -33,6 +33,7 @@ type ClarificationState = {
 type PlanState = {
   plan: PlanData;
   intakeAnalysis: Record<string, any>;
+  answers: string[];
 };
 
 export default function AGIMode({ activeThread, workingDir, setWorkingDir, createThread, updateThreadEvents }: Props) {
@@ -138,6 +139,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
               approach: analysis.approach || "",
             },
             intakeAnalysis: analysis,
+            answers,
           });
           setIntakeLoading(false);
           return;
@@ -421,7 +423,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
               Back
             </button>
             <button
-              onClick={() => startRun(clarification?.answers || [])}
+              onClick={() => startRun(planReview.answers)}
               style={{
                 padding: "10px 24px", borderRadius: 10, border: "none",
                 background: "#16a34a", color: "#fff", cursor: "pointer",
