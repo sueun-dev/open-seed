@@ -159,33 +159,40 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
   // Clarification UI
   if (clarification) {
     return (
-      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, padding: "0 24px" }}>
-        <div style={{ textAlign: "center", marginBottom: 8 }}>
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 24px", overflowY: "auto" }}>
+        <div style={{ width: "100%", maxWidth: 640 }}>
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
           <div style={{ fontSize: 36, marginBottom: 8 }}>🤔</div>
           <h2 style={{ fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" }}>Before I start...</h2>
           <p style={{ color: "#666", fontSize: 12, maxWidth: 500, margin: "0 auto" }}>
-            A few questions to make sure I build exactly what you need.
+            I researched current trends and best practices. A few questions to nail down the approach.
           </p>
         </div>
 
         {/* Task summary */}
         <div style={{
-          width: "100%", maxWidth: 560, padding: "10px 14px", borderRadius: 8,
+          width: "100%", padding: "10px 14px", borderRadius: 8,
           background: "#111", border: "1px solid #222", fontSize: 12, color: "#888",
+          marginBottom: 20,
         }}>
           <span style={{ color: "#555", fontWeight: 600 }}>Task:</span> {task}
         </div>
 
         {/* Questions */}
-        <div style={{ width: "100%", maxWidth: 560, display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* Questions */}
+        <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
           {clarification.questions.map((q, i) => (
-            <div key={i}>
-              <label style={{
-                fontSize: 13, color: "#ddd", fontWeight: 500,
-                display: "block", marginBottom: 6,
+            <div key={i} style={{
+              padding: "14px 16px", borderRadius: 10,
+              border: "1px solid #1a1a1a", background: "#0a0a0a",
+            }}>
+              <div style={{
+                fontSize: 13, color: "#ccc", lineHeight: 1.5,
+                marginBottom: 10, whiteSpace: "pre-wrap",
               }}>
-                {i + 1}. {q}
-              </label>
+                <span style={{ color: "#2563eb", fontWeight: 700, marginRight: 6 }}>{i + 1}.</span>
+                {q}
+              </div>
               <input
                 value={clarification.answers[i]}
                 onChange={(e) => {
@@ -202,7 +209,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
                 autoFocus={i === 0}
                 style={{
                   width: "100%", padding: "10px 14px", borderRadius: 8,
-                  border: "1px solid #222", background: "#0d0d0d", color: "#eee",
+                  border: "1px solid #222", background: "#111", color: "#eee",
                   fontSize: 13, outline: "none",
                 }}
                 onFocus={(e) => e.currentTarget.style.borderColor = "#2563eb"}
@@ -213,7 +220,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
         </div>
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
           <button
             onClick={() => startRun([])}
             style={{
@@ -239,6 +246,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             Continue →
           </button>
         </div>
+      </div>
       </div>
     );
   }

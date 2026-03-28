@@ -102,13 +102,46 @@ async def intake_node(state: PipelineState) -> dict:
     except Exception as exc:
         logger.debug("Microagent loading skipped: %s", exc)
 
-    # ── Step 5: Analyse task + generate clarification questions via Claude ──
+    # ── Step 5: Research current trends (for first pass only) ──
     from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
 
-    # Check if we already have answers (second pass after user responded)
     has_answers = bool(state.get("clarification_answers"))
 
+    research_context = ""
+    if not has_answers:
+        try:
+            research_response = await agent.invoke(
+                prompt=f"""Research current best practices and trends for this task.
+Use web search to find the latest approaches, popular tools, and modern patterns.
+
+Task: {task}
+{codebase_context}
+
+Respond with a concise summary (max 300 words):
+TRENDS:
+- <current trend/best practice 1>
+- <current trend/best practice 2>
+- <current trend/best practice 3>
+- <current trend/best practice 4>
+POPULAR_TOOLS:
+- <tool/library 1 with brief reason>
+- <tool/library 2 with brief reason>
+MODERN_PATTERNS:
+- <pattern 1>
+- <pattern 2>
+
+Focus on what's popular RIGHT NOW. Include specific library names and versions where relevant.
+Be factual and concise. No fluff.""",
+                model="sonnet",  # Sonnet for speed on research
+                max_turns=3,  # Allow tool use for web search
+            )
+            research_context = f"\n\nCurrent trends and best practices (from web research):\n{research_response.text[:800]}\n"
+            logger.info("Trend research complete: %s", research_response.text[:100])
+        except Exception as exc:
+            logger.debug("Trend research skipped: %s", exc)
+
+    # ── Step 6: Analyse task + generate clarification questions via Claude ──
     answers_context = ""
     if has_answers:
         answers = state["clarification_answers"]
@@ -123,7 +156,7 @@ async def intake_node(state: PipelineState) -> dict:
 Task: {task}
 Working directory: {working_dir}
 {intent_info}{memory_context}
-{codebase_context}{answers_context}
+{codebase_context}{research_context}{answers_context}
 
 Respond with EXACTLY this structure (fill in each line):
 INTENT: <implementation|fix|research|investigation|evaluation|open_ended>
@@ -150,10 +183,11 @@ Rules for EXISTING_PROJECT:
   an existing project, not building from scratch.
 
 Rules for QUESTIONS:
-- {"User already answered your questions. Set QUESTIONS to empty (no lines)." if has_answers else "Always ask 2-4 specific, actionable clarification questions that would help you produce a better result."}
-- {"" if has_answers else "Questions should be about: scope decisions, design preferences, constraints, expected behavior, edge cases."}
-- {"" if has_answers else "Make questions specific to THIS task. Not generic. Not yes/no."}
-- {"" if has_answers else "Examples: 'Should the API return paginated results or all at once?', 'Which auth method do you prefer: JWT or session-based?'"}
+- {"User already answered your questions. Set QUESTIONS to empty (no lines)." if has_answers else "Always generate 2-4 clarification questions."}
+- {"" if has_answers else "Each question MUST reference specific current trends, tools, or patterns from the research above."}
+- {"" if has_answers else "Present options with context: 'Passkeys/WebAuthn are becoming standard for passwordless auth, while JWT+refresh tokens remain the most common. Social login via Google One Tap has high conversion rates. Which approach fits your needs?'"}
+- {"" if has_answers else "Show the user what's available NOW and let them pick. Don't ask blind questions."}
+- {"" if has_answers else "Be specific: mention library names, version numbers, concrete approaches."}
 
 Be concise. No extra prose outside the above structure.""",
         model="opus",
