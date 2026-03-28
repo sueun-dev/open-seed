@@ -1,56 +1,49 @@
 """
 Plan node — Generate implementation plan via Claude Opus.
+
+If intake already produced a user-approved plan (with PLAN/SCOPE/DONE_WHEN),
+convert it to a structured Plan object and use it directly.
+Otherwise, generate a new plan from scratch via Claude.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 
 from openseed_brain.state import PipelineState, Plan, PlanTask, FileEntry
+
+logger = logging.getLogger(__name__)
 
 
 async def plan_node(state: PipelineState) -> dict:
     """
     Generate a detailed implementation plan via Claude Opus.
+    Reuses intake's plan if the user already approved one.
     """
     task = state["task"]
     working_dir = state["working_dir"]
     intake = "\n".join(state.get("messages", []))
-
-    # Use structured intake analysis if available
     intake_analysis = state.get("intake_analysis", {})
-    analysis_context = ""
-    if intake_analysis:
-        reqs = intake_analysis.get("requirements", [])
-        approach = intake_analysis.get("approach", "")
-        existing = intake_analysis.get("existing_project", "no")
-        complexity = intake_analysis.get("complexity", "moderate")
-        tech_stack = intake_analysis.get("tech_stack", "")
-        lessons = intake_analysis.get("lessons", "")
-        intent = intake_analysis.get("intent", "implementation")
-        parts = [
-            "\nIntake analysis:",
-            f"- Intent: {intent}",
-            f"- Complexity: {complexity}",
-            f"- Existing project: {existing}",
-        ]
-        if tech_stack:
-            parts.append(f"- Tech stack: {tech_stack}")
-        if approach:
-            parts.append(f"- Approach: {approach}")
-        if reqs:
-            parts.append(f"- Requirements: {', '.join(reqs) if isinstance(reqs, list) else reqs}")
-        if lessons and str(lessons).lower() != "none":
-            parts.append(f"- Lessons from past: {lessons}")
-        if existing.lower() == "yes":
-            parts.append(
-                "- IMPORTANT: This is an existing project. Plan should include BOTH "
-                "files to modify AND files to create. Do NOT plan to recreate files that already exist."
-            )
-        analysis_context = "\n".join(parts) + "\n"
+
+    # ── Fast path: intake already has a user-approved plan ──
+    intake_plan = intake_analysis.get("plan", "")
+    intake_scope = intake_analysis.get("scope", {})
+    intake_done_when = intake_analysis.get("done_when", [])
+
+    if intake_plan and (intake_scope or intake_done_when):
+        plan = _convert_intake_plan(task, intake_analysis)
+        logger.info("Using intake's user-approved plan (%d tasks, %d files)",
+                     len(plan.tasks), len(plan.file_manifest))
+        return {
+            "plan": plan,
+            "messages": [f"Plan: {plan.summary} ({len(plan.tasks)} tasks, {len(plan.file_manifest)} files)"],
+        }
+
+    # ── Normal path: generate plan via Claude ──
+    analysis_context = _build_analysis_context(intake_analysis)
 
     from openseed_claude.agent import ClaudeAgent
-
     agent = ClaudeAgent()
 
     response = await agent.invoke(
@@ -86,15 +79,120 @@ the backend MUST have a corresponding task and route for it. Walk through every 
 - CROSS-CHECK: If the backend exposes an endpoint, the frontend must have code that calls it. \
 No orphan endpoints, no orphan UI actions.
 - Output ONLY the JSON object, nothing else""",
-        model="opus",  # Planning uses Opus for thorough architecture decisions
+        model="opus",
         max_turns=1,
     )
 
-    # Parse plan from response
+    plan = _parse_claude_plan(task, response.text)
+
+    return {
+        "plan": plan,
+        "messages": [f"Plan: {plan.summary} ({len(plan.tasks)} tasks, {len(plan.file_manifest)} files)"],
+    }
+
+
+def _convert_intake_plan(task: str, intake_analysis: dict) -> Plan:
+    """Convert intake's text-based plan to a structured Plan object."""
+    approach = intake_analysis.get("approach", "")
+    plan_text = intake_analysis.get("plan", "")
+    scope = intake_analysis.get("scope", {})
+    done_when = intake_analysis.get("done_when", [])
+
+    plan = Plan(summary=approach or f"Plan for: {task[:100]}")
+
+    # Convert plan steps to tasks
+    steps = [line.strip() for line in plan_text.splitlines() if line.strip()]
+    for i, step in enumerate(steps):
+        # Strip leading "1. ", "2. " etc.
+        desc = step.lstrip("0123456789. ").strip() if step[0:1].isdigit() else step
+        # Guess role from content
+        lower = desc.lower()
+        if any(w in lower for w in ("frontend", "component", "ui", "css", "style", "react", "page")):
+            role = "frontend"
+        elif any(w in lower for w in ("backend", "api", "server", "endpoint", "route", "database", "model")):
+            role = "backend"
+        elif any(w in lower for w in ("test", "verify", "check")):
+            role = "qa"
+        elif any(w in lower for w in ("setup", "install", "config", "deploy", "docker")):
+            role = "infra"
+        else:
+            role = "fullstack"
+        plan.tasks.append(PlanTask(
+            id=f"T{i + 1}",
+            description=desc,
+            role=role,
+            files=[],
+        ))
+
+    # Build file manifest from scope
+    modify_files = scope.get("modify", [])
+    create_files = scope.get("create", [])
+    do_not_touch = scope.get("do_not_touch", [])
+
+    for f in create_files:
+        plan.file_manifest.append(FileEntry(path=f, purpose="Create new"))
+    for f in modify_files:
+        plan.file_manifest.append(FileEntry(path=f, purpose="Modify existing"))
+
+    # Attach scope and done_when as extra context for downstream nodes
+    if do_not_touch:
+        plan.tasks.append(PlanTask(
+            id="T-SCOPE",
+            description=f"DO NOT TOUCH: {', '.join(do_not_touch)}",
+            role="constraint",
+            files=[],
+        ))
+    if done_when:
+        plan.tasks.append(PlanTask(
+            id="T-DONE",
+            description="DONE WHEN: " + " | ".join(done_when),
+            role="constraint",
+            files=[],
+        ))
+
+    return plan
+
+
+def _build_analysis_context(intake_analysis: dict) -> str:
+    """Build analysis context string from intake analysis fields."""
+    if not intake_analysis:
+        return ""
+
+    reqs = intake_analysis.get("requirements", [])
+    approach = intake_analysis.get("approach", "")
+    existing = intake_analysis.get("existing_project", "no")
+    complexity = intake_analysis.get("complexity", "moderate")
+    tech_stack = intake_analysis.get("tech_stack", "")
+    lessons = intake_analysis.get("lessons", "")
+    intent = intake_analysis.get("intent", "implementation")
+
+    parts = [
+        "\nIntake analysis:",
+        f"- Intent: {intent}",
+        f"- Complexity: {complexity}",
+        f"- Existing project: {existing}",
+    ]
+    if tech_stack:
+        parts.append(f"- Tech stack: {tech_stack}")
+    if approach:
+        parts.append(f"- Approach: {approach}")
+    if reqs:
+        parts.append(f"- Requirements: {', '.join(reqs) if isinstance(reqs, list) else reqs}")
+    if lessons and str(lessons).lower() != "none":
+        parts.append(f"- Lessons from past: {lessons}")
+    if existing.lower() == "yes":
+        parts.append(
+            "- IMPORTANT: This is an existing project. Plan should include BOTH "
+            "files to modify AND files to create. Do NOT plan to recreate files that already exist."
+        )
+    return "\n".join(parts) + "\n"
+
+
+def _parse_claude_plan(task: str, text: str) -> Plan:
+    """Parse Claude's JSON plan response into a Plan object."""
     plan = Plan(summary=f"Plan for: {task[:100]}")
     try:
-        text = response.text
-        # Strip markdown code fences if present (```json ... ```)
+        # Strip markdown code fences if present
         if "```" in text:
             lines = text.split("\n")
             cleaned = []
@@ -126,10 +224,7 @@ No orphan endpoints, no orphan UI actions.
                 plan.file_manifest.append(
                     FileEntry(path=f.get("path", ""), purpose=f.get("purpose", ""))
                 )
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        pass
+    except (json.JSONDecodeError, TypeError, AttributeError) as exc:
+        logger.warning("Failed to parse plan JSON: %s", exc)
 
-    return {
-        "plan": plan,
-        "messages": [f"Plan: {plan.summary} ({len(plan.tasks)} tasks, {len(plan.file_manifest)} files)"],
-    }
+    return plan
