@@ -137,7 +137,7 @@ export default function FolderBrowser({ onSelect, onClose }: Props) {
         {!serverAvailable && (
           <div style={{ padding: "24px 16px", textAlign: "center" }}>
             <div style={{ fontSize: 11, color: "#666", marginBottom: 8 }}>
-              Backend not running — type a path above, or drag a folder onto the app.
+              Backend not running. Type a path above, or drag a folder onto the app.
             </div>
             <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace" }}>
               Start backend: openseed serve --port 8000

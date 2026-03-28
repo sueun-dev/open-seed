@@ -53,7 +53,7 @@ function formatEvent(e: any, i: number) {
       color = "#60a5fa"; icon = "▶"; text = `Pipeline started: ${data.task || ""}`;
       break;
     case "pipeline.complete":
-      color = "#4ade80"; icon = "✓"; text = "Pipeline COMPLETE — zero errors";
+      color = "#4ade80"; icon = "✓"; text = "Pipeline COMPLETE - zero errors";
       break;
     case "pipeline.fail":
       color = "#f87171"; icon = "✗"; text = `Pipeline FAILED: ${data.error || ""}`;
@@ -77,7 +77,7 @@ function formatEvent(e: any, i: number) {
       break;
     case "node.qa":
       color = data.verdict === "pass" ? "#4ade80" : data.verdict === "block" ? "#f87171" : "#facc15";
-      icon = "⚖"; text = `QA: ${data.verdict?.toUpperCase()} — ${data.findings} findings`;
+      icon = "⚖"; text = `QA: ${data.verdict?.toUpperCase()} - ${data.findings} findings`;
       break;
     case "node.deploy":
       color = data.success ? "#4ade80" : "#f87171";
