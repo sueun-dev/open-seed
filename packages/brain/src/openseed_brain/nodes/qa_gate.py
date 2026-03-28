@@ -75,7 +75,8 @@ async def qa_gate_node(state: PipelineState) -> dict:
 
             for f in files_to_read:
                 try:
-                    content = open(os.path.join(working_dir, f)).read()[:2000]
+                    with open(os.path.join(working_dir, f)) as fh:
+                        content = fh.read(2000)
                     context_parts.append(f"\n--- {f} ---\n{content}")
                 except Exception:
                     pass
