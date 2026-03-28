@@ -219,10 +219,10 @@ Review both approaches objectively and execute the better one.
 
 TASK: {req.message}
 
-ENGINEER A (Claude Sonnet) SAID:
+ENGINEER A:
 {claude_analysis.text[:1500]}
 
-ENGINEER B (Codex GPT) SAID:
+ENGINEER B:
 {codex_text[:1500]}
 
 Instructions:
