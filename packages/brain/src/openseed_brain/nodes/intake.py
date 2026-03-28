@@ -1,10 +1,11 @@
 """
-Intake node — Analyze task, recall memories, classify intent.
-REAL implementation — calls Claude + Memory recall.
+Intake node — Analyze task, recall memories, classify intent, ask clarifications.
 
-Sets skip_planning=True when Claude determines the task is trivial (complexity:
-simple/trivial with a single well-scoped change). All routing decisions are
-made by the LLM — no regex, no hardcoded extension checks.
+Two-phase intake:
+  1. intake_node: analyze + generate clarification questions (always)
+  2. intake_with_answers_node: re-analyze with user's answers, then proceed
+
+All routing decisions are made by the LLM — no regex, no hardcoded extension checks.
 """
 
 from __future__ import annotations
@@ -101,9 +102,20 @@ async def intake_node(state: PipelineState) -> dict:
     except Exception as exc:
         logger.debug("Microagent loading skipped: %s", exc)
 
-    # ── Step 5: Analyse task via Claude ──
+    # ── Step 5: Analyse task + generate clarification questions via Claude ──
     from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
+
+    # Check if we already have answers (second pass after user responded)
+    has_answers = bool(state.get("clarification_answers"))
+
+    answers_context = ""
+    if has_answers:
+        answers = state["clarification_answers"]
+        questions = state.get("clarification_questions", [])
+        answers_context = "\n\nUser's clarification answers:\n"
+        for i, (q, a) in enumerate(zip(questions, answers)):
+            answers_context += f"Q{i+1}: {q}\nA{i+1}: {a}\n"
 
     response = await agent.invoke(
         prompt=f"""Analyze this task and classify it.
@@ -111,7 +123,7 @@ async def intake_node(state: PipelineState) -> dict:
 Task: {task}
 Working directory: {working_dir}
 {intent_info}{memory_context}
-{codebase_context}
+{codebase_context}{answers_context}
 
 Respond with EXACTLY this structure (fill in each line):
 INTENT: <implementation|fix|research|investigation|evaluation|open_ended>
@@ -123,6 +135,10 @@ REQUIREMENTS:
 - <requirement 2>
 APPROACH: <1-2 sentence approach>
 LESSONS: <any relevant lessons from past experiences, or "none">
+QUESTIONS:
+- <clarifying question 1>
+- <clarifying question 2>
+- <clarifying question 3>
 
 Rules for SKIP_PLANNING:
 - yes ONLY when: complexity is simple AND the task is a single, clearly scoped change
@@ -132,16 +148,22 @@ Rules for SKIP_PLANNING:
 Rules for EXISTING_PROJECT:
 - If the working directory already has source files, treat this as MODIFICATION of
   an existing project, not building from scratch.
-- Read the existing tech stack and adapt your approach to match it.
+
+Rules for QUESTIONS:
+- {"User already answered your questions. Set QUESTIONS to empty (no lines)." if has_answers else "Always ask 2-4 specific, actionable clarification questions that would help you produce a better result."}
+- {"" if has_answers else "Questions should be about: scope decisions, design preferences, constraints, expected behavior, edge cases."}
+- {"" if has_answers else "Make questions specific to THIS task. Not generic. Not yes/no."}
+- {"" if has_answers else "Examples: 'Should the API return paginated results or all at once?', 'Which auth method do you prefer: JWT or session-based?'"}
 
 Be concise. No extra prose outside the above structure.""",
-        model="opus",  # Top-level orchestration uses Opus for best judgment
+        model="opus",
         max_turns=1,
     )
 
     analysis_text = response.text
     skip_planning = _parse_skip_planning(analysis_text)
     intake_analysis = _parse_analysis(analysis_text)
+    questions = _parse_questions(analysis_text)
 
     # Inject detected tech stack into analysis for downstream nodes
     if detected_tech_stack:
@@ -152,6 +174,8 @@ Be concise. No extra prose outside the above structure.""",
         "intake_analysis": intake_analysis,
         "messages": [f"Intake: {analysis_text[:500]}"],
     }
+    if questions and not has_answers:
+        result["clarification_questions"] = questions
     if microagent_context:
         result["microagent_context"] = microagent_context
     return result
@@ -307,6 +331,23 @@ def _parse_analysis(text: str) -> dict:
         analysis["requirements"] = requirements
 
     return analysis
+
+
+def _parse_questions(text: str) -> list[str]:
+    """Extract QUESTIONS from Claude's structured response."""
+    questions: list[str] = []
+    in_questions = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith("QUESTIONS:"):
+            in_questions = True
+            continue
+        if in_questions:
+            if stripped.startswith("- ") and len(stripped) > 4:
+                questions.append(stripped[2:].strip())
+            elif stripped and not stripped.startswith("-"):
+                break  # End of questions section
+    return questions
 
 
 def _parse_skip_planning(text: str) -> bool:

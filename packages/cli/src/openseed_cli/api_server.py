@@ -47,6 +47,13 @@ class RunRequest(BaseModel):
     working_dir: str = "."
     config_path: str | None = None
     provider: str = "claude"  # "claude", "codex", "both"
+    clarification_answers: list[str] = []  # Answers to intake questions
+
+
+class IntakeRequest(BaseModel):
+    task: str
+    working_dir: str = "."
+    provider: str = "claude"
 
 
 class MemorySearchRequest(BaseModel):
@@ -62,6 +69,22 @@ async def health() -> dict:
     return {"status": "ok", "version": "2.0.0-alpha.0"}
 
 
+@app.post("/api/intake")
+async def run_intake(req: IntakeRequest) -> dict:
+    """Run intake analysis only — returns clarification questions."""
+    from openseed_brain.nodes.intake import intake_node
+    from openseed_brain.state import initial_state
+
+    state = initial_state(task=req.task, working_dir=req.working_dir, provider=req.provider)
+    result = await intake_node(state)
+
+    return {
+        "intake_analysis": result.get("intake_analysis", {}),
+        "clarification_questions": result.get("clarification_questions", []),
+        "skip_planning": result.get("skip_planning", False),
+    }
+
+
 @app.post("/api/run")
 async def start_run(req: RunRequest) -> dict:
     """Start a pipeline run. Events streamed via WebSocket."""
@@ -73,7 +96,10 @@ async def start_run(req: RunRequest) -> dict:
     _current_run = {"task": req.task, "status": "running", "messages": []}
 
     # Run pipeline in background
-    asyncio.create_task(_execute_pipeline(req.task, req.working_dir, req.config_path, req.provider))
+    asyncio.create_task(_execute_pipeline(
+        req.task, req.working_dir, req.config_path, req.provider,
+        clarification_answers=req.clarification_answers,
+    ))
 
     return {"status": "started", "task": req.task}
 
@@ -338,7 +364,10 @@ async def _broadcast(event: dict) -> None:
 # ─── Pipeline Execution ──────────────────────────────────────────────────────
 
 
-async def _execute_pipeline(task: str, working_dir: str, config_path: str | None, provider: str = "claude") -> None:
+async def _execute_pipeline(
+    task: str, working_dir: str, config_path: str | None,
+    provider: str = "claude", clarification_answers: list[str] | None = None,
+) -> None:
     """Run the full pipeline with event broadcasting."""
     global _current_run
 
@@ -349,6 +378,8 @@ async def _execute_pipeline(task: str, working_dir: str, config_path: str | None
 
     state = initial_state(task=task, working_dir=str(Path(working_dir).resolve()), provider=provider)
     state["max_retries"] = cfg.sentinel.max_retries
+    if clarification_answers:
+        state["clarification_answers"] = clarification_answers
     graph = compile_graph(
         checkpoint_dir=str(Path(str(cfg.brain.checkpoint_dir)).expanduser()),
     )
