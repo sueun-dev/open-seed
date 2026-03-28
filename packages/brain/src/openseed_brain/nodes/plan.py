@@ -85,6 +85,9 @@ No orphan endpoints, no orphan UI actions.
 
     plan = _parse_claude_plan(task, response.text)
 
+    if not plan.tasks:
+        logger.warning("Plan generation produced 0 tasks — implement will use fullstack fallback")
+
     return {
         "plan": plan,
         "messages": [f"Plan: {plan.summary} ({len(plan.tasks)} tasks, {len(plan.file_manifest)} files)"],
@@ -213,7 +216,9 @@ def _parse_claude_plan(task: str, text: str) -> Plan:
             text = "\n".join(cleaned)
         start = text.find("{")
         end = text.rfind("}")
-        if start != -1 and end > start:
+        if start == -1 or end <= start:
+            logger.warning("No JSON object found in Claude plan response")
+        elif start != -1 and end > start:
             data = json.loads(text[start:end + 1])
             plan.summary = data.get("summary", plan.summary)
             for i, t in enumerate(data.get("tasks", [])):
