@@ -157,13 +157,16 @@ async def _chat_claude(req: ChatRequest) -> tuple[str, str | None]:
 
 async def _chat_codex(req: ChatRequest) -> tuple[str, str | None]:
     """Direct Codex CLI call."""
-    from openseed_codex.agent import CodexAgent
-    agent = CodexAgent()
-    response = await agent.invoke(
-        prompt=req.message,
-        working_dir=req.working_dir,
-    )
-    return response.text, None
+    try:
+        from openseed_codex.agent import CodexAgent
+        agent = CodexAgent()
+        response = await agent.invoke(
+            prompt=req.message,
+            working_dir=req.working_dir,
+        )
+        return response.text, None
+    except Exception as e:
+        return f"Codex error: {e}\n\nCodex CLI may require a terminal. Try using Claude or Both mode instead.", None
 
 
 async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
@@ -184,19 +187,26 @@ async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
         working_dir=req.working_dir,
         max_turns=5,
     )
-    codex_task = codex_agent.invoke(
-        prompt=f"Analyze this and propose your approach (do NOT execute yet, just analyze):\n\n{req.message}",
-        working_dir=req.working_dir,
-    )
 
-    claude_analysis, codex_analysis = await asyncio.gather(claude_task, codex_task)
+    # Codex may fail in non-terminal environments — handle gracefully
+    codex_text = ""
+    try:
+        codex_task = codex_agent.invoke(
+            prompt=f"Analyze this and propose your approach (do NOT execute yet, just analyze):\n\n{req.message}",
+            working_dir=req.working_dir,
+        )
+        claude_analysis, codex_analysis = await asyncio.gather(claude_task, codex_task)
+        codex_text = codex_analysis.text
+    except Exception:
+        claude_analysis = await claude_task
+        codex_text = "(Codex unavailable)"
 
     # Step 2: Show both analyses to user
     await _broadcast({"type": "debate.opinion", "node": "pair", "data": {
         "speaker": "claude", "message": claude_analysis.text[:2000]}})
 
     await _broadcast({"type": "debate.opinion", "node": "pair", "data": {
-        "speaker": "codex", "message": codex_analysis.text[:2000]}})
+        "speaker": "codex", "message": codex_text[:2000]}})
 
     # Step 3: Claude reviews and decides
     await _broadcast({"type": "debate.deciding", "node": "pair", "data": {
@@ -211,7 +221,7 @@ CLAUDE'S ANALYSIS:
 {claude_analysis.text[:1500]}
 
 CODEX'S ANALYSIS:
-{codex_analysis.text[:1500]}
+{codex_text[:1500]}
 
 Instructions:
 1. Compare both approaches. State which is better and why (1-2 sentences).
@@ -236,7 +246,7 @@ Start with "CHOSEN: [Claude/Codex/Combined] because..." then execute.""",
 {claude_analysis.text[:1000]}
 
 **🟢 Codex's Analysis:**
-{codex_analysis.text[:1000]}
+{codex_text[:1000]}
 
 ## Decision & Execution
 
