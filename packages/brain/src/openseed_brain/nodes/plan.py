@@ -140,11 +140,13 @@ def _convert_intake_plan(task: str, intake_analysis: dict) -> Plan:
             files=task_files,
         ))
 
-    # Build file manifest from scope
+    # Build file manifest from scope (strip parenthetical notes from paths)
     for f in create_files:
-        plan.file_manifest.append(FileEntry(path=f, purpose="Create new"))
+        path = f.split("(")[0].strip() if "(" in f else f
+        plan.file_manifest.append(FileEntry(path=path, purpose="Create new"))
     for f in modify_files:
-        plan.file_manifest.append(FileEntry(path=f, purpose="Modify existing"))
+        path = f.split("(")[0].strip() if "(" in f else f
+        plan.file_manifest.append(FileEntry(path=path, purpose="Modify existing"))
 
     # Inject constraints into plan summary (NOT as tasks, to avoid execution)
     constraints = []
