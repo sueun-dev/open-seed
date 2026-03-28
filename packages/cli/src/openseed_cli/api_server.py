@@ -208,28 +208,30 @@ async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
     await _broadcast({"type": "debate.opinion", "node": "pair", "data": {
         "speaker": "codex", "message": codex_text[:2000]}})
 
-    # Step 3: Claude reviews and decides
+    # Step 3: Opus judges (neutral arbiter, not Claude judging itself)
     await _broadcast({"type": "debate.deciding", "node": "pair", "data": {
-        "step": "deciding", "message": "Comparing both approaches and choosing the best..."}})
+        "step": "deciding", "message": "Opus is judging both approaches..."}})
 
-    response = await claude_agent.invoke(
-        prompt=f"""Two AI engineers analyzed the same task. Review both approaches and execute the better one.
+    judge = ClaudeAgent()
+    response = await judge.invoke(
+        prompt=f"""You are a neutral judge. Two AI engineers (Claude and Codex) analyzed the same task independently.
+Review both approaches objectively and execute the better one.
 
 TASK: {req.message}
 
-CLAUDE'S ANALYSIS:
+ENGINEER A (Claude Sonnet) SAID:
 {claude_analysis.text[:1500]}
 
-CODEX'S ANALYSIS:
+ENGINEER B (Codex GPT) SAID:
 {codex_text[:1500]}
 
 Instructions:
-1. Compare both approaches. State which is better and why (1-2 sentences).
+1. Compare both approaches objectively. State which is better and why (1-2 sentences).
 2. Execute the winning approach. Actually make the changes - read files, write files, run commands.
 3. If both have good ideas, combine the best parts.
 
-Start with "CHOSEN: [Claude/Codex/Combined] because..." then execute.""",
-        model="sonnet",
+Start with "VERDICT: [Engineer A/Engineer B/Combined] because..." then execute.""",
+        model="opus",
         working_dir=req.working_dir,
         max_turns=20,
     )
