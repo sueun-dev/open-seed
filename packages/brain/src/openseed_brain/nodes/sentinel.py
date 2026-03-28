@@ -245,9 +245,6 @@ async def fix_node(state: PipelineState) -> dict:
         await _git_stash_push(working_dir)
 
     # ── Main fix with session continuity ──
-    import os
-    import hashlib
-
     from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
 
