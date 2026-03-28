@@ -112,6 +112,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
 
   // Step 2: Generate plan from answers, show for approval
   const generatePlan = async (answers: string[]) => {
+    const savedClarification = clarification;
     setClarification(null);
     setIntakeLoading(true);
 
@@ -119,10 +120,12 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       const res = await fetch("/api/intake", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task, working_dir: workingDir, provider }),
+        body: JSON.stringify({
+          task, working_dir: workingDir, provider,
+          clarification_answers: answers.filter((a) => a.trim()),
+          clarification_questions: savedClarification?.questions || [],
+        }),
       });
-      // We need to pass answers through the pipeline - for now, include in task context
-      // The actual plan generation happens in the pipeline's intake node with answers
       if (res.ok) {
         const data = await res.json();
         const analysis = data.intake_analysis || {};
@@ -318,7 +321,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
               Skip, just run
             </button>
             <button
-              onClick={() => startRun(clarification.answers)}
+              onClick={() => generatePlan(clarification.answers)}
               style={{
                 padding: "10px 24px", borderRadius: 10, border: "none",
                 background: "#2563eb", color: "#fff", cursor: "pointer",

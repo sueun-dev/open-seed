@@ -54,6 +54,8 @@ class IntakeRequest(BaseModel):
     task: str
     working_dir: str = "."
     provider: str = "claude"
+    clarification_answers: list[str] = []
+    clarification_questions: list[dict] = []
 
 
 class MemorySearchRequest(BaseModel):
@@ -71,11 +73,21 @@ async def health() -> dict:
 
 @app.post("/api/intake")
 async def run_intake(req: IntakeRequest) -> dict:
-    """Run intake analysis only — returns clarification questions."""
+    """Run intake analysis. Phase 1: questions. Phase 2 (with answers): plan."""
     from openseed_brain.nodes.intake import intake_node
     from openseed_brain.state import initial_state
 
     state = initial_state(task=req.task, working_dir=req.working_dir, provider=req.provider)
+
+    # Pass answers and questions for Phase 2 (plan generation)
+    if req.clarification_answers:
+        state["clarification_answers"] = req.clarification_answers
+        # Pass question texts so intake can reference them
+        state["clarification_questions"] = [
+            q.get("question", q) if isinstance(q, dict) else q
+            for q in req.clarification_questions
+        ]
+
     result = await intake_node(state)
 
     return {
