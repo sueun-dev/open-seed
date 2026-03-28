@@ -68,6 +68,24 @@ export default function App() {
     setActiveThreadId(null);
   };
 
+  // Remove a project and its threads
+  const removeProject = (path: string) => {
+    setProjects((prev) => prev.filter((p) => p.path !== path));
+    setThreads((prev) => prev.filter((t) => t.projectPath !== path));
+    if (activeProjectPath === path) {
+      setActiveProjectPath("");
+      setActiveThreadId(null);
+    }
+  };
+
+  // Delete a single thread
+  const deleteThread = (threadId: string) => {
+    setThreads((prev) => prev.filter((t) => t.id !== threadId));
+    if (activeThreadId === threadId) {
+      setActiveThreadId(null);
+    }
+  };
+
   const updateThreadEvents = (threadId: string, events: any[]) => {
     setThreads((prev) =>
       prev.map((t) => (t.id === threadId ? { ...t, events, updatedAt: new Date().toISOString() } : t))
@@ -75,22 +93,25 @@ export default function App() {
   };
 
   // Resolve dropped folder to absolute path, then add as project
-  const resolveAndAddFolder = async (folderName: string) => {
+  const resolveAndAddFolder = async (folderName: string, childNames?: string[]) => {
     let resolved = "";
 
     // 1. Already absolute path → use directly
     if (folderName.startsWith("/")) {
       resolved = folderName;
     } else {
-      // 2. Just a name → try to resolve via backend
+      // 2. Just a name → try to resolve via backend (with children for disambiguation)
       try {
-        const res = await fetch(`/api/resolve-folder?name=${encodeURIComponent(folderName)}`);
+        const params = new URLSearchParams({ name: folderName });
+        if (childNames && childNames.length > 0) {
+          params.set("children", childNames.join(","));
+        }
+        const res = await fetch(`/api/resolve-folder?${params}`);
         if (res.ok) {
           const text = await res.text();
           if (text) {
             const data = JSON.parse(text);
             if (data.matches?.length >= 1) {
-              // Auto-pick first match — no prompt popup
               resolved = data.matches[0];
             }
           }
@@ -103,6 +124,18 @@ export default function App() {
     setActiveThreadId(null);
   };
 
+  // Read top-level children from a dropped directory entry
+  const readDirChildren = (dirEntry: any): Promise<string[]> => {
+    return new Promise((resolve) => {
+      if (!dirEntry?.isDirectory) { resolve([]); return; }
+      const reader = dirEntry.createReader();
+      reader.readEntries(
+        (entries: any[]) => resolve(entries.map((e: any) => e.name).sort()),
+        () => resolve([]),
+      );
+    });
+  };
+
   // Global drag & drop — extract absolute path first, name as fallback
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -110,6 +143,7 @@ export default function App() {
     setDropHighlight(false);
 
     let folderPath = "";
+    let childNames: string[] = [];
 
     // 1. Try to get absolute path from file (Electron/native apps set .path)
     const files = e.dataTransfer.files;
@@ -124,13 +158,17 @@ export default function App() {
       if (text && text.startsWith("/")) { folderPath = text; }
     }
 
-    // 3. Fallback: webkitGetAsEntry for directory name
+    // 3. Fallback: webkitGetAsEntry for directory name + read children for disambiguation
     if (!folderPath) {
       const items = e.dataTransfer.items;
       if (items?.length) {
         for (let i = 0; i < items.length; i++) {
           const entry = (items[i] as any).webkitGetAsEntry?.();
-          if (entry?.isDirectory) { folderPath = entry.name; break; }
+          if (entry?.isDirectory) {
+            folderPath = entry.name;
+            childNames = await readDirChildren(entry);
+            break;
+          }
         }
       }
     }
@@ -140,7 +178,7 @@ export default function App() {
       folderPath = files[0].name;
     }
 
-    if (folderPath) await resolveAndAddFolder(folderPath);
+    if (folderPath) await resolveAndAddFolder(folderPath, childNames);
   };
 
   // No project selected — show onboarding
@@ -188,6 +226,8 @@ export default function App() {
         }}
         onNewThread={handleNewThread}
         onAddProject={() => setShowBrowser(true)}
+        onRemoveProject={removeProject}
+        onDeleteThread={deleteThread}
       />
 
       {/* Main Area */}
