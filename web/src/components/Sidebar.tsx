@@ -40,9 +40,38 @@ export default function Sidebar({
       <div style={{ padding: "14px 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: "#999" }}>Projects</span>
         <div style={{ display: "flex", gap: 4 }}>
-          <button onClick={onAddProject} style={iconBtnStyle} title="Add project folder">📁</button>
-          <button onClick={onToggle} style={iconBtnStyle} title="Collapse">«</button>
+          <button onClick={onToggle} style={iconBtnStyle} title="Collapse sidebar">«</button>
         </div>
+      </div>
+
+      {/* Action buttons */}
+      <div style={{ padding: "0 12px 8px", display: "flex", gap: 6 }}>
+        <button
+          onClick={onAddProject}
+          style={{
+            flex: 1, padding: "7px 0", borderRadius: 7, border: "1px solid #222",
+            background: "#111", color: "#888", cursor: "pointer", fontSize: 11,
+            fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+            transition: "all 0.15s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#2563eb"; e.currentTarget.style.color = "#60a5fa"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#222"; e.currentTarget.style.color = "#888"; }}
+        >
+          <span style={{ fontSize: 13 }}>+</span> Add Folder
+        </button>
+        <button
+          onClick={onNewThread}
+          style={{
+            flex: 1, padding: "7px 0", borderRadius: 7, border: "1px solid #222",
+            background: "#111", color: "#888", cursor: "pointer", fontSize: 11,
+            fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+            transition: "all 0.15s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#2563eb"; e.currentTarget.style.color = "#60a5fa"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#222"; e.currentTarget.style.color = "#888"; }}
+        >
+          <span style={{ fontSize: 13 }}>+</span> New Thread
+        </button>
       </div>
 
       {/* Project + Thread list */}
