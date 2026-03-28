@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import DiffPanel from "./DiffPanel";
+import { ThinkingSpinner } from "./Spinner";
 import type { Thread, Mode } from "../App";
 
 type Message = {
@@ -213,11 +214,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
               </div>
             </div>
           ))}
-          {streaming && (
-            <div style={{ padding: "8px 16px", color: "#60a5fa", fontSize: 12 }}>
-              ⠋ AI is thinking...
-            </div>
-          )}
+          {streaming && <ThinkingSpinner />}
           <div ref={messagesEndRef} />
         </div>
 
