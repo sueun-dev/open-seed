@@ -200,14 +200,14 @@ export default function Sidebar({
               label: "Remove Project",
               icon: "🗑",
               danger: true,
-              onClick: () => { onRemoveProject(contextMenu.id); closeMenu(); },
+              onClick: () => { if (confirm("Remove this project and all its threads?")) onRemoveProject(contextMenu.id); closeMenu(); },
             },
           ] : [
             {
               label: "Delete Thread",
               icon: "🗑",
               danger: true,
-              onClick: () => { onDeleteThread(contextMenu.id); closeMenu(); },
+              onClick: () => { if (confirm("Delete this thread?")) onDeleteThread(contextMenu.id); closeMenu(); },
             },
           ]}
           onClose={closeMenu}

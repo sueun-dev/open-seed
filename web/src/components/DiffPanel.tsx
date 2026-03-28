@@ -32,7 +32,10 @@ export default function DiffPanel({ diffs, onClose }: Props) {
         </div>
         <button
           onClick={onClose}
-          style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 14 }}
+          aria-label="Close diff panel"
+          style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 14, transition: "color 0.15s" }}
+          onMouseEnter={(e) => e.currentTarget.style.color = "#aaa"}
+          onMouseLeave={(e) => e.currentTarget.style.color = "#555"}
         >
           ✕
         </button>
@@ -56,7 +59,7 @@ export default function DiffPanel({ diffs, onClose }: Props) {
                 }}>
                   NEW
                 </span>
-                <span style={{ fontSize: 12, color: "#ccc", fontFamily: "monospace" }}>
+                <span style={{ fontSize: 12, color: "#ccc", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f}>
                   {f}
                 </span>
               </div>
@@ -69,7 +72,7 @@ export default function DiffPanel({ diffs, onClose }: Props) {
                 }}>
                   MOD
                 </span>
-                <span style={{ fontSize: 12, color: "#ccc", fontFamily: "monospace" }}>
+                <span style={{ fontSize: 12, color: "#ccc", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f}>
                   {f}
                 </span>
               </div>
@@ -86,18 +89,30 @@ export default function DiffPanel({ diffs, onClose }: Props) {
       {/* Actions */}
       {(totalCreated > 0 || totalModified > 0) && (
         <div style={{ padding: "12px 16px", borderTop: "1px solid #1a1a1a", display: "flex", gap: 8 }}>
-          <button style={{
-            flex: 1, padding: "8px 12px", borderRadius: 8,
-            border: "1px solid #333", background: "#111",
-            color: "#888", cursor: "pointer", fontSize: 12, fontWeight: 600,
-          }}>
+          <button
+            onClick={() => { if (confirm("Revert all changes?")) { /* TODO: POST /api/revert */ } }}
+            style={{
+              flex: 1, padding: "8px 12px", borderRadius: 8,
+              border: "1px solid #333", background: "#111",
+              color: "#888", cursor: "pointer", fontSize: 12, fontWeight: 600,
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#f87171"; e.currentTarget.style.color = "#f87171"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#333"; e.currentTarget.style.color = "#888"; }}
+          >
             Revert All
           </button>
-          <button style={{
-            flex: 1, padding: "8px 12px", borderRadius: 8,
-            border: "none", background: "#2563eb",
-            color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600,
-          }}>
+          <button
+            onClick={() => { /* TODO: POST /api/commit */ }}
+            style={{
+              flex: 1, padding: "8px 12px", borderRadius: 8,
+              border: "none", background: "#2563eb",
+              color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600,
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "#3b82f6"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "#2563eb"}
+          >
             Commit
           </button>
         </div>
