@@ -93,8 +93,13 @@ async def get_config() -> dict:
 
 
 @app.get("/api/resolve-folder")
-async def resolve_folder(name: str) -> dict:
-    """Resolve a folder name to its full absolute path by searching common locations."""
+async def resolve_folder(name: str, children: str = "") -> dict:
+    """Resolve a folder name to its full absolute path by searching common locations.
+
+    Args:
+        name: Folder name or absolute path.
+        children: Comma-separated list of top-level child names (for disambiguation).
+    """
     import os
     import subprocess
 
@@ -105,6 +110,9 @@ async def resolve_folder(name: str) -> dict:
     # If already absolute path, just verify it exists
     if name.startswith("/") and os.path.isdir(name):
         return {"matches": [name]}
+
+    # Parse child names for disambiguation
+    child_set = set(c.strip() for c in children.split(",") if c.strip()) if children else set()
 
     # Search common parent directories
     home = os.path.expanduser("~")
@@ -128,7 +136,7 @@ async def resolve_folder(name: str) -> dict:
     matches = []
     seen = set()
 
-    # Quick search: walk 3 levels deep in common locations
+    # Quick search: walk 4 levels deep in common locations
     for root in search_roots:
         if not os.path.isdir(root):
             continue
@@ -147,8 +155,10 @@ async def resolve_folder(name: str) -> dict:
                         if full not in seen:
                             seen.add(full)
                             matches.append(full)
-                            if len(matches) >= 10:
-                                return {"matches": matches}
+                            if len(matches) >= 20:
+                                break
+                if len(matches) >= 20:
+                    break
         except PermissionError:
             continue
 
@@ -162,17 +172,29 @@ async def resolve_folder(name: str) -> dict:
             for line in result.stdout.strip().split("\n"):
                 line = line.strip()
                 if line and os.path.isdir(line) and line not in seen:
-                    # Skip system folders
                     if "/Library/" in line or "/Applications/" in line:
                         continue
                     seen.add(line)
                     matches.append(line)
-                    if len(matches) >= 10:
+                    if len(matches) >= 20:
                         break
         except Exception:
             pass
 
-    return {"matches": matches}
+    # Disambiguate using child names if provided
+    if child_set and len(matches) > 1:
+        scored = []
+        for m in matches:
+            try:
+                actual_children = set(os.listdir(m))
+                overlap = len(child_set & actual_children)
+                scored.append((overlap, m))
+            except OSError:
+                scored.append((0, m))
+        scored.sort(key=lambda x: -x[0])
+        matches = [m for _, m in scored]
+
+    return {"matches": matches[:10]}
 
 
 @app.get("/api/browse")
