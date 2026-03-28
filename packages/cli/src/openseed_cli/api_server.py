@@ -85,6 +85,61 @@ async def get_status() -> dict:
     return _current_run
 
 
+@app.get("/api/auth/status")
+async def auth_status() -> dict:
+    """Check authentication status for Claude and OpenAI."""
+    from openseed_core.auth.claude import check_claude_auth
+    from openseed_core.auth.openai import check_openai_auth
+
+    claude = check_claude_auth()
+    openai = check_openai_auth()
+
+    return {
+        "claude": {
+            "installed": claude.installed,
+            "authenticated": claude.authenticated,
+            "error": claude.error,
+        },
+        "openai": {
+            "installed": openai.installed,
+            "authenticated": openai.authenticated,
+            "error": openai.error,
+        },
+    }
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: dict) -> dict:
+    """Trigger OAuth login for a provider. Runs CLI auth command."""
+    import subprocess
+
+    provider = body.get("provider", "")
+
+    if provider == "claude":
+        from openseed_core.auth.claude import get_claude_cli_path
+        cli = get_claude_cli_path()
+        if not cli:
+            return {"status": "error", "message": "Claude CLI not installed. Run: npm install -g @anthropic-ai/claude-code"}
+        try:
+            result = subprocess.run([cli, "auth", "login"], capture_output=True, text=True, timeout=60)
+            return {"status": "ok" if result.returncode == 0 else "error", "message": result.stdout or result.stderr}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    elif provider == "openai":
+        from openseed_core.auth.openai import get_codex_cli_path
+        cli = get_codex_cli_path()
+        if not cli:
+            return {"status": "error", "message": "Codex CLI not installed. Run: npm install -g @openai/codex"}
+        try:
+            result = subprocess.run([cli, "auth", "login"], capture_output=True, text=True, timeout=60)
+            return {"status": "ok" if result.returncode == 0 else "error", "message": result.stdout or result.stderr}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    return {"status": "error", "message": f"Unknown provider: {provider}"}
+
+
 @app.get("/api/config")
 async def get_config() -> dict:
     from openseed_core.config import load_config

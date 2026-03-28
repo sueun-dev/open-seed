@@ -169,6 +169,38 @@ export default function Settings({ onClose }: Props) {
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [authStatus, setAuthStatus] = useState<{
+    claude: { installed: boolean; authenticated: boolean; error: string | null };
+    openai: { installed: boolean; authenticated: boolean; error: string | null };
+  } | null>(null);
+  const [authLoading, setAuthLoading] = useState<string | null>(null);
+
+  // Check auth status on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/status");
+        if (res.ok) setAuthStatus(await res.json());
+      } catch {}
+    })();
+  }, []);
+
+  const triggerLogin = async (provider: "claude" | "openai") => {
+    setAuthLoading(provider);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      if (res.ok) {
+        // Refresh auth status
+        const statusRes = await fetch("/api/auth/status");
+        if (statusRes.ok) setAuthStatus(await statusRes.json());
+      }
+    } catch {}
+    setAuthLoading(null);
+  };
 
   // Load config from backend on mount
   useEffect(() => {
@@ -423,6 +455,92 @@ export default function Settings({ onClose }: Props) {
                       Reset to defaults
                     </button>
                   </div>
+
+                  {/* Auth connection cards */}
+                  {section.key === "auth" && (
+                    <div style={{ marginBottom: 20 }}>
+                      {(["claude", "openai"] as const).map((provider) => {
+                        const status = authStatus?.[provider];
+                        const isConnected = status?.authenticated;
+                        const isInstalled = status?.installed;
+                        const loading = authLoading === provider;
+
+                        return (
+                          <div key={provider} style={{
+                            padding: "16px 18px", borderRadius: 8, border: `1px solid ${isConnected ? "#1a3a1a" : "#2a2020"}`,
+                            background: isConnected ? "#0d1a0d" : "#1a1212",
+                            marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between",
+                          }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                              <span style={{ fontSize: 22 }}>{provider === "claude" ? "🟣" : "🟢"}</span>
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: "#ddd" }}>
+                                  {provider === "claude" ? "Anthropic (Claude)" : "OpenAI (Codex)"}
+                                </div>
+                                <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+                                  {!authStatus ? "Checking..." :
+                                    !isInstalled ? "CLI not installed" :
+                                    isConnected ? "Connected via OAuth" :
+                                    status?.error || "Not authenticated"}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              {/* Status badge */}
+                              {authStatus && (
+                                <span style={{
+                                  fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 4,
+                                  background: isConnected ? "#16a34a22" : "#dc262622",
+                                  color: isConnected ? "#4ade80" : "#f87171",
+                                }}>
+                                  {isConnected ? "Connected" : isInstalled ? "Disconnected" : "Not Installed"}
+                                </span>
+                              )}
+                              {/* Connect button */}
+                              {isInstalled && !isConnected && (
+                                <button
+                                  onClick={() => triggerLogin(provider)}
+                                  disabled={loading}
+                                  style={{
+                                    padding: "6px 14px", borderRadius: 6, border: "none",
+                                    background: loading ? "#333" : "#2563eb",
+                                    color: loading ? "#666" : "#fff",
+                                    fontSize: 11, fontWeight: 600, cursor: loading ? "default" : "pointer",
+                                    transition: "background 0.15s",
+                                  }}
+                                >
+                                  {loading ? "Connecting..." : "Connect"}
+                                </button>
+                              )}
+                              {!isInstalled && authStatus && (
+                                <button
+                                  onClick={() => {
+                                    const cmd = provider === "claude"
+                                      ? "npm install -g @anthropic-ai/claude-code"
+                                      : "npm install -g @openai/codex";
+                                    navigator.clipboard.writeText(cmd);
+                                  }}
+                                  style={{
+                                    padding: "6px 14px", borderRadius: 6, border: "1px solid #333",
+                                    background: "transparent", color: "#888",
+                                    fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                    transition: "border-color 0.15s",
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.borderColor = "#555"}
+                                  onMouseLeave={(e) => e.currentTarget.style.borderColor = "#333"}
+                                  title={provider === "claude"
+                                    ? "npm install -g @anthropic-ai/claude-code"
+                                    : "npm install -g @openai/codex"}
+                                >
+                                  Copy Install Command
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
 
                   {/* Fields */}
                   {fields.map((field) => {
