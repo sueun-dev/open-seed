@@ -100,11 +100,11 @@ def _convert_intake_plan(task: str, intake_analysis: dict) -> Plan:
 
     plan = Plan(summary=approach or f"Plan for: {task[:100]}")
 
-    # Collect all file paths from scope for matching
+    # Collect all file paths from scope for matching (strip parenthetical notes)
     modify_files = scope.get("modify", [])
     create_files = scope.get("create", [])
     do_not_touch = scope.get("do_not_touch", [])
-    all_scope_files = modify_files + create_files
+    all_scope_files = [f.split("(")[0].strip() for f in modify_files + create_files]
 
     # Convert plan steps to tasks with file assignment
     steps = [line.strip() for line in plan_text.splitlines() if line.strip()]
@@ -208,7 +208,7 @@ def _parse_claude_plan(task: str, text: str) -> Plan:
                 if line.strip().startswith("```"):
                     in_fence = not in_fence
                     continue
-                if in_fence or not line.strip().startswith("```"):
+                if in_fence:
                     cleaned.append(line)
             text = "\n".join(cleaned)
         start = text.find("{")
