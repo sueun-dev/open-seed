@@ -302,7 +302,7 @@ export default function App() {
               <h2 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: 0 }}>Drop a folder to start</h2>
               <p style={{ color: "#555", fontSize: 13, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
                 Drag a project folder here, or click the button below to browse.
-                Each folder becomes a workspace — all tasks run inside it.
+                Each folder becomes a workspace. All tasks run inside it.
               </p>
               <button
                 onClick={() => setShowBrowser(true)}

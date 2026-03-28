@@ -223,8 +223,8 @@ export default function SnakeGame() {
 
   const statusMsg =
     display.status === "idle" ? "Press SPACE or any arrow key to start" :
-    display.status === "paused" ? "PAUSED — press SPACE to resume" :
-    display.status === "over" ? "GAME OVER — press SPACE to restart" :
+    display.status === "paused" ? "PAUSED - press SPACE to resume" :
+    display.status === "over" ? "GAME OVER - press SPACE to restart" :
     null;
 
   return (

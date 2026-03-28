@@ -107,7 +107,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
           <div style={{ fontSize: 48, marginBottom: 12 }}>🤖</div>
           <h2 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: "0 0 6px" }}>AGI Mode</h2>
           <p style={{ color: "#555", fontSize: 13, maxWidth: 400 }}>
-            Describe what to build. The pipeline runs autonomously —
+            Describe what to build. The pipeline runs autonomously:
             intake, plan, implement, QA, fix, deploy, memorize.
           </p>
         </div>
