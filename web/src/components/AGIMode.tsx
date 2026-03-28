@@ -12,9 +12,26 @@ type Props = {
   updateThreadEvents: (threadId: string, events: any[]) => void;
 };
 
+type QuestionItem = {
+  question: string;
+  options: string[];
+};
+
+type PlanData = {
+  plan: string;
+  scope: { modify: string[]; create: string[]; do_not_touch: string[] };
+  done_when: string[];
+  approach: string;
+};
+
 type ClarificationState = {
-  questions: string[];
+  questions: QuestionItem[];
   answers: string[];
+  intakeAnalysis: Record<string, any>;
+};
+
+type PlanState = {
+  plan: PlanData;
   intakeAnalysis: Record<string, any>;
 };
 
@@ -24,6 +41,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
   const [events, setEvents] = useState<any[]>(activeThread?.events || []);
   const [provider, setProvider] = useState<"claude" | "codex" | "both">("claude");
   const [clarification, setClarification] = useState<ClarificationState | null>(null);
+  const [planReview, setPlanReview] = useState<PlanState | null>(null);
   const [intakeLoading, setIntakeLoading] = useState(false);
   const threadIdRef = useRef<string | null>(activeThread?.id || null);
 
@@ -36,6 +54,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       setTask("");
       setRunning(false);
       setClarification(null);
+      setPlanReview(null);
       setIntakeLoading(false);
       threadIdRef.current = null;
     }
@@ -67,10 +86,16 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
 
-      if (data.clarification_questions?.length > 0) {
+      const rawQ = data.clarification_questions || [];
+      // Normalize: backend may return strings (old) or {question, options} (new)
+      const questions: QuestionItem[] = rawQ.map((q: any) =>
+        typeof q === "string" ? { question: q, options: [] } : q
+      );
+
+      if (questions.length > 0) {
         setClarification({
-          questions: data.clarification_questions,
-          answers: data.clarification_questions.map(() => ""),
+          questions,
+          answers: questions.map(() => ""),
           intakeAnalysis: data.intake_analysis || {},
         });
       } else {
@@ -85,9 +110,47 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     }
   };
 
-  // Step 2: Run pipeline (with or without answers)
+  // Step 2: Generate plan from answers, show for approval
+  const generatePlan = async (answers: string[]) => {
+    setClarification(null);
+    setIntakeLoading(true);
+
+    try {
+      const res = await fetch("/api/intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task, working_dir: workingDir, provider }),
+      });
+      // We need to pass answers through the pipeline - for now, include in task context
+      // The actual plan generation happens in the pipeline's intake node with answers
+      if (res.ok) {
+        const data = await res.json();
+        const analysis = data.intake_analysis || {};
+        if (analysis.plan || analysis.done_when || analysis.scope) {
+          setPlanReview({
+            plan: {
+              plan: analysis.plan || "",
+              scope: analysis.scope || { modify: [], create: [], do_not_touch: [] },
+              done_when: analysis.done_when || [],
+              approach: analysis.approach || "",
+            },
+            intakeAnalysis: analysis,
+          });
+          setIntakeLoading(false);
+          return;
+        }
+      }
+    } catch {}
+
+    // Fallback: skip plan review, run directly
+    setIntakeLoading(false);
+    startRun(answers);
+  };
+
+  // Step 3: Run pipeline (with or without answers)
   const startRun = async (answers: string[]) => {
     setClarification(null);
+    setPlanReview(null);
     setRunning(true);
     setEvents([]);
 
@@ -156,97 +219,218 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     }
   };
 
-  // Clarification UI
+  // ── Clarification UI (Step 2: Questions with options) ──
   if (clarification) {
     return (
       <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 24px", overflowY: "auto" }}>
         <div style={{ width: "100%", maxWidth: 640 }}>
-        <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ fontSize: 36, marginBottom: 8 }}>🤔</div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" }}>Before I start...</h2>
-          <p style={{ color: "#666", fontSize: 12, maxWidth: 500, margin: "0 auto" }}>
-            I researched current trends and best practices. A few questions to nail down the approach.
-          </p>
-        </div>
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>🤔</div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" }}>Before I start...</h2>
+            <p style={{ color: "#666", fontSize: 12 }}>
+              I researched current trends and best practices. Pick the options that fit your needs.
+            </p>
+          </div>
 
-        {/* Task summary */}
-        <div style={{
-          width: "100%", padding: "10px 14px", borderRadius: 8,
-          background: "#111", border: "1px solid #222", fontSize: 12, color: "#888",
-          marginBottom: 20,
-        }}>
-          <span style={{ color: "#555", fontWeight: 600 }}>Task:</span> {task}
-        </div>
+          <div style={{
+            width: "100%", padding: "10px 14px", borderRadius: 8,
+            background: "#111", border: "1px solid #222", fontSize: 12, color: "#888", marginBottom: 20,
+          }}>
+            <span style={{ color: "#555", fontWeight: 600 }}>Task:</span> {task}
+          </div>
 
-        {/* Questions */}
-        {/* Questions */}
-        <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-          {clarification.questions.map((q, i) => (
-            <div key={i} style={{
-              padding: "14px 16px", borderRadius: 10,
-              border: "1px solid #1a1a1a", background: "#0a0a0a",
-            }}>
-              <div style={{
-                fontSize: 13, color: "#ccc", lineHeight: 1.5,
-                marginBottom: 10, whiteSpace: "pre-wrap",
+          {/* Questions with option buttons */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {clarification.questions.map((q, i) => (
+              <div key={i} style={{
+                padding: "14px 16px", borderRadius: 10,
+                border: "1px solid #1a1a1a", background: "#0a0a0a",
               }}>
-                <span style={{ color: "#2563eb", fontWeight: 700, marginRight: 6 }}>{i + 1}.</span>
-                {q}
-              </div>
-              <input
-                value={clarification.answers[i]}
-                onChange={(e) => {
-                  const newAnswers = [...clarification.answers];
-                  newAnswers[i] = e.target.value;
-                  setClarification({ ...clarification, answers: newAnswers });
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && i === clarification.questions.length - 1) {
-                    startRun(clarification.answers);
-                  }
-                }}
-                placeholder="Your answer..."
-                autoFocus={i === 0}
-                style={{
-                  width: "100%", padding: "10px 14px", borderRadius: 8,
-                  border: "1px solid #222", background: "#111", color: "#eee",
-                  fontSize: 13, outline: "none",
-                }}
-                onFocus={(e) => e.currentTarget.style.borderColor = "#2563eb"}
-                onBlur={(e) => e.currentTarget.style.borderColor = "#222"}
-              />
-            </div>
-          ))}
-        </div>
+                <div style={{ fontSize: 13, color: "#ccc", lineHeight: 1.5, marginBottom: 10 }}>
+                  <span style={{ color: "#2563eb", fontWeight: 700, marginRight: 6 }}>{i + 1}.</span>
+                  {q.question}
+                </div>
 
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-          <button
-            onClick={() => startRun([])}
-            style={{
-              padding: "10px 20px", borderRadius: 10, border: "1px solid #333",
-              background: "transparent", color: "#888", cursor: "pointer",
-              fontSize: 13, fontWeight: 600, transition: "border-color 0.15s",
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.borderColor = "#555"}
-            onMouseLeave={(e) => e.currentTarget.style.borderColor = "#333"}
-          >
-            Skip, just run
-          </button>
-          <button
-            onClick={() => startRun(clarification.answers)}
-            style={{
-              padding: "10px 24px", borderRadius: 10, border: "none",
-              background: "#2563eb", color: "#fff", cursor: "pointer",
-              fontSize: 13, fontWeight: 700, transition: "background 0.15s",
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "#3b82f6"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "#2563eb"}
-          >
-            Continue →
-          </button>
+                {/* Option buttons */}
+                {q.options.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                    {q.options.map((opt) => {
+                      const isSelected = clarification.answers[i] === opt;
+                      return (
+                        <button
+                          key={opt}
+                          onClick={() => {
+                            const newAnswers = [...clarification.answers];
+                            newAnswers[i] = isSelected ? "" : opt;
+                            setClarification({ ...clarification, answers: newAnswers });
+                          }}
+                          style={{
+                            padding: "6px 12px", borderRadius: 6, fontSize: 11,
+                            border: isSelected ? "1px solid #2563eb" : "1px solid #222",
+                            background: isSelected ? "#1e3a5f" : "#111",
+                            color: isSelected ? "#60a5fa" : "#999",
+                            cursor: "pointer", transition: "all 0.15s",
+                            textAlign: "left", lineHeight: 1.4,
+                          }}
+                          onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = "#333"; }}
+                          onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = "#222"; }}
+                        >
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Custom answer input */}
+                <input
+                  value={q.options.includes(clarification.answers[i]) ? "" : clarification.answers[i]}
+                  onChange={(e) => {
+                    const newAnswers = [...clarification.answers];
+                    newAnswers[i] = e.target.value;
+                    setClarification({ ...clarification, answers: newAnswers });
+                  }}
+                  placeholder={q.options.length > 0 ? "Or type a custom answer..." : "Your answer..."}
+                  style={{
+                    width: "100%", padding: "8px 12px", borderRadius: 6,
+                    border: "1px solid #1a1a1a", background: "#111", color: "#eee",
+                    fontSize: 12, outline: "none",
+                  }}
+                  onFocus={(e) => e.currentTarget.style.borderColor = "#2563eb"}
+                  onBlur={(e) => e.currentTarget.style.borderColor = "#1a1a1a"}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <button
+              onClick={() => startRun([])}
+              style={{
+                padding: "10px 20px", borderRadius: 10, border: "1px solid #333",
+                background: "transparent", color: "#888", cursor: "pointer",
+                fontSize: 13, fontWeight: 600, transition: "border-color 0.15s",
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.borderColor = "#555"}
+              onMouseLeave={(e) => e.currentTarget.style.borderColor = "#333"}
+            >
+              Skip, just run
+            </button>
+            <button
+              onClick={() => startRun(clarification.answers)}
+              style={{
+                padding: "10px 24px", borderRadius: 10, border: "none",
+                background: "#2563eb", color: "#fff", cursor: "pointer",
+                fontSize: 13, fontWeight: 700, transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = "#3b82f6"}
+              onMouseLeave={(e) => e.currentTarget.style.background = "#2563eb"}
+            >
+              Continue →
+            </button>
+          </div>
         </div>
       </div>
+    );
+  }
+
+  // ── Plan Review UI (Step 3: Review plan before execution) ──
+  if (planReview) {
+    const { plan } = planReview;
+    return (
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 24px", overflowY: "auto" }}>
+        <div style={{ width: "100%", maxWidth: 640 }}>
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>📋</div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" }}>Execution Plan</h2>
+            <p style={{ color: "#666", fontSize: 12 }}>Review the plan below. Approve to start the pipeline.</p>
+          </div>
+
+          {/* Approach */}
+          {plan.approach && (
+            <div style={{ padding: "12px 14px", borderRadius: 8, background: "#111", border: "1px solid #222", marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: "#555", fontWeight: 600, marginBottom: 4 }}>APPROACH</div>
+              <div style={{ fontSize: 13, color: "#ddd", lineHeight: 1.5 }}>{plan.approach}</div>
+            </div>
+          )}
+
+          {/* Plan steps */}
+          {plan.plan && (
+            <div style={{ padding: "12px 14px", borderRadius: 8, background: "#0a0a0a", border: "1px solid #1a1a1a", marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: "#555", fontWeight: 600, marginBottom: 8 }}>STEPS</div>
+              <div style={{ fontSize: 12, color: "#ccc", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{plan.plan}</div>
+            </div>
+          )}
+
+          {/* Scope */}
+          <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+            {plan.scope.modify.length > 0 && (
+              <div style={{ flex: 1, padding: "10px 12px", borderRadius: 8, background: "#111", border: "1px solid #1a1a1a" }}>
+                <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 600, marginBottom: 6 }}>MODIFY</div>
+                {plan.scope.modify.map((f) => (
+                  <div key={f} style={{ fontSize: 11, color: "#888", fontFamily: "monospace", marginBottom: 2 }}>{f}</div>
+                ))}
+              </div>
+            )}
+            {plan.scope.create.length > 0 && (
+              <div style={{ flex: 1, padding: "10px 12px", borderRadius: 8, background: "#111", border: "1px solid #1a1a1a" }}>
+                <div style={{ fontSize: 10, color: "#4ade80", fontWeight: 600, marginBottom: 6 }}>CREATE</div>
+                {plan.scope.create.map((f) => (
+                  <div key={f} style={{ fontSize: 11, color: "#888", fontFamily: "monospace", marginBottom: 2 }}>{f}</div>
+                ))}
+              </div>
+            )}
+            {plan.scope.do_not_touch.length > 0 && (
+              <div style={{ flex: 1, padding: "10px 12px", borderRadius: 8, background: "#111", border: "1px solid #1a1a1a" }}>
+                <div style={{ fontSize: 10, color: "#f87171", fontWeight: 600, marginBottom: 6 }}>DO NOT TOUCH</div>
+                {plan.scope.do_not_touch.map((f) => (
+                  <div key={f} style={{ fontSize: 11, color: "#888", fontFamily: "monospace", marginBottom: 2 }}>{f}</div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Done When */}
+          {plan.done_when.length > 0 && (
+            <div style={{ padding: "12px 14px", borderRadius: 8, background: "#0d1a0d", border: "1px solid #1a2e1a", marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: "#4ade80", fontWeight: 600, marginBottom: 8 }}>DONE WHEN</div>
+              {plan.done_when.map((criterion, i) => (
+                <div key={i} style={{ fontSize: 12, color: "#ccc", marginBottom: 4, display: "flex", gap: 6 }}>
+                  <span style={{ color: "#4ade80" }}>&#x2610;</span> {criterion}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <button
+              onClick={() => { setPlanReview(null); setClarification(null); }}
+              style={{
+                padding: "10px 20px", borderRadius: 10, border: "1px solid #333",
+                background: "transparent", color: "#888", cursor: "pointer",
+                fontSize: 13, fontWeight: 600, transition: "border-color 0.15s",
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.borderColor = "#555"}
+              onMouseLeave={(e) => e.currentTarget.style.borderColor = "#333"}
+            >
+              Back
+            </button>
+            <button
+              onClick={() => startRun(clarification?.answers || [])}
+              style={{
+                padding: "10px 24px", borderRadius: 10, border: "none",
+                background: "#16a34a", color: "#fff", cursor: "pointer",
+                fontSize: 13, fontWeight: 700, transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = "#22c55e"}
+              onMouseLeave={(e) => e.currentTarget.style.background = "#16a34a"}
+            >
+              Approve & Run →
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

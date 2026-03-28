@@ -141,7 +141,7 @@ Be factual and concise. No fluff.""",
         except Exception as exc:
             logger.debug("Trend research skipped: %s", exc)
 
-    # ── Step 6: Analyse task + generate clarification questions via Claude ──
+    # ── Step 6: Analyse task ──
     answers_context = ""
     if has_answers:
         answers = state["clarification_answers"]
@@ -150,15 +150,17 @@ Be factual and concise. No fluff.""",
         for i, (q, a) in enumerate(zip(questions, answers)):
             answers_context += f"Q{i+1}: {q}\nA{i+1}: {a}\n"
 
-    response = await agent.invoke(
-        prompt=f"""Analyze this task and classify it.
+    # ── Phase 1: Questions (first pass) ──
+    # ── Phase 2: Plan document (after user answers) ──
+    if not has_answers:
+        prompt = f"""Analyze this task and classify it.
 
 Task: {task}
 Working directory: {working_dir}
 {intent_info}{memory_context}
-{codebase_context}{research_context}{answers_context}
+{codebase_context}{research_context}
 
-Respond with EXACTLY this structure (fill in each line):
+Respond with EXACTLY this structure:
 INTENT: <implementation|fix|research|investigation|evaluation|open_ended>
 COMPLEXITY: <simple|moderate|complex>
 SKIP_PLANNING: <yes|no>
@@ -169,35 +171,82 @@ REQUIREMENTS:
 APPROACH: <1-2 sentence approach>
 LESSONS: <any relevant lessons from past experiences, or "none">
 QUESTIONS:
-- <clarifying question 1>
-- <clarifying question 2>
-- <clarifying question 3>
-
-Rules for SKIP_PLANNING:
-- yes ONLY when: complexity is simple AND the task is a single, clearly scoped change
-  (e.g. fix one bug in one file, add one small function, update one config value)
-- no for everything else: new features, multi-file changes, refactors, research tasks
-
-Rules for EXISTING_PROJECT:
-- If the working directory already has source files, treat this as MODIFICATION of
-  an existing project, not building from scratch.
+- <question text> | OPTIONS: <A. option>, <B. option>, <C. option>
+- <question text> | OPTIONS: <A. option>, <B. option>, <C. option>
+- <question text> | OPTIONS: <A. option>, <B. option>
 
 Rules for QUESTIONS:
-- {"User already answered your questions. Set QUESTIONS to empty (no lines)." if has_answers else "Always generate 2-4 clarification questions."}
-- {"" if has_answers else "Each question MUST reference specific current trends, tools, or patterns from the research above."}
-- {"" if has_answers else "Present options with context: 'Passkeys/WebAuthn are becoming standard for passwordless auth, while JWT+refresh tokens remain the most common. Social login via Google One Tap has high conversion rates. Which approach fits your needs?'"}
-- {"" if has_answers else "Show the user what's available NOW and let them pick. Don't ask blind questions."}
-- {"" if has_answers else "Be specific: mention library names, version numbers, concrete approaches."}
+- Always generate 2-4 clarification questions.
+- EVERY question MUST have 2-4 concrete OPTIONS separated by commas after "OPTIONS:".
+- Each option should be a specific, actionable choice (library name, pattern name, concrete approach).
+- Reference current trends and tools from the research above.
+- The LAST option can be "Other (specify)" to allow custom answers.
+- Example: "How should users authenticate? | OPTIONS: A. Passkey/WebAuthn (modern, passwordless), B. JWT + refresh tokens (most common), C. OAuth social login (Google/GitHub), D. Other (specify)"
+- Do NOT ask vague or yes/no questions. Every question must be a decision point.
 
-Be concise. No extra prose outside the above structure.""",
-        model="opus",
-        max_turns=1,
-    )
+Rules for SKIP_PLANNING:
+- yes ONLY when: complexity is simple AND single scoped change
+- no for everything else
+
+Rules for EXISTING_PROJECT:
+- If working directory has source files, this is MODIFICATION not building from scratch.
+
+Be concise. No extra prose outside the structure."""
+    else:
+        prompt = f"""You previously analyzed this task and the user answered your questions.
+Now generate a detailed execution plan.
+
+Task: {task}
+Working directory: {working_dir}
+{intent_info}{memory_context}
+{codebase_context}{research_context}{answers_context}
+
+Respond with EXACTLY this structure:
+INTENT: <implementation|fix|research|investigation|evaluation|open_ended>
+COMPLEXITY: <simple|moderate|complex>
+SKIP_PLANNING: <yes|no>
+EXISTING_PROJECT: <yes|no>
+REQUIREMENTS:
+- <requirement 1>
+- <requirement 2>
+APPROACH: <1-2 sentence approach>
+LESSONS: <any relevant lessons from past experiences, or "none">
+
+PLAN:
+<A clear, step-by-step execution plan in 3-8 steps. Each step should be one sentence.>
+
+SCOPE:
+- MODIFY: <comma-separated list of existing files/dirs that WILL be changed>
+- CREATE: <comma-separated list of new files/dirs to create>
+- DO_NOT_TOUCH: <comma-separated list of files/dirs that must NOT be modified>
+
+DONE_WHEN:
+- <success criterion 1: specific, testable condition>
+- <success criterion 2>
+- <success criterion 3>
+
+Rules:
+- PLAN must incorporate the user's answers to your earlier questions.
+- SCOPE must be specific. List actual file paths where possible based on codebase analysis.
+- DONE_WHEN must be concrete and verifiable (e.g. "Server starts without errors", "All tests pass", "Login page renders at /login").
+- DO_NOT_TOUCH should include core config files, unrelated modules, etc.
+- No QUESTIONS section needed. The user already answered.
+
+Be concise. No extra prose outside the structure."""
+
+    response = await agent.invoke(prompt=prompt, model="opus", max_turns=1)
 
     analysis_text = response.text
     skip_planning = _parse_skip_planning(analysis_text)
     intake_analysis = _parse_analysis(analysis_text)
-    questions = _parse_questions(analysis_text)
+
+    # Parse phase-specific outputs
+    if not has_answers:
+        questions = _parse_questions_with_options(analysis_text)
+    else:
+        intake_analysis["plan"] = _parse_section(analysis_text, "PLAN")
+        intake_analysis["scope"] = _parse_scope(analysis_text)
+        intake_analysis["done_when"] = _parse_list_section(analysis_text, "DONE_WHEN")
 
     # Inject detected tech stack into analysis for downstream nodes
     if detected_tech_stack:
@@ -208,7 +257,7 @@ Be concise. No extra prose outside the above structure.""",
         "intake_analysis": intake_analysis,
         "messages": [f"Intake: {analysis_text[:500]}"],
     }
-    if questions and not has_answers:
+    if not has_answers and questions:
         result["clarification_questions"] = questions
     if microagent_context:
         result["microagent_context"] = microagent_context
@@ -367,9 +416,14 @@ def _parse_analysis(text: str) -> dict:
     return analysis
 
 
-def _parse_questions(text: str) -> list[str]:
-    """Extract QUESTIONS from Claude's structured response."""
-    questions: list[str] = []
+def _parse_questions_with_options(text: str) -> list[dict]:
+    """
+    Extract QUESTIONS with OPTIONS from Claude's structured response.
+
+    Format: "- question text | OPTIONS: A. opt1, B. opt2, C. opt3"
+    Returns: [{"question": "...", "options": ["A. opt1", "B. opt2", "C. opt3"]}]
+    """
+    questions: list[dict] = []
     in_questions = False
     for line in text.splitlines():
         stripped = line.strip()
@@ -378,10 +432,83 @@ def _parse_questions(text: str) -> list[str]:
             continue
         if in_questions:
             if stripped.startswith("- ") and len(stripped) > 4:
-                questions.append(stripped[2:].strip())
+                content = stripped[2:].strip()
+                if "| OPTIONS:" in content or "|OPTIONS:" in content:
+                    parts = content.split("| OPTIONS:" if "| OPTIONS:" in content else "|OPTIONS:", 1)
+                    question_text = parts[0].strip()
+                    options = [o.strip() for o in parts[1].split(",") if o.strip()]
+                    questions.append({"question": question_text, "options": options})
+                else:
+                    # No options provided, treat as open-ended
+                    questions.append({"question": content, "options": []})
             elif stripped and not stripped.startswith("-"):
-                break  # End of questions section
+                break
     return questions
+
+
+def _parse_section(text: str, section_name: str) -> str:
+    """Extract a multi-line section by name (e.g., PLAN:)."""
+    lines: list[str] = []
+    in_section = False
+    known_sections = {"INTENT", "COMPLEXITY", "SKIP_PLANNING", "EXISTING_PROJECT",
+                      "REQUIREMENTS", "APPROACH", "LESSONS", "PLAN", "SCOPE",
+                      "DONE_WHEN", "QUESTIONS", "MODIFY", "CREATE", "DO_NOT_TOUCH"}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith(f"{section_name}:"):
+            in_section = True
+            # Check for inline content after colon
+            after = stripped.split(":", 1)[1].strip()
+            if after:
+                lines.append(after)
+            continue
+        if in_section:
+            # Stop at next known section
+            if any(stripped.upper().startswith(f"{s}:") for s in known_sections if s != section_name):
+                break
+            if stripped:
+                lines.append(stripped.lstrip("- ").strip() if stripped.startswith("- ") else stripped)
+    return "\n".join(lines)
+
+
+def _parse_list_section(text: str, section_name: str) -> list[str]:
+    """Extract a bulleted list section."""
+    items: list[str] = []
+    in_section = False
+    known_sections = {"INTENT", "COMPLEXITY", "SKIP_PLANNING", "EXISTING_PROJECT",
+                      "REQUIREMENTS", "APPROACH", "LESSONS", "PLAN", "SCOPE",
+                      "DONE_WHEN", "QUESTIONS", "MODIFY", "CREATE", "DO_NOT_TOUCH"}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith(f"{section_name}:"):
+            in_section = True
+            continue
+        if in_section:
+            if any(stripped.upper().startswith(f"{s}:") for s in known_sections if s != section_name):
+                break
+            if stripped.startswith("- ") and len(stripped) > 3:
+                items.append(stripped[2:].strip())
+    return items
+
+
+def _parse_scope(text: str) -> dict:
+    """Extract SCOPE section with MODIFY, CREATE, DO_NOT_TOUCH sub-fields."""
+    scope: dict = {"modify": [], "create": [], "do_not_touch": []}
+    in_scope = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith("SCOPE:"):
+            in_scope = True
+            continue
+        if in_scope:
+            if stripped.upper().startswith("DONE_WHEN:") or stripped.upper().startswith("QUESTIONS:"):
+                break
+            for key in ["MODIFY", "CREATE", "DO_NOT_TOUCH"]:
+                if stripped.upper().startswith(f"- {key}:") or stripped.upper().startswith(f"{key}:"):
+                    val = stripped.split(":", 1)[1].strip()
+                    scope[key.lower()] = [v.strip() for v in val.split(",") if v.strip()]
+                    break
+    return scope
 
 
 def _parse_skip_planning(text: str) -> bool:
