@@ -79,8 +79,8 @@ type SectionKey = keyof typeof DEFAULT_CONFIG;
 const SECTIONS: { key: SectionKey; label: string; icon: string; description: string }[] = [
   { key: "auth", label: "Authentication", icon: "🔐", description: "OAuth keychain services for Claude and OpenAI" },
   { key: "brain", label: "Brain (Pipeline)", icon: "🧠", description: "LangGraph checkpoint and parallelism settings" },
-  { key: "claude", label: "Claude (Left Hand)", icon: "🟣", description: "Claude CLI models, tokens, and turn limits" },
-  { key: "codex", label: "Codex (Right Hand)", icon: "🟢", description: "Codex CLI, sandbox mode, and parallelism" },
+  { key: "claude", label: "Claude", icon: "🟣", description: "Claude CLI models, context window, and turn limits" },
+  { key: "codex", label: "Codex", icon: "🟢", description: "Codex CLI, sandbox mode, and parallelism" },
   { key: "qa_gate", label: "QA Gate", icon: "🔍", description: "Quality assurance agents and synthesis" },
   { key: "sentinel", label: "Sentinel", icon: "🛡", description: "Retry limits, stagnation detection, backoff" },
   { key: "body", label: "Deployment", icon: "🚀", description: "Git, cron, webhook deployment channels" },
