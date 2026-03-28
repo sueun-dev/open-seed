@@ -167,16 +167,16 @@ async def _chat_codex(req: ChatRequest) -> tuple[str, str | None]:
 
 
 async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
-    """Claude + Codex debate: both analyze, then Claude picks the best approach and executes."""
+    """Claude + Codex debate: both analyze, then best approach executes. User sees every step."""
     from openseed_claude.agent import ClaudeAgent
     from openseed_codex.agent import CodexAgent
 
-    # Step 1: Both analyze in parallel
     claude_agent = ClaudeAgent()
     codex_agent = CodexAgent()
 
-    await _broadcast({"type": "node.log", "node": "pair", "data": {
-        "message": "Both mode: Claude and Codex analyzing in parallel..."}})
+    # Step 1: Both analyze in parallel
+    await _broadcast({"type": "debate.start", "node": "pair", "data": {
+        "step": "analyzing", "message": "Claude and Codex are both analyzing your request..."}})
 
     claude_task = claude_agent.invoke(
         prompt=f"Analyze this and propose your approach (do NOT execute yet, just analyze):\n\n{req.message}",
@@ -191,10 +191,17 @@ async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
 
     claude_analysis, codex_analysis = await asyncio.gather(claude_task, codex_task)
 
-    await _broadcast({"type": "node.log", "node": "pair", "data": {
-        "message": f"Claude's view: {claude_analysis.text[:200]}...\nCodex's view: {codex_analysis.text[:200]}..."}})
+    # Step 2: Show both analyses to user
+    await _broadcast({"type": "debate.opinion", "node": "pair", "data": {
+        "speaker": "claude", "message": claude_analysis.text[:2000]}})
 
-    # Step 2: Claude reviews both approaches and picks the best, then executes
+    await _broadcast({"type": "debate.opinion", "node": "pair", "data": {
+        "speaker": "codex", "message": codex_analysis.text[:2000]}})
+
+    # Step 3: Claude reviews and decides
+    await _broadcast({"type": "debate.deciding", "node": "pair", "data": {
+        "step": "deciding", "message": "Comparing both approaches and choosing the best..."}})
+
     response = await claude_agent.invoke(
         prompt=f"""Two AI engineers analyzed the same task. Review both approaches and execute the better one.
 
@@ -217,7 +224,25 @@ Start with "CHOSEN: [Claude/Codex/Combined] because..." then execute.""",
         max_turns=20,
     )
 
-    return response.text, response.session_id or None
+    # Step 4: Show verdict
+    verdict_line = response.text.split("\n")[0] if response.text else ""
+    await _broadcast({"type": "debate.verdict", "node": "pair", "data": {
+        "verdict": verdict_line, "message": response.text[:500]}})
+
+    # Build combined response showing the full debate
+    full_response = f"""## Debate
+
+**🟣 Claude's Analysis:**
+{claude_analysis.text[:1000]}
+
+**🟢 Codex's Analysis:**
+{codex_analysis.text[:1000]}
+
+## Decision & Execution
+
+{response.text}"""
+
+    return full_response, response.session_id or None
 
 
 @app.post("/api/intake")

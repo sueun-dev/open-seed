@@ -43,6 +43,46 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
       createThread(input.slice(0, 60), "pair");
     }
 
+    // Connect WebSocket for real-time debate events (Both mode)
+    let ws: WebSocket | null = null;
+    if (provider === "both") {
+      try {
+        ws = new WebSocket(`ws://${location.host}/ws/events`);
+        ws.onmessage = (e) => {
+          try {
+            const event = JSON.parse(e.data);
+            if (event.type === "debate.start") {
+              setMessages((prev) => [...prev, {
+                role: "assistant", content: "⚡ " + event.data.message,
+                timestamp: new Date().toISOString(),
+              }]);
+            } else if (event.type === "debate.opinion") {
+              const icon = event.data.speaker === "claude" ? "🟣" : "🟢";
+              const name = event.data.speaker === "claude" ? "Claude" : "Codex";
+              setMessages((prev) => [...prev, {
+                role: "assistant", content: `${icon} **${name}'s Analysis:**\n${event.data.message}`,
+                timestamp: new Date().toISOString(),
+              }]);
+            } else if (event.type === "debate.deciding") {
+              setMessages((prev) => [...prev, {
+                role: "assistant", content: "⚖️ " + event.data.message,
+                timestamp: new Date().toISOString(),
+              }]);
+            } else if (event.type === "debate.verdict") {
+              setMessages((prev) => [...prev, {
+                role: "assistant", content: "✅ " + event.data.verdict,
+                timestamp: new Date().toISOString(),
+              }]);
+            }
+          } catch {}
+        };
+        await new Promise<void>((resolve) => {
+          if (ws) ws.onopen = () => resolve();
+          setTimeout(resolve, 500);
+        });
+      } catch {}
+    }
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -86,6 +126,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
       }]);
     } finally {
       setStreaming(false);
+      if (ws) try { ws.close(); } catch {}
     }
   };
 
