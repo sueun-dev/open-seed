@@ -25,6 +25,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
   const [diffs, setDiffs] = useState<any[]>([]);
   const [showDiff, setShowDiff] = useState(true);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [provider, setProvider] = useState<"claude" | "codex" | "both">("claude");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,6 +51,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
           message: input,
           working_dir: workingDir,
           session_id: sessionId,
+          provider,
         }),
       });
 
@@ -60,11 +62,22 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
       if (data.session_id) setSessionId(data.session_id);
 
       // Add assistant message
+      const label = provider === "both" ? "Claude + Codex" : provider === "codex" ? "Codex" : "Claude";
       setMessages((prev) => [...prev, {
         role: "assistant",
         content: data.response,
         timestamp: new Date().toISOString(),
+        files: [...(data.files_created || []), ...(data.files_modified || [])],
       }]);
+
+      // Show file changes in diff panel
+      if (data.files_created?.length || data.files_modified?.length) {
+        setDiffs((prev) => [...prev, {
+          files_created: data.files_created,
+          files_modified: data.files_modified,
+          summary: data.response?.slice(0, 200) || "",
+        }]);
+      }
     } catch (err) {
       setMessages((prev) => [...prev, {
         role: "assistant",
@@ -110,6 +123,21 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
               >
                 <span style={{ fontSize: 16, display: "block", marginBottom: 4 }}>{s.icon}</span>
                 {s.text}
+              </button>
+            ))}
+          </div>
+
+          {/* Provider selector */}
+          <div style={{ display: "flex", gap: 6 }}>
+            {(["claude", "codex", "both"] as const).map((p) => (
+              <button key={p} onClick={() => setProvider(p)} style={{
+                padding: "6px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                border: provider === p ? "1px solid #2563eb" : "1px solid #222",
+                background: provider === p ? "#1e3a5f" : "#111",
+                color: provider === p ? "#60a5fa" : "#666",
+                transition: "all 0.15s",
+              }}>
+                {p === "claude" ? "🟣 Claude" : p === "codex" ? "🟢 Codex" : "⚡ Both (Debate)"}
               </button>
             ))}
           </div>

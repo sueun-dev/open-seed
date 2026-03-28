@@ -62,6 +62,7 @@ class ChatRequest(BaseModel):
     message: str
     working_dir: str = "."
     session_id: str | None = None
+    provider: str = "claude"  # "claude", "codex", "both"
 
 
 class MemorySearchRequest(BaseModel):
@@ -79,33 +80,144 @@ async def health() -> dict:
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest) -> dict:
-    """Pair Mode: direct Claude CLI call, no pipeline. Streaming via WebSocket."""
-    from openseed_claude.agent import ClaudeAgent
+    """Pair Mode: direct CLI call with provider selection + file change detection."""
+    import os
+    import hashlib
 
-    agent = ClaudeAgent()
+    await _broadcast({"type": "node.start", "node": "pair", "data": {"provider": req.provider}})
 
-    await _broadcast({"type": "node.start", "node": "pair", "data": {}})
+    def _snapshot(d: str) -> dict[str, str]:
+        skip = {"node_modules", ".git", "__pycache__", ".venv", "dist", "build"}
+        hashes: dict[str, str] = {}
+        try:
+            for root, dirs, files in os.walk(d):
+                dirs[:] = [x for x in dirs if x not in skip]
+                for f in files:
+                    path = os.path.join(root, f)
+                    try:
+                        with open(path, "rb") as fh:
+                            hashes[os.path.relpath(path, d)] = hashlib.md5(fh.read()).hexdigest()
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        return hashes
+
+    before = _snapshot(req.working_dir)
 
     try:
-        response = await agent.invoke(
-            prompt=req.message,
-            model="sonnet",
-            working_dir=req.working_dir,
-            max_turns=20,
-            session_id=req.session_id,
-            continue_session=bool(req.session_id),
-        )
+        if req.provider == "codex":
+            response_text, session = await _chat_codex(req)
+        elif req.provider == "both":
+            response_text, session = await _chat_both(req)
+        else:
+            response_text, session = await _chat_claude(req)
 
-        await _broadcast({"type": "node.log", "node": "pair", "data": {"message": response.text}})
+        # Detect file changes
+        after = _snapshot(req.working_dir)
+        files_created = [f for f in after if f not in before]
+        files_modified = [f for f in after if f in before and after[f] != before[f]]
+
+        await _broadcast({"type": "node.log", "node": "pair", "data": {"message": response_text}})
+
+        if files_created or files_modified:
+            await _broadcast({"type": "node.implementation", "node": "pair", "data": {
+                "summary": response_text[:300],
+                "files_created": files_created,
+                "files_modified": files_modified,
+            }})
+
         await _broadcast({"type": "pipeline.complete", "node": "pair", "data": {"status": "completed"}})
 
         return {
-            "response": response.text,
-            "session_id": response.session_id,
+            "response": response_text,
+            "session_id": session,
+            "files_created": files_created,
+            "files_modified": files_modified,
         }
     except Exception as e:
         await _broadcast({"type": "pipeline.fail", "node": "pair", "data": {"error": str(e)}})
-        return {"response": f"Error: {e}", "session_id": None}
+        return {"response": f"Error: {e}", "session_id": None, "files_created": [], "files_modified": []}
+
+
+async def _chat_claude(req: ChatRequest) -> tuple[str, str | None]:
+    """Direct Claude CLI call."""
+    from openseed_claude.agent import ClaudeAgent
+    agent = ClaudeAgent()
+    response = await agent.invoke(
+        prompt=req.message,
+        model="sonnet",
+        working_dir=req.working_dir,
+        max_turns=20,
+        session_id=req.session_id,
+        continue_session=bool(req.session_id),
+    )
+    return response.text, response.session_id or None
+
+
+async def _chat_codex(req: ChatRequest) -> tuple[str, str | None]:
+    """Direct Codex CLI call."""
+    from openseed_codex.agent import CodexAgent
+    agent = CodexAgent()
+    response = await agent.invoke(
+        prompt=req.message,
+        working_dir=req.working_dir,
+    )
+    return response.text, None
+
+
+async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
+    """Claude + Codex debate: both analyze, then Claude picks the best approach and executes."""
+    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
+
+    # Step 1: Both analyze in parallel
+    claude_agent = ClaudeAgent()
+    codex_agent = CodexAgent()
+
+    await _broadcast({"type": "node.log", "node": "pair", "data": {
+        "message": "Both mode: Claude and Codex analyzing in parallel..."}})
+
+    claude_task = claude_agent.invoke(
+        prompt=f"Analyze this and propose your approach (do NOT execute yet, just analyze):\n\n{req.message}",
+        model="sonnet",
+        working_dir=req.working_dir,
+        max_turns=5,
+    )
+    codex_task = codex_agent.invoke(
+        prompt=f"Analyze this and propose your approach (do NOT execute yet, just analyze):\n\n{req.message}",
+        working_dir=req.working_dir,
+    )
+
+    claude_analysis, codex_analysis = await asyncio.gather(claude_task, codex_task)
+
+    await _broadcast({"type": "node.log", "node": "pair", "data": {
+        "message": f"Claude's view: {claude_analysis.text[:200]}...\nCodex's view: {codex_analysis.text[:200]}..."}})
+
+    # Step 2: Claude reviews both approaches and picks the best, then executes
+    response = await claude_agent.invoke(
+        prompt=f"""Two AI engineers analyzed the same task. Review both approaches and execute the better one.
+
+TASK: {req.message}
+
+CLAUDE'S ANALYSIS:
+{claude_analysis.text[:1500]}
+
+CODEX'S ANALYSIS:
+{codex_analysis.text[:1500]}
+
+Instructions:
+1. Compare both approaches. State which is better and why (1-2 sentences).
+2. Execute the winning approach. Actually make the changes - read files, write files, run commands.
+3. If both have good ideas, combine the best parts.
+
+Start with "CHOSEN: [Claude/Codex/Combined] because..." then execute.""",
+        model="sonnet",
+        working_dir=req.working_dir,
+        max_turns=20,
+    )
+
+    return response.text, response.session_id or None
 
 
 @app.post("/api/intake")
