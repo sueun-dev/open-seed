@@ -64,17 +64,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
         role: "assistant",
         content: data.response,
         timestamp: new Date().toISOString(),
-        files: [...(data.files_created || []), ...(data.files_modified || [])],
       }]);
-
-      // Collect file changes for diff panel
-      if (data.files_created?.length || data.files_modified?.length) {
-        setDiffs((prev) => [...prev, {
-          files_created: data.files_created || [],
-          files_modified: data.files_modified || [],
-          summary: data.response?.slice(0, 200) || "",
-        }]);
-      }
     } catch (err) {
       setMessages((prev) => [...prev, {
         role: "assistant",
