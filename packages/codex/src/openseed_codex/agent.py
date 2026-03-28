@@ -69,7 +69,7 @@ class CodexAgent:
         cli = self._resolve_cli()
         use_auto = auto_mode if auto_mode is not None else self.config.auto_mode
 
-        cmd = [cli]
+        cmd = [cli, "exec"]
         if use_auto:
             cmd.append("--full-auto")
         cmd.append(prompt)
