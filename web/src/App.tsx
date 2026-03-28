@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import AGIMode from "./components/AGIMode";
 import PairMode from "./components/PairMode";
 import FolderBrowser from "./components/FolderBrowser";
+import Settings from "./components/Settings";
 
 export type Mode = "agi" | "pair";
 export type Project = { path: string; name: string };
@@ -24,6 +25,7 @@ export default function App() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(() => loadState("os_activeThread", null));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => loadState("os_collapsed", false));
   const [showBrowser, setShowBrowser] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [dropHighlight, setDropHighlight] = useState(false);
 
   // Auto-save to localStorage on change
@@ -267,8 +269,22 @@ export default function App() {
             </div>
           )}
 
-          {/* Current project */}
+          {/* Current project + Settings */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => setShowSettings(true)}
+              style={{
+                width: 32, height: 32, borderRadius: 6, border: "1px solid #222",
+                background: "transparent", color: "#666", cursor: "pointer",
+                fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#444"; e.currentTarget.style.color = "#aaa"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#222"; e.currentTarget.style.color = "#666"; }}
+              title="Settings"
+            >
+              &#9881;
+            </button>
             {activeProject ? (
               <button
                 onClick={() => setShowBrowser(true)}
@@ -343,6 +359,11 @@ export default function App() {
           onSelect={(path) => { addProject(path); setShowBrowser(false); }}
           onClose={() => setShowBrowser(false)}
         />
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <Settings onClose={() => setShowSettings(false)} />
       )}
     </div>
   );
