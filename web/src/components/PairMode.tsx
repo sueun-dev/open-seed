@@ -24,6 +24,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
   const [streaming, setStreaming] = useState(false);
   const [diffs, setDiffs] = useState<any[]>([]);
   const [showDiff, setShowDiff] = useState(true);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,72 +42,47 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
       createThread(input.slice(0, 60), "pair");
     }
 
-    // Check backend availability
     try {
-      const healthCheck = await fetch("/api/health");
-      if (!healthCheck.ok) throw new Error();
-    } catch {
-      setStreaming(false);
-      setMessages((prev) => [...prev, {
-        role: "assistant",
-        content: "Backend server not running.\n\nStart it with:\n```\nopenseed serve --port 8000\n```",
-        timestamp: new Date().toISOString(),
-      }]);
-      return;
-    }
-
-    try {
-      const res = await fetch("/api/run", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: input, working_dir: workingDir, provider: "claude" }),
+        body: JSON.stringify({
+          message: input,
+          working_dir: workingDir,
+          session_id: sessionId,
+        }),
       });
+
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const data = await res.json();
 
-      const ws = new WebSocket(`ws://${location.host}/ws/events`);
-      let assistantContent = "";
+      // Save session for multi-turn conversation
+      if (data.session_id) setSessionId(data.session_id);
 
-      ws.onmessage = (e) => {
-        try {
-          const event = JSON.parse(e.data);
-          if (event.type === "node.log" || event.type === "node.implementation") {
-            const text = event.data?.message || event.data?.summary || "";
-            if (text) {
-              assistantContent += text + "\n";
-              setMessages((prev) => {
-                const updated = [...prev];
-                const lastIdx = updated.length - 1;
-                if (lastIdx >= 0 && updated[lastIdx].role === "assistant") {
-                  updated[lastIdx] = { ...updated[lastIdx], content: assistantContent };
-                } else {
-                  updated.push({ role: "assistant", content: assistantContent, timestamp: new Date().toISOString() });
-                }
-                return updated;
-              });
-            }
-          }
-          // Collect file changes for diff panel
-          if (event.data?.files_created || event.data?.files_modified) {
-            setDiffs((prev) => [...prev, {
-              files_created: event.data.files_created || [],
-              files_modified: event.data.files_modified || [],
-              summary: event.data.summary || "",
-            }]);
-          }
-          if (event.type === "pipeline.complete" || event.type === "pipeline.fail") {
-            setStreaming(false);
-            ws.close();
-          }
-        } catch {}
-      };
-      ws.onerror = () => setStreaming(false);
-      ws.onclose = () => setStreaming(false);
-    } catch {
-      setStreaming(false);
+      // Add assistant message
       setMessages((prev) => [...prev, {
-        role: "assistant", content: "Connection error. Is the server running?",
+        role: "assistant",
+        content: data.response,
+        timestamp: new Date().toISOString(),
+        files: [...(data.files_created || []), ...(data.files_modified || [])],
+      }]);
+
+      // Collect file changes for diff panel
+      if (data.files_created?.length || data.files_modified?.length) {
+        setDiffs((prev) => [...prev, {
+          files_created: data.files_created || [],
+          files_modified: data.files_modified || [],
+          summary: data.response?.slice(0, 200) || "",
+        }]);
+      }
+    } catch (err) {
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: String(err).includes("fetch") ? "Backend not running. Start with: openseed serve --port 8000" : String(err),
         timestamp: new Date().toISOString(),
       }]);
+    } finally {
+      setStreaming(false);
     }
   };
 
