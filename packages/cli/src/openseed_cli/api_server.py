@@ -93,31 +93,19 @@ async def chat(req: ChatRequest) -> dict:
             working_dir=req.working_dir,
             max_turns=20,
             session_id=req.session_id,
-            continue_session=req.session_id is None and False,
+            continue_session=bool(req.session_id),
         )
 
-        # Broadcast response
         await _broadcast({"type": "node.log", "node": "pair", "data": {"message": response.text}})
-
-        # Broadcast file changes if any
-        if response.files_created or response.files_modified:
-            await _broadcast({"type": "node.implementation", "node": "pair", "data": {
-                "summary": response.text[:300],
-                "files_created": response.files_created,
-                "files_modified": response.files_modified,
-            }})
-
         await _broadcast({"type": "pipeline.complete", "node": "pair", "data": {"status": "completed"}})
 
         return {
             "response": response.text,
             "session_id": response.session_id,
-            "files_created": response.files_created,
-            "files_modified": response.files_modified,
         }
     except Exception as e:
         await _broadcast({"type": "pipeline.fail", "node": "pair", "data": {"error": str(e)}})
-        return {"response": f"Error: {e}", "session_id": None, "files_created": [], "files_modified": []}
+        return {"response": f"Error: {e}", "session_id": None}
 
 
 @app.post("/api/intake")
