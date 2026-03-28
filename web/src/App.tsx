@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import AGIMode from "./components/AGIMode";
 import PairMode from "./components/PairMode";
@@ -8,15 +8,31 @@ export type Mode = "agi" | "pair";
 export type Project = { path: string; name: string };
 export type Thread = { id: string; name: string; mode: Mode; projectPath: string; updatedAt: string; events: any[] };
 
+// Persist to localStorage
+function loadState<T>(key: string, fallback: T): T {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+}
+function saveState(key: string, value: any) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
 export default function App() {
-  const [mode, setMode] = useState<Mode>("agi");
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [activeProjectPath, setActiveProjectPath] = useState<string>("");
-  const [threads, setThreads] = useState<Thread[]>([]);
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mode, setMode] = useState<Mode>(() => loadState("os_mode", "agi"));
+  const [projects, setProjects] = useState<Project[]>(() => loadState("os_projects", []));
+  const [activeProjectPath, setActiveProjectPath] = useState<string>(() => loadState("os_activeProject", ""));
+  const [threads, setThreads] = useState<Thread[]>(() => loadState("os_threads", []));
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(() => loadState("os_activeThread", null));
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => loadState("os_collapsed", false));
   const [showBrowser, setShowBrowser] = useState(false);
   const [dropHighlight, setDropHighlight] = useState(false);
+
+  // Auto-save to localStorage on change
+  useEffect(() => { saveState("os_mode", mode); }, [mode]);
+  useEffect(() => { saveState("os_projects", projects); }, [projects]);
+  useEffect(() => { saveState("os_activeProject", activeProjectPath); }, [activeProjectPath]);
+  useEffect(() => { saveState("os_threads", threads); }, [threads]);
+  useEffect(() => { saveState("os_activeThread", activeThreadId); }, [activeThreadId]);
+  useEffect(() => { saveState("os_collapsed", sidebarCollapsed); }, [sidebarCollapsed]);
 
   const activeThread = threads.find((t) => t.id === activeThreadId) || null;
   const activeProject = projects.find((p) => p.path === activeProjectPath) || null;
