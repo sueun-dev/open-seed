@@ -77,10 +77,6 @@ def _build_rules(intake: dict) -> str:
     return "\n".join(parts)
 
 
-# Legacy constant for backward compatibility (specialist runner, integration check)
-_IMPLEMENTATION_RULES = f"Rules:\n{_RULES_CORE}\n{_RULES_WEB}"
-
-
 def _build_plan_text(state: PipelineState) -> str:
     """Build human-readable plan text from state."""
     plan = state.get("plan")
