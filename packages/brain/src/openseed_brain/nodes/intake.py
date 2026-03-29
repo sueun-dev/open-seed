@@ -32,6 +32,16 @@ async def intake_node(state: PipelineState) -> dict:
     """
     Multi-step intake: context → gaps → research → questions (or plan if answers exist).
     """
+    # ── Fast path: plan already approved by user (from frontend Phase 2) ──
+    existing = state.get("intake_analysis")
+    if existing and existing.get("plan"):
+        logger.info("Intake: using pre-approved plan, skipping analysis")
+        return {
+            "skip_planning": True,  # Skip plan_node — plan is already done
+            "intake_analysis": existing,
+            "messages": ["Intake: using user-approved plan"],
+        }
+
     task = state["task"]
     working_dir = state["working_dir"]
     has_answers = bool(state.get("clarification_answers"))
