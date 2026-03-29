@@ -71,12 +71,16 @@ async def qa_gate_node(state: PipelineState) -> dict:
             # Read plan files first (most relevant), then fill remaining slots
             priority_files = [f for f in all_files if f in plan_files]
             other_files = [f for f in all_files if f not in plan_files]
-            files_to_read = (priority_files + other_files)[:8]
+            # Plan files: read fully (these are what was just created/modified)
+            # Other files: read truncated (context only)
+            files_to_read = priority_files[:20] + other_files[:10]
 
             for f in files_to_read:
                 try:
+                    is_plan_file = f in plan_files
+                    max_chars = 30_000 if is_plan_file else 4_000
                     with open(os.path.join(working_dir, f)) as fh:
-                        content = fh.read(2000)
+                        content = fh.read(max_chars)
                     context_parts.append(f"\n--- {f} ---\n{content}")
                 except Exception:
                     pass
