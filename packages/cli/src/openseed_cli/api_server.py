@@ -48,6 +48,7 @@ class RunRequest(BaseModel):
     config_path: str | None = None
     provider: str = "claude"  # "claude", "codex", "both"
     clarification_answers: list[str] = []  # Answers to intake questions
+    intake_analysis: dict[str, Any] | None = None  # Plan from Phase 2 (scope, done_when, approach, etc.)
 
 
 class IntakeRequest(BaseModel):
@@ -534,6 +535,7 @@ async def start_run(req: RunRequest) -> dict:
     asyncio.create_task(_execute_pipeline(
         req.task, req.working_dir, req.config_path, req.provider,
         clarification_answers=req.clarification_answers,
+        intake_analysis=req.intake_analysis,
     ))
 
     return {"status": "started", "task": req.task}
@@ -802,6 +804,7 @@ async def _broadcast(event: dict) -> None:
 async def _execute_pipeline(
     task: str, working_dir: str, config_path: str | None,
     provider: str = "claude", clarification_answers: list[str] | None = None,
+    intake_analysis: dict[str, Any] | None = None,
 ) -> None:
     """Run the full pipeline with event broadcasting."""
     global _current_run
@@ -815,6 +818,8 @@ async def _execute_pipeline(
     state["max_retries"] = cfg.sentinel.max_retries
     if clarification_answers:
         state["clarification_answers"] = clarification_answers
+    if intake_analysis:
+        state["intake_analysis"] = intake_analysis
     graph = compile_graph(
         checkpoint_dir=str(Path(str(cfg.brain.checkpoint_dir)).expanduser()),
     )
