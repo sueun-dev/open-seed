@@ -128,13 +128,22 @@ export default function App() {
           const text = await res.text();
           if (text) {
             const data = JSON.parse(text);
-            if (data.matches?.length >= 1) {
+            if (data.matches?.length === 1) {
+              // Single match → use directly
               resolved = data.matches[0];
+            } else if (data.matches?.length > 1) {
+              // Multiple matches → let user pick via folder browser
+              setShowBrowser(true);
+              return;
             }
           }
         }
       } catch {}
-      if (!resolved) resolved = "/" + folderName;
+      if (!resolved) {
+        // Can't resolve → open folder browser for manual selection
+        setShowBrowser(true);
+        return;
+      }
     }
 
     addProject(resolved);
