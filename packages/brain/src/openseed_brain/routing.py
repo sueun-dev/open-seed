@@ -17,11 +17,15 @@ def route_after_intake(state: PipelineState) -> Literal["plan", "implement"]:
     """
     After intake, decide: full planning or skip directly to implement.
 
-    The intake node calls Claude to classify the task and sets skip_planning=True
-    when Claude determines the task is trivial enough to skip the planning phase.
-    This router reads that flag — no string matching, no hardcoded rules.
+    Skip planning when:
+    - skip_planning=True (simple task, or pre-approved plan from frontend)
+    - intake_analysis already has a plan (user approved it in the UI)
     """
     if state.get("skip_planning", False):
+        return "implement"
+    # Pre-approved plan from frontend Phase 2 → skip plan_node
+    analysis = state.get("intake_analysis")
+    if analysis and analysis.get("plan"):
         return "implement"
     return "plan"
 
