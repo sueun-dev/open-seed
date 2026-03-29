@@ -464,6 +464,26 @@ async def read_file(path: str) -> dict:
         return {"content": "", "error": str(e)}
 
 
+@app.post("/api/file")
+async def save_file(body: dict) -> dict:
+    """Save file content from the code editor."""
+    import os
+
+    path = body.get("path", "")
+    content = body.get("content", "")
+
+    if not path:
+        return {"error": "No path provided"}
+
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return {"status": "saved", "path": path}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.post("/api/intake")
 async def run_intake(req: IntakeRequest) -> dict:
     """Run intake analysis. Phase 1: questions. Phase 2 (with answers): plan."""
