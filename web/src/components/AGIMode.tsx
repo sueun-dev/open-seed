@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import Pipeline from "./Pipeline";
 import TaskLog from "./TaskLog";
 import { BrailleSpinner } from "./Spinner";
@@ -10,6 +10,8 @@ type Props = {
   setWorkingDir: (dir: string) => void;
   createThread: (name: string, mode: Mode) => string;
   updateThreadEvents: (threadId: string, events: any[]) => void;
+  appendThreadEvent: (threadId: string, event: any) => void;
+  setThreadRunning: (threadId: string, running: boolean) => void;
 };
 
 type QuestionItem = {
@@ -37,30 +39,100 @@ type PlanState = {
   previousClarification: ClarificationState | null;
 };
 
-export default function AGIMode({ activeThread, workingDir, setWorkingDir, createThread, updateThreadEvents }: Props) {
+// Per-thread UI state (not stored in Thread object)
+type ThreadUIState = {
+  task: string;
+  clarification: ClarificationState | null;
+  planReview: PlanState | null;
+  intakeLoading: boolean;
+  provider: "claude" | "codex" | "both";
+};
+
+const DEFAULT_UI_STATE: ThreadUIState = {
+  task: "",
+  clarification: null,
+  planReview: null,
+  intakeLoading: false,
+  provider: "claude",
+};
+
+export default function AGIMode({ activeThread, workingDir, setWorkingDir, createThread, updateThreadEvents, appendThreadEvent, setThreadRunning }: Props) {
+  // Current UI state (for active thread or new-thread view)
   const [task, setTask] = useState("");
-  const [running, setRunning] = useState(false);
-  const [events, setEvents] = useState<any[]>(activeThread?.events || []);
   const [provider, setProvider] = useState<"claude" | "codex" | "both">("claude");
   const [clarification, setClarification] = useState<ClarificationState | null>(null);
   const [planReview, setPlanReview] = useState<PlanState | null>(null);
   const [intakeLoading, setIntakeLoading] = useState(false);
-  const threadIdRef = useRef<string | null>(activeThread?.id || null);
 
-  useEffect(() => {
-    if (activeThread) {
-      setEvents(activeThread.events);
-      threadIdRef.current = activeThread.id;
+  // Per-thread persistent stores (survive thread switches)
+  const uiStatesRef = useRef<Map<string, ThreadUIState>>(new Map());
+  const wsRef = useRef<Map<string, WebSocket>>(new Map());
+  const prevThreadIdRef = useRef<string | null>(null);
+
+  // Derive running & events from the thread object (source of truth)
+  const running = activeThread?.running ?? false;
+  const events = activeThread?.events ?? [];
+
+  // Save current UI state for a thread
+  const saveUIState = useCallback((threadId: string) => {
+    uiStatesRef.current.set(threadId, {
+      task,
+      clarification,
+      planReview,
+      intakeLoading,
+      provider,
+    });
+  }, [task, clarification, planReview, intakeLoading, provider]);
+
+  // Restore UI state for a thread
+  const restoreUIState = useCallback((threadId: string) => {
+    const saved = uiStatesRef.current.get(threadId);
+    if (saved) {
+      setTask(saved.task);
+      setClarification(saved.clarification);
+      setPlanReview(saved.planReview);
+      setIntakeLoading(saved.intakeLoading);
+      setProvider(saved.provider);
     } else {
-      setEvents([]);
       setTask("");
-      setRunning(false);
       setClarification(null);
       setPlanReview(null);
       setIntakeLoading(false);
-      threadIdRef.current = null;
     }
+  }, []);
+
+  // Handle thread switch: save old state, restore new state
+  useEffect(() => {
+    const prevId = prevThreadIdRef.current;
+    const newId = activeThread?.id ?? null;
+
+    // Save previous thread's UI state
+    if (prevId && prevId !== newId) {
+      saveUIState(prevId);
+    }
+
+    // Restore new thread's UI state or reset for new-thread view
+    if (newId) {
+      restoreUIState(newId);
+    } else {
+      // New thread view: reset everything
+      setTask("");
+      setClarification(null);
+      setPlanReview(null);
+      setIntakeLoading(false);
+    }
+
+    prevThreadIdRef.current = newId;
   }, [activeThread?.id]);
+
+  // Cleanup: close all WebSockets on unmount
+  useEffect(() => {
+    return () => {
+      wsRef.current.forEach((ws) => {
+        try { ws.close(); } catch {}
+      });
+    };
+  }, []);
 
   // Step 1: Run intake to get clarification questions
   const startIntake = async () => {
@@ -73,7 +145,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     } catch {
       setIntakeLoading(false);
       setClarification(null);
-      // Fallback: skip intake, go directly to run
       startRun([]);
       return;
     }
@@ -89,7 +160,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       const data = await res.json();
 
       const rawQ = data.clarification_questions || [];
-      // Normalize: backend may return strings (old) or {question, options} (new)
       const questions: QuestionItem[] = rawQ.map((q: any) =>
         typeof q === "string" ? { question: q, options: [] } : q
       );
@@ -101,11 +171,9 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
           intakeAnalysis: data.intake_analysis || {},
         });
       } else {
-        // No questions, run directly
         startRun([]);
       }
     } catch {
-      // Fallback: run without clarification
       startRun([]);
     } finally {
       setIntakeLoading(false);
@@ -149,7 +217,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       }
     } catch {}
 
-    // Fallback: skip plan review, run directly
     setIntakeLoading(false);
     startRun(answers);
   };
@@ -158,44 +225,53 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
   const startRun = async (answers: string[]) => {
     setClarification(null);
     setPlanReview(null);
-    setRunning(true);
-    setEvents([]);
 
     const tid = createThread(task.slice(0, 60), "agi");
-    threadIdRef.current = tid;
+    setThreadRunning(tid, true);
+
+    // Save UI state for this new thread
+    uiStatesRef.current.set(tid, {
+      task,
+      clarification: null,
+      planReview: null,
+      intakeLoading: false,
+      provider,
+    });
 
     try {
       const healthCheck = await fetch("/api/health");
       if (!healthCheck.ok) throw new Error("Backend not responding");
     } catch {
       const errMsg = "Backend server not running. Start it with: openseed serve --port 8000";
-      setEvents((prev) => {
-        const next = [...prev, { type: "error", data: { message: errMsg } }];
-        updateThreadEvents(tid, next);
-        return next;
-      });
-      setRunning(false);
+      updateThreadEvents(tid, [{ type: "error", data: { message: errMsg } }]);
+      setThreadRunning(tid, false);
       return;
     }
 
     try {
       const ws = new WebSocket(`ws://${location.host}/ws/events`);
+      wsRef.current.set(tid, ws);
+
       ws.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data);
-          setEvents((prev) => {
-            const next = [...prev, event];
-            updateThreadEvents(tid, next);
-            return next;
-          });
+          appendThreadEvent(tid, event);
+
           if (event.type === "pipeline.complete" || event.type === "pipeline.fail") {
-            setRunning(false);
+            setThreadRunning(tid, false);
+            wsRef.current.delete(tid);
             setTimeout(() => ws.close(), 1000);
           }
         } catch {}
       };
-      ws.onerror = () => setRunning(false);
-      ws.onclose = () => setRunning(false);
+      ws.onerror = () => {
+        setThreadRunning(tid, false);
+        wsRef.current.delete(tid);
+      };
+      ws.onclose = () => {
+        setThreadRunning(tid, false);
+        wsRef.current.delete(tid);
+      };
 
       await new Promise<void>((resolve) => {
         ws.onopen = () => resolve();
@@ -215,18 +291,19 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       if (text) {
         const data = JSON.parse(text);
         if (data.error) {
-          setEvents((prev) => [...prev, { type: "error", data: { message: data.error } }]);
-          setRunning(false);
+          appendThreadEvent(tid, { type: "error", data: { message: data.error } });
+          setThreadRunning(tid, false);
           ws.close();
+          wsRef.current.delete(tid);
         }
       }
     } catch (err) {
-      setEvents((prev) => [...prev, { type: "error", data: { message: String(err) } }]);
-      setRunning(false);
+      appendThreadEvent(tid, { type: "error", data: { message: String(err) } });
+      setThreadRunning(tid, false);
     }
   };
 
-  // ── Clarification UI (Step 2: Questions with options) ──
+  // ── Clarification UI ──
   if (clarification) {
     return (
       <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 24px", overflowY: "auto" }}>
@@ -246,7 +323,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             <span style={{ color: "#555", fontWeight: 600 }}>Task:</span> {task}
           </div>
 
-          {/* Questions with option buttons */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {clarification.questions.map((q, i) => (
               <div key={i} style={{
@@ -258,7 +334,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
                   {q.question}
                 </div>
 
-                {/* Option buttons */}
                 {q.options.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
                     {q.options.map((opt) => {
@@ -289,7 +364,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
                   </div>
                 )}
 
-                {/* Custom answer input */}
                 <input
                   value={q.options.includes(clarification.answers[i]) ? "" : clarification.answers[i]}
                   onChange={(e) => {
@@ -310,7 +384,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             ))}
           </div>
 
-          {/* Actions */}
           <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
             <button
               onClick={() => startRun([])}
@@ -342,7 +415,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     );
   }
 
-  // ── Plan Review UI (Step 3: Review plan before execution) ──
+  // ── Plan Review UI ──
   if (planReview) {
     const { plan } = planReview;
     return (
@@ -354,7 +427,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             <p style={{ color: "#666", fontSize: 12 }}>Review the plan below. Approve to start the pipeline.</p>
           </div>
 
-          {/* Approach */}
           {plan.approach && (
             <div style={{ padding: "12px 14px", borderRadius: 8, background: "#111", border: "1px solid #222", marginBottom: 16 }}>
               <div style={{ fontSize: 10, color: "#555", fontWeight: 600, marginBottom: 4 }}>APPROACH</div>
@@ -362,7 +434,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             </div>
           )}
 
-          {/* Plan steps */}
           {plan.plan && (
             <div style={{ padding: "12px 14px", borderRadius: 8, background: "#0a0a0a", border: "1px solid #1a1a1a", marginBottom: 16 }}>
               <div style={{ fontSize: 10, color: "#555", fontWeight: 600, marginBottom: 8 }}>STEPS</div>
@@ -370,7 +441,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             </div>
           )}
 
-          {/* Scope */}
           <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
             {plan.scope.modify.length > 0 && (
               <div style={{ flex: 1, padding: "10px 12px", borderRadius: 8, background: "#111", border: "1px solid #1a1a1a" }}>
@@ -398,7 +468,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             )}
           </div>
 
-          {/* Done When */}
           {plan.done_when.length > 0 && (
             <div style={{ padding: "12px 14px", borderRadius: 8, background: "#0d1a0d", border: "1px solid #1a2e1a", marginBottom: 16 }}>
               <div style={{ fontSize: 10, color: "#4ade80", fontWeight: 600, marginBottom: 8 }}>DONE WHEN</div>
@@ -410,7 +479,6 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             </div>
           )}
 
-          {/* Actions */}
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <button
               onClick={() => { setClarification(planReview.previousClarification); setPlanReview(null); }}
@@ -442,7 +510,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     );
   }
 
-  // Empty state
+  // ── Empty state (no thread selected) ──
   if (!activeThread && events.length === 0 && !running && !intakeLoading) {
     return (
       <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24 }}>
@@ -558,7 +626,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     );
   }
 
-  // Running / completed state
+  // ── Running / completed state ──
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: "16px 24px", overflow: "hidden" }}>
       {/* Pipeline progress */}
