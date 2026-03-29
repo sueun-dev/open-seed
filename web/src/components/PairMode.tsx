@@ -28,6 +28,8 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
   const [provider, setProvider] = useState<"claude" | "codex" | "both">("claude");
   const [rightTab, setRightTab] = useState<"chat" | "changes">("chat");
   const [changedFiles, setChangedFiles] = useState<string[]>([]);
+  const [viewingFiles, setViewingFiles] = useState<string[]>([]);
+  const [activeFile, setActiveFile] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -74,7 +76,10 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: input, working_dir: workingDir, session_id: sessionId, provider }),
+        body: JSON.stringify({
+          message: input, working_dir: workingDir, session_id: sessionId, provider,
+          viewing_files: viewingFiles, active_file: activeFile,
+        }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
@@ -115,7 +120,11 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
     <div style={{ height: "100%", display: "flex" }}>
       {/* LEFT: Code Viewer */}
       <div style={{ flex: 1, minWidth: 0, borderRight: "1px solid #1a1a1a" }}>
-        <CodeViewer workingDir={workingDir} highlightFiles={changedFiles} />
+        <CodeViewer
+          workingDir={workingDir}
+          highlightFiles={changedFiles}
+          onOpenFilesChange={(files, active) => { setViewingFiles(files); setActiveFile(active); }}
+        />
       </div>
 
       {/* RIGHT: Chat + Changes */}

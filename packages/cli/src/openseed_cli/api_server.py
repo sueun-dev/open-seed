@@ -63,6 +63,8 @@ class ChatRequest(BaseModel):
     working_dir: str = "."
     session_id: str | None = None
     provider: str = "claude"  # "claude", "codex", "both"
+    viewing_files: list[str] = []  # Files the user has open in the code viewer
+    active_file: str | None = None  # File the user is currently looking at
 
 
 class MemorySearchRequest(BaseModel):
@@ -140,12 +142,25 @@ async def chat(req: ChatRequest) -> dict:
         return {"response": f"Error: {e}", "session_id": None, "files_created": [], "files_modified": []}
 
 
+def _build_chat_prompt(req: ChatRequest) -> str:
+    """Build prompt with viewing context."""
+    parts = []
+    if req.active_file:
+        parts.append(f"[User is currently viewing: {req.active_file}]")
+    if req.viewing_files:
+        other = [f for f in req.viewing_files if f != req.active_file]
+        if other:
+            parts.append(f"[Also open: {', '.join(other)}]")
+    parts.append(req.message)
+    return "\n".join(parts)
+
+
 async def _chat_claude(req: ChatRequest) -> tuple[str, str | None]:
     """Direct Claude CLI call."""
     from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
     response = await agent.invoke(
-        prompt=req.message,
+        prompt=_build_chat_prompt(req),
         model="sonnet",
         working_dir=req.working_dir,
         max_turns=20,
@@ -161,7 +176,7 @@ async def _chat_codex(req: ChatRequest) -> tuple[str, str | None]:
         from openseed_codex.agent import CodexAgent
         agent = CodexAgent()
         response = await agent.invoke(
-            prompt=req.message,
+            prompt=_build_chat_prompt(req),
             working_dir=req.working_dir,
         )
         return response.text, None
@@ -181,8 +196,10 @@ async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
     await _broadcast({"type": "debate.start", "node": "pair", "data": {
         "step": "analyzing", "message": "Claude and Codex are both analyzing your request..."}})
 
+    chat_prompt = _build_chat_prompt(req)
+
     claude_task = claude_agent.invoke(
-        prompt=req.message,
+        prompt=chat_prompt,
         model="sonnet",
         working_dir=req.working_dir,
         max_turns=10,
@@ -192,7 +209,7 @@ async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
     codex_text = ""
     try:
         codex_task = codex_agent.invoke(
-            prompt=req.message,
+            prompt=chat_prompt,
             working_dir=req.working_dir,
         )
         claude_analysis, codex_analysis = await asyncio.gather(claude_task, codex_task)
