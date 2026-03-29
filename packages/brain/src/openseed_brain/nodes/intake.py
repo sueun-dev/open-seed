@@ -60,9 +60,15 @@ async def intake_node(state: PipelineState) -> dict:
     gaps = await _identify_gaps(agent, task, context)
     logger.info("Identified %d knowledge gaps", len(gaps))
 
+    # ── Step 2.5: Select Skills — pick relevant official skills for this task ──
+    selected_skills = await _select_skills(agent, task, gaps, context)
+    logger.info("Selected %d skills: %s", len(selected_skills), selected_skills)
+
     if not gaps:
         # No gaps = simple task, skip questions entirely
         analysis = await _quick_classify(agent, task, context)
+        if selected_skills:
+            analysis["selected_skills"] = selected_skills
         return {
             "skip_planning": analysis.get("skip_planning", True),
             "intake_analysis": analysis,
@@ -76,6 +82,11 @@ async def intake_node(state: PipelineState) -> dict:
 
     # ── Step 4: Formulate Questions — dynamic count, research-backed options ──
     result = await _formulate_questions(agent, task, context, gaps, research_results)
+
+    # Inject selected skills into intake_analysis
+    if selected_skills and "intake_analysis" in result:
+        result["intake_analysis"]["selected_skills"] = selected_skills
+
     return result
 
 
@@ -182,6 +193,27 @@ def _build_context_block(context: dict) -> str:
     if context["codebase_context"]:
         parts.append(context["codebase_context"])
     return "\n".join(parts)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 2.5: Skill Selection
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _select_skills(agent, task: str, gaps: list[dict], context: dict) -> list[str]:
+    """Select relevant official skills from Anthropic/OpenAI repos."""
+    try:
+        from openseed_brain.skill_loader import select_skills_for_task
+        return await select_skills_for_task(
+            agent,
+            task=task,
+            gaps=gaps,
+            tech_stack=context.get("detected_tech_stack", []),
+            codebase_context=context.get("codebase_context", ""),
+        )
+    except Exception as exc:
+        logger.debug("Skill selection skipped: %s", exc)
+        return []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
