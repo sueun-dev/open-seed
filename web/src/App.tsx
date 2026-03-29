@@ -28,6 +28,7 @@ export default function App() {
   const [showBrowser, setShowBrowser] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(220);
   const [dropHighlight, setDropHighlight] = useState(false);
 
   // Auto-save to localStorage on change
@@ -357,31 +358,53 @@ export default function App() {
 
           {/* Terminal toggle bar */}
           <div
-            onClick={() => setShowTerminal(!showTerminal)}
             style={{
               height: 28, borderTop: "1px solid #1a1a1a", display: "flex",
               alignItems: "center", padding: "0 12px", gap: 6,
-              background: "#0a0a0a", cursor: "pointer", flexShrink: 0,
-              transition: "background 0.1s",
+              background: "#0a0a0a", flexShrink: 0,
             }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "#111"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "#0a0a0a"}
           >
-            <span style={{ fontSize: 12, color: "#555" }}>{showTerminal ? "▼" : "▲"}</span>
-            <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>Terminal</span>
-            {activeProjectPath && (
-              <span style={{ fontSize: 10, color: "#444", fontFamily: "monospace", marginLeft: 8 }}>
-                {activeProjectPath.split("/").pop()}
-              </span>
-            )}
+            <div
+              onClick={() => setShowTerminal(!showTerminal)}
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", flex: 1 }}
+            >
+              <span style={{ fontSize: 12, color: "#555" }}>{showTerminal ? "▼" : "▲"}</span>
+              <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>Terminal</span>
+              {activeProjectPath && (
+                <span style={{ fontSize: 10, color: "#444", fontFamily: "monospace", marginLeft: 8 }}>
+                  {activeProjectPath.split("/").pop()}
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* Terminal panel */}
+          {/* Terminal panel with drag resize */}
           {showTerminal && activeProjectPath && (
-            <div style={{
-              height: 220, borderTop: "1px solid #1a1a1a", flexShrink: 0,
-              transition: "height 0.2s ease",
-            }}>
+            <div style={{ height: terminalHeight, flexShrink: 0, position: "relative" }}>
+              {/* Resize handle */}
+              <div
+                style={{
+                  position: "absolute", top: 0, left: 0, right: 0, height: 4,
+                  cursor: "ns-resize", zIndex: 10,
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const startY = e.clientY;
+                  const startH = terminalHeight;
+                  const onMove = (ev: MouseEvent) => {
+                    const delta = startY - ev.clientY;
+                    setTerminalHeight(Math.max(100, Math.min(600, startH + delta)));
+                  };
+                  const onUp = () => {
+                    document.removeEventListener("mousemove", onMove);
+                    document.removeEventListener("mouseup", onUp);
+                  };
+                  document.addEventListener("mousemove", onMove);
+                  document.addEventListener("mouseup", onUp);
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "rgba(37,99,235,0.3)"}
+                onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+              />
               <Terminal workingDir={activeProjectPath} />
             </div>
           )}
