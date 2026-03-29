@@ -244,6 +244,32 @@ async def fix_node(state: PipelineState) -> dict:
         # Re-stash so we have a clean revert point for Insight's approach
         await _git_stash_push(working_dir)
 
+    # ── Gather plan/intake context for fix ──
+    intake = state.get("intake_analysis") or {}
+    plan = state.get("plan")
+
+    plan_context = ""
+    if plan:
+        plan_context = f"\n## Original Plan\n{plan.summary}\n"
+        for t in plan.tasks[:10]:
+            plan_context += f"- {t.id}: {t.description} ({t.role}) files: {', '.join(t.files[:5])}\n"
+
+    intake_context = ""
+    if intake:
+        parts = []
+        if intake.get("approach"):
+            parts.append(f"Approach: {intake['approach']}")
+        if intake.get("requirements"):
+            reqs = intake["requirements"]
+            parts.append(f"Requirements: {', '.join(reqs) if isinstance(reqs, list) else reqs}")
+        if intake.get("tech_stack"):
+            parts.append(f"Tech stack: {intake['tech_stack']}")
+        if parts:
+            intake_context = "\n## Project Context\n" + "\n".join(parts) + "\n"
+
+    # Build skill-aware system prompt so fix preserves patterns from original implementation
+    skill_system_prompt = _build_fix_skill_prompt(state)
+
     # ── Main fix with session continuity ──
     from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
@@ -259,6 +285,8 @@ async def fix_node(state: PipelineState) -> dict:
         retry_count=retry_count,
         failure_history=failure_history[-5:],
         insight_advice=insight_advice,
+        plan_context=plan_context,
+        intake_context=intake_context,
     )
 
     # Snapshot files BEFORE fix
@@ -267,6 +295,7 @@ async def fix_node(state: PipelineState) -> dict:
     # Use session continuity: first attempt creates session, subsequent reuse it
     response = await agent.invoke(
         prompt=prompt,
+        system_prompt=skill_system_prompt if skill_system_prompt else None,
         model="sonnet",
         working_dir=working_dir,
         max_turns=20,
@@ -458,6 +487,41 @@ def _snapshot_dir(d: str) -> dict[str, str]:
     return hashes
 
 
+def _build_fix_skill_prompt(state: PipelineState) -> str | None:
+    """
+    Build system prompt from skills used during implementation.
+    Ensures fix_node preserves patterns/conventions established by the original skills.
+    """
+    intake = state.get("intake_analysis") or {}
+    plan = state.get("plan")
+    if not plan:
+        return None
+
+    # Collect all unique skills from plan tasks
+    skill_names: list[str] = []
+    seen: set[str] = set()
+    for t in plan.tasks:
+        for s in getattr(t, "skills", []):
+            if s not in seen:
+                skill_names.append(s)
+                seen.add(s)
+
+    if not skill_names:
+        return None
+
+    try:
+        from openseed_brain.skill_loader import get_skill_content
+        parts = ["You are fixing code that was written following these official skills. "
+                 "Preserve the patterns and conventions from these skills when making fixes.\n"]
+        for name in skill_names:
+            content = get_skill_content(name)
+            if content:
+                parts.append(f"\n{'='*40}\nSKILL: {name}\n{'='*40}\n{content}")
+        return "\n".join(parts) if len(parts) > 1 else None
+    except Exception:
+        return None
+
+
 def _build_fix_prompt(
     *,
     task: str,
@@ -467,6 +531,8 @@ def _build_fix_prompt(
     retry_count: int,
     failure_history: list[str],
     insight_advice: object | None = None,
+    plan_context: str = "",
+    intake_context: str = "",
 ) -> str:
     """
     Build a structured fix prompt. Strategy changes based on retry_count:
@@ -500,7 +566,7 @@ Do NOT repeat what was tried before.
 
 ## Task
 {task}
-
+{intake_context}{plan_context}
 ## Retry Attempt
 {retry_count} (of max 10)
 
@@ -545,7 +611,7 @@ You MUST try a COMPLETELY DIFFERENT approach this time.
 
 ## Task
 {task}
-
+{intake_context}{plan_context}
 ## Working Directory
 {working_dir}
 
