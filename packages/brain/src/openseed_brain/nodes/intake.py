@@ -35,9 +35,9 @@ async def intake_node(state: PipelineState) -> dict:
     # ── Fast path: plan already approved by user (from frontend Phase 2) ──
     existing = state.get("intake_analysis")
     if existing and existing.get("plan"):
-        logger.info("Intake: using pre-approved plan, skipping analysis")
+        logger.info("Intake: using pre-approved plan, sending to plan_node for structuring")
         return {
-            "skip_planning": True,  # Skip plan_node — plan is already done
+            "skip_planning": False,  # Still go through plan_node to convert text → Plan object
             "intake_analysis": existing,
             "messages": ["Intake: using user-approved plan"],
         }

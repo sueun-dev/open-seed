@@ -23,10 +23,6 @@ def route_after_intake(state: PipelineState) -> Literal["plan", "implement"]:
     """
     if state.get("skip_planning", False):
         return "implement"
-    # Pre-approved plan from frontend Phase 2 → skip plan_node
-    analysis = state.get("intake_analysis")
-    if analysis and analysis.get("plan"):
-        return "implement"
     return "plan"
 
 
