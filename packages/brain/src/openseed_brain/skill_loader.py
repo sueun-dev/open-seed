@@ -22,7 +22,7 @@ _SKILLS_DIR = _PROJECT_ROOT / "skills"
 
 
 @dataclass
-class SkillInfo:
+class OfficialSkill:
     """Metadata for a single skill."""
     name: str
     description: str
@@ -34,7 +34,7 @@ class SkillInfo:
 
 # ─── Module-level cache ──────────────────────────────────────────────────────
 
-_skills_cache: list[SkillInfo] | None = None
+_skills_cache: list[OfficialSkill] | None = None
 
 
 def _parse_frontmatter(text: str) -> dict[str, str]:
@@ -56,9 +56,9 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
     return result
 
 
-def _scan_skills_dir() -> list[SkillInfo]:
+def _scan_skills_dir() -> list[OfficialSkill]:
     """Scan skills/ directory and index all SKILL.md files."""
-    skills: list[SkillInfo] = []
+    skills: list[OfficialSkill] = []
 
     if not _SKILLS_DIR.is_dir():
         logger.warning("Skills directory not found: %s", _SKILLS_DIR)
@@ -73,7 +73,7 @@ def _scan_skills_dir() -> list[SkillInfo]:
                 try:
                     text = skill_md.read_text(encoding="utf-8", errors="ignore")
                     fm = _parse_frontmatter(text)
-                    skills.append(SkillInfo(
+                    skills.append(OfficialSkill(
                         name=fm.get("name", entry.name),
                         description=fm.get("description", ""),
                         source="anthropic",
@@ -92,7 +92,7 @@ def _scan_skills_dir() -> list[SkillInfo]:
                 try:
                     text = skill_md.read_text(encoding="utf-8", errors="ignore")
                     fm = _parse_frontmatter(text)
-                    skills.append(SkillInfo(
+                    skills.append(OfficialSkill(
                         name=fm.get("name", entry.name),
                         description=fm.get("description", ""),
                         source="openai",
@@ -111,7 +111,7 @@ def _scan_skills_dir() -> list[SkillInfo]:
                 try:
                     text = skill_md.read_text(encoding="utf-8", errors="ignore")
                     fm = _parse_frontmatter(text)
-                    skills.append(SkillInfo(
+                    skills.append(OfficialSkill(
                         name=fm.get("name", entry.name),
                         description=fm.get("description", ""),
                         source="openai",
@@ -128,7 +128,7 @@ def _scan_skills_dir() -> list[SkillInfo]:
     return skills
 
 
-def list_all_skills() -> list[SkillInfo]:
+def list_all_skills() -> list[OfficialSkill]:
     """Return all available skills (cached after first scan)."""
     global _skills_cache
     if _skills_cache is None:
