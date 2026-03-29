@@ -188,6 +188,9 @@ def _build_analysis_context(intake_analysis: dict) -> str:
         parts.append(f"- Approach: {approach}")
     if reqs:
         parts.append(f"- Requirements: {', '.join(reqs) if isinstance(reqs, list) else reqs}")
+    selected_skills = intake_analysis.get("selected_skills", [])
+    if selected_skills:
+        parts.append(f"- Selected skills: {', '.join(selected_skills)}")
     if lessons and str(lessons).lower() != "none":
         parts.append(f"- Lessons from past: {lessons}")
     if existing.lower() == "yes":
