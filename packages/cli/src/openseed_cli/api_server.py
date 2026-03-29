@@ -487,6 +487,7 @@ async def save_file(body: dict) -> dict:
 @app.post("/api/intake")
 async def run_intake(req: IntakeRequest) -> dict:
     """Run intake analysis. Phase 1: questions. Phase 2 (with answers): plan."""
+    import traceback
     from openseed_brain.nodes.intake import intake_node
     from openseed_brain.state import initial_state
 
@@ -501,7 +502,16 @@ async def run_intake(req: IntakeRequest) -> dict:
             for q in req.clarification_questions
         ]
 
-    result = await intake_node(state)
+    try:
+        result = await intake_node(state)
+    except Exception as exc:
+        print(f"[INTAKE ERROR] {exc}")
+        traceback.print_exc()
+        return {
+            "intake_analysis": {"skip_planning": True},
+            "clarification_questions": [],
+            "skip_planning": True,
+        }
 
     return {
         "intake_analysis": result.get("intake_analysis", {}),
