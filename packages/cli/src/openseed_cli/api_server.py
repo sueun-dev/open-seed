@@ -714,19 +714,47 @@ async def resolve_folder(name: str, children: str = "") -> dict:
         except Exception:
             pass
 
-    # Score and rank matches: prioritize code projects + child name overlap
+    # Score and rank matches using file tree fingerprint from drag & drop
     _PROJECT_MARKERS = {".git", "package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Makefile"}
+
+    # Separate top-level and nested children for matching
+    top_level_children = set()
+    nested_children = set()  # "subdir/file" format
+    for c in child_set:
+        if "/" in c:
+            nested_children.add(c)
+        else:
+            top_level_children.add(c)
+
     scored = []
     for m in matches:
         score = 0
         try:
-            actual_children = set(os.listdir(m))
-            # Child name overlap (from drag & drop)
-            if child_set:
-                score += len(child_set & actual_children) * 10
+            actual_top = set(os.listdir(m))
+
+            # Top-level children overlap
+            if top_level_children:
+                overlap = len(top_level_children & actual_top)
+                total = len(top_level_children)
+                score += overlap * 10
+                # Penalize heavily if low overlap ratio
+                if total > 3 and overlap < total * 0.5:
+                    score -= 50
+
+            # Nested children overlap (2-level fingerprint — very precise)
+            if nested_children:
+                nested_matches = 0
+                for nc in nested_children:
+                    if os.path.exists(os.path.join(m, nc)):
+                        nested_matches += 1
+                score += nested_matches * 20  # Nested matches are worth more (more unique)
+                if len(nested_children) > 2 and nested_matches == 0:
+                    score -= 100  # No nested matches = definitely wrong folder
+
             # Code project bonus
-            if actual_children & _PROJECT_MARKERS:
+            if actual_top & _PROJECT_MARKERS:
                 score += 5
+
             # Penalize deeply nested paths (SDK internals, etc.)
             depth = m.count(os.sep)
             score -= depth

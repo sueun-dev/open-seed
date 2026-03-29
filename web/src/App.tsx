@@ -150,15 +150,31 @@ export default function App() {
     setActiveThreadId(null);
   };
 
-  // Read top-level children from a dropped directory entry
-  const readDirChildren = (dirEntry: any): Promise<string[]> => {
+  // Read directory tree from a dropped directory entry (2 levels deep for fingerprinting)
+  const readDirTree = (dirEntry: any, depth = 0): Promise<string[]> => {
     return new Promise((resolve) => {
-      if (!dirEntry?.isDirectory) { resolve([]); return; }
+      if (!dirEntry?.isDirectory || depth > 1) { resolve([]); return; }
       const reader = dirEntry.createReader();
-      reader.readEntries(
-        (entries: any[]) => resolve(entries.map((e: any) => e.name).sort()),
-        () => resolve([]),
-      );
+      const readAll = (allEntries: any[] = []) => {
+        reader.readEntries(async (entries: any[]) => {
+          if (entries.length === 0) {
+            // All entries read — collect names and recurse into subdirs
+            const names: string[] = [];
+            for (const e of allEntries) {
+              names.push(e.name);
+              if (e.isDirectory && depth < 1) {
+                const subNames = await readDirTree(e, depth + 1);
+                for (const s of subNames) names.push(`${e.name}/${s}`);
+              }
+            }
+            resolve(names.sort());
+          } else {
+            // readEntries returns in batches — keep reading
+            readAll([...allEntries, ...entries]);
+          }
+        }, () => resolve([]));
+      };
+      readAll();
     });
   };
 
@@ -192,7 +208,7 @@ export default function App() {
           const entry = (items[i] as any).webkitGetAsEntry?.();
           if (entry?.isDirectory) {
             folderPath = entry.name;
-            childNames = await readDirChildren(entry);
+            childNames = await readDirTree(entry);
             break;
           }
         }
