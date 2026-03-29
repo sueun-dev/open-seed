@@ -32,7 +32,7 @@ async def plan_node(state: PipelineState) -> dict:
     intake_done_when = intake_analysis.get("done_when", [])
 
     if intake_plan and (intake_scope or intake_done_when):
-        plan = _convert_intake_plan(task, intake_analysis)
+        plan = await _convert_intake_plan_via_llm(task, intake_analysis)
         logger.info("Using intake's user-approved plan (%d tasks, %d files)",
                      len(plan.tasks), len(plan.file_manifest))
         return {
@@ -94,64 +94,137 @@ No orphan endpoints, no orphan UI actions.
     }
 
 
-def _convert_intake_plan(task: str, intake_analysis: dict) -> Plan:
-    """Convert intake's text-based plan to a structured Plan object."""
+async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict) -> Plan:
+    """
+    Convert intake's text-based plan to structured Plan via LLM.
+
+    Uses Sonnet to accurately assign roles and files to each step,
+    instead of unreliable keyword matching.
+    """
+    from openseed_claude.agent import ClaudeAgent
+
     approach = intake_analysis.get("approach", "")
     plan_text = intake_analysis.get("plan", "")
     scope = intake_analysis.get("scope", {})
     done_when = intake_analysis.get("done_when", [])
+    selected_skills = intake_analysis.get("selected_skills", [])
+    tech_stack = intake_analysis.get("tech_stack", "")
 
-    plan = Plan(summary=approach or f"Plan for: {task[:100]}")
-
-    # Collect all file paths from scope for matching (strip parenthetical notes)
     modify_files = scope.get("modify", [])
     create_files = scope.get("create", [])
     do_not_touch = scope.get("do_not_touch", [])
     all_scope_files = [f.split("(")[0].strip() for f in modify_files + create_files]
 
-    # Convert plan steps to tasks with file assignment
-    steps = [line.strip() for line in plan_text.splitlines() if line.strip()]
-    for i, step in enumerate(steps):
-        # Strip leading "1. ", "2. " etc.
-        desc = step.lstrip("0123456789. ").strip() if step[0:1].isdigit() else step
-        lower = desc.lower()
+    agent = ClaudeAgent()
+    response = await agent.invoke(
+        prompt=f"""Convert this approved plan into structured JSON tasks with accurate role assignments.
 
-        # Guess role from content
-        if any(w in lower for w in ("frontend", "component", "ui", "css", "style", "react", "page")):
-            role = "frontend"
-        elif any(w in lower for w in ("backend", "api", "server", "endpoint", "route", "database", "model")):
-            role = "backend"
-        elif any(w in lower for w in ("test", "verify", "check")):
-            role = "qa"
-        elif any(w in lower for w in ("setup", "install", "config", "deploy", "docker")):
-            role = "infra"
-        else:
-            role = "fullstack"
+Task: {task}
+Approach: {approach}
+Tech stack: {tech_stack}
+Selected skills: {', '.join(selected_skills) if selected_skills else 'none'}
 
-        # Match scope files to this task by keyword overlap
-        task_files = []
-        for fp in all_scope_files:
-            fp_lower = fp.lower()
-            # Check if any word from the step description appears in the file path
-            desc_words = [w for w in lower.split() if len(w) > 3]
-            if any(w in fp_lower for w in desc_words):
-                task_files.append(fp)
+Plan steps:
+{plan_text}
+
+Files in scope:
+- MODIFY: {', '.join(modify_files) if modify_files else 'none'}
+- CREATE: {', '.join(create_files) if create_files else 'none'}
+
+Respond with ONLY valid JSON:
+{{
+  "tasks": [
+    {{"id": "T1", "description": "...", "role": "frontend|backend|database|infra|fullstack", "files": ["path1", "path2"]}}
+  ],
+  "file_manifest": [
+    {{"path": "file/path", "purpose": "Create new|Modify existing"}}
+  ]
+}}
+
+Role assignment rules:
+- "frontend": UI components, pages, CSS, styling, client-side routing, forms, React/Vue/Svelte
+- "backend": API endpoints, auth logic, middleware, validation, business logic, server code
+- "database": Schema design, migrations, models, ORM setup, seed data, queries
+- "infra": Project setup, package.json, Docker, CI/CD, deploy config, env vars, build config, testing framework setup
+- "fullstack": Tasks that span multiple domains or are too intertwined to separate
+
+File assignment rules:
+- Each file from scope MUST appear in exactly ONE task
+- Match files to the task that will actually create/modify them
+- A task can have 0 files if it's a conceptual step (e.g. "verify integration")
+
+Output ONLY the JSON object.""",
+        model="sonnet",
+        max_turns=1,
+    )
+
+    plan = _parse_llm_converted_plan(task, approach, response.text, all_scope_files, modify_files, create_files, do_not_touch, done_when)
+    return plan
+
+
+def _parse_llm_converted_plan(
+    task: str, approach: str, text: str,
+    all_scope_files: list[str], modify_files: list[str], create_files: list[str],
+    do_not_touch: list[str], done_when: list[str],
+) -> Plan:
+    """Parse LLM's JSON response into a Plan object, with fallback."""
+    plan = Plan(summary=approach or f"Plan for: {task[:100]}")
+
+    try:
+        # Strip markdown code fences if present
+        if "```" in text:
+            lines = text.split("\n")
+            cleaned = []
+            in_fence = False
+            for line in lines:
+                if line.strip().startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    cleaned.append(line)
+            text = "\n".join(cleaned)
+
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end > start:
+            data = json.loads(text[start:end + 1])
+
+            for i, t in enumerate(data.get("tasks", [])):
+                if not isinstance(t, dict):
+                    continue
+                role = t.get("role", "fullstack")
+                if role not in ("frontend", "backend", "database", "infra", "fullstack"):
+                    role = "fullstack"
+                plan.tasks.append(PlanTask(
+                    id=t.get("id", f"T{i + 1}"),
+                    description=t.get("description", str(t)),
+                    role=role,
+                    files=t.get("files", []),
+                ))
+
+            for f in data.get("file_manifest", []):
+                if not isinstance(f, dict):
+                    continue
+                plan.file_manifest.append(
+                    FileEntry(path=f.get("path", ""), purpose=f.get("purpose", ""))
+                )
+    except (json.JSONDecodeError, TypeError, AttributeError) as exc:
+        logger.warning("Failed to parse LLM-converted plan: %s — using fallback", exc)
+        # Fallback: create a single fullstack task with all files
         plan.tasks.append(PlanTask(
-            id=f"T{i + 1}",
-            description=desc,
-            role=role,
-            files=task_files,
+            id="T1",
+            description=f"Implement: {task[:200]}",
+            role="fullstack",
+            files=all_scope_files,
         ))
+        for f in create_files:
+            path = f.split("(")[0].strip() if "(" in f else f
+            plan.file_manifest.append(FileEntry(path=path, purpose="Create new"))
+        for f in modify_files:
+            path = f.split("(")[0].strip() if "(" in f else f
+            plan.file_manifest.append(FileEntry(path=path, purpose="Modify existing"))
 
-    # Build file manifest from scope (strip parenthetical notes from paths)
-    for f in create_files:
-        path = f.split("(")[0].strip() if "(" in f else f
-        plan.file_manifest.append(FileEntry(path=path, purpose="Create new"))
-    for f in modify_files:
-        path = f.split("(")[0].strip() if "(" in f else f
-        plan.file_manifest.append(FileEntry(path=path, purpose="Modify existing"))
-
-    # Inject constraints into plan summary (NOT as tasks, to avoid execution)
+    # Inject constraints into plan summary
     constraints = []
     if do_not_touch:
         constraints.append(f"DO NOT TOUCH: {', '.join(do_not_touch)}")
