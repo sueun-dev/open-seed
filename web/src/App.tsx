@@ -8,7 +8,7 @@ import Settings from "./components/Settings";
 
 export type Mode = "agi" | "pair";
 export type Project = { path: string; name: string };
-export type Thread = { id: string; name: string; mode: Mode; projectPath: string; updatedAt: string; events: any[] };
+export type Thread = { id: string; name: string; mode: Mode; projectPath: string; updatedAt: string; events: any[]; running?: boolean };
 
 // Persist to localStorage
 function loadState<T>(key: string, fallback: T): T {
@@ -94,6 +94,18 @@ export default function App() {
   const updateThreadEvents = (threadId: string, events: any[]) => {
     setThreads((prev) =>
       prev.map((t) => (t.id === threadId ? { ...t, events, updatedAt: new Date().toISOString() } : t))
+    );
+  };
+
+  const appendThreadEvent = (threadId: string, event: any) => {
+    setThreads((prev) =>
+      prev.map((t) => (t.id === threadId ? { ...t, events: [...t.events, event], updatedAt: new Date().toISOString() } : t))
+    );
+  };
+
+  const setThreadRunning = (threadId: string, running: boolean) => {
+    setThreads((prev) =>
+      prev.map((t) => (t.id === threadId ? { ...t, running } : t))
     );
   };
 
@@ -344,6 +356,8 @@ export default function App() {
                 setWorkingDir={(dir) => addProject(dir)}
                 createThread={createThread}
                 updateThreadEvents={updateThreadEvents}
+                appendThreadEvent={appendThreadEvent}
+                setThreadRunning={setThreadRunning}
               />
             ) : (
               <PairMode
