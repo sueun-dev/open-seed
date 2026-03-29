@@ -285,7 +285,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
             </div>
           </div>
         ) : (
-          <DiffPanel diffs={diffs} onClose={() => setRightTab("chat")} />
+          <DiffPanel diffs={diffs} onClose={() => setRightTab("chat")} workingDir={workingDir} />
         )}
       </div>
     </div>
