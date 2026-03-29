@@ -714,18 +714,27 @@ async def resolve_folder(name: str, children: str = "") -> dict:
         except Exception:
             pass
 
-    # Disambiguate using child names if provided
-    if child_set and len(matches) > 1:
-        scored = []
-        for m in matches:
-            try:
-                actual_children = set(os.listdir(m))
-                overlap = len(child_set & actual_children)
-                scored.append((overlap, m))
-            except OSError:
-                scored.append((0, m))
-        scored.sort(key=lambda x: -x[0])
-        matches = [m for _, m in scored]
+    # Score and rank matches: prioritize code projects + child name overlap
+    _PROJECT_MARKERS = {".git", "package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Makefile"}
+    scored = []
+    for m in matches:
+        score = 0
+        try:
+            actual_children = set(os.listdir(m))
+            # Child name overlap (from drag & drop)
+            if child_set:
+                score += len(child_set & actual_children) * 10
+            # Code project bonus
+            if actual_children & _PROJECT_MARKERS:
+                score += 5
+            # Penalize deeply nested paths (SDK internals, etc.)
+            depth = m.count(os.sep)
+            score -= depth
+        except OSError:
+            score = -100
+        scored.append((score, m))
+    scored.sort(key=lambda x: -x[0])
+    matches = [m for _, m in scored]
 
     return {"matches": matches[:10]}
 
