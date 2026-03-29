@@ -30,6 +30,7 @@ export default function App() {
   const [showTerminal, setShowTerminal] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(220);
   const [dropHighlight, setDropHighlight] = useState(false);
+  const [folderPicker, setFolderPicker] = useState<string[] | null>(null);
 
   // Auto-save to localStorage on change
   useEffect(() => { saveState("os_mode", mode); }, [mode]);
@@ -132,8 +133,8 @@ export default function App() {
               // Single match → use directly
               resolved = data.matches[0];
             } else if (data.matches?.length > 1) {
-              // Multiple matches → let user pick via folder browser
-              setShowBrowser(true);
+              // Multiple matches → show inline picker
+              setFolderPicker(data.matches);
               return;
             }
           }
@@ -248,6 +249,53 @@ export default function App() {
             <div style={{ fontSize: 36, marginBottom: 8 }}>📁</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#60a5fa" }}>Drop folder to add project</div>
             <div style={{ fontSize: 12, color: "#446", marginTop: 4 }}>Each folder becomes a project workspace</div>
+          </div>
+        </div>
+      )}
+
+      {/* Folder picker — shown when drag-drop resolves to multiple matches */}
+      {folderPicker && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 100,
+          background: "rgba(0,0,0,0.7)", display: "flex",
+          alignItems: "center", justifyContent: "center",
+        }} onClick={() => setFolderPicker(null)}>
+          <div style={{
+            background: "#111", border: "1px solid #333", borderRadius: 12,
+            padding: "24px", maxWidth: 600, width: "90%", maxHeight: "60vh", overflowY: "auto",
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+              Which folder did you mean?
+            </div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 16 }}>
+              Multiple folders with this name were found. Pick the right one.
+            </div>
+            {folderPicker.map((path) => (
+              <button
+                key={path}
+                onClick={() => { addProject(path); setActiveThreadId(null); setFolderPicker(null); }}
+                style={{
+                  display: "block", width: "100%", padding: "10px 14px", marginBottom: 6,
+                  borderRadius: 8, border: "1px solid #222", background: "#0a0a0a",
+                  color: "#ccc", cursor: "pointer", textAlign: "left",
+                  fontFamily: "monospace", fontSize: 12, transition: "border-color 0.15s",
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.borderColor = "#2563eb"}
+                onMouseLeave={(e) => e.currentTarget.style.borderColor = "#222"}
+              >
+                {path}
+              </button>
+            ))}
+            <button
+              onClick={() => { setFolderPicker(null); setShowBrowser(true); }}
+              style={{
+                marginTop: 8, padding: "8px 16px", borderRadius: 8,
+                border: "1px solid #333", background: "transparent",
+                color: "#888", cursor: "pointer", fontSize: 12,
+              }}
+            >
+              None of these — browse manually
+            </button>
           </div>
         </div>
       )}
