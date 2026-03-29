@@ -257,6 +257,32 @@ Start with "VERDICT: [Engineer A/Engineer B/Combined] because..." then execute."
     return full_response, response.session_id or None
 
 
+@app.post("/api/terminal")
+async def run_terminal(body: dict) -> dict:
+    """Run a shell command in the working directory."""
+    import subprocess
+
+    cmd = body.get("command", "")
+    cwd = body.get("working_dir", ".")
+
+    if not cmd:
+        return {"output": "", "exit_code": 1}
+
+    try:
+        result = subprocess.run(
+            cmd, shell=True, cwd=cwd,
+            capture_output=True, text=True, timeout=30,
+        )
+        return {
+            "output": (result.stdout + result.stderr)[:10000],
+            "exit_code": result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"output": "Command timed out (30s limit)", "exit_code": 124}
+    except Exception as e:
+        return {"output": str(e), "exit_code": 1}
+
+
 @app.get("/api/files")
 async def list_files(path: str = "") -> dict:
     """List files as a tree for the code viewer."""

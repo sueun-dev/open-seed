@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import AGIMode from "./components/AGIMode";
 import PairMode from "./components/PairMode";
+import Terminal from "./components/Terminal";
 import FolderBrowser from "./components/FolderBrowser";
 import Settings from "./components/Settings";
 
@@ -26,6 +27,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => loadState("os_collapsed", false));
   const [showBrowser, setShowBrowser] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
   const [dropHighlight, setDropHighlight] = useState(false);
 
   // Auto-save to localStorage on change
@@ -309,46 +311,79 @@ export default function App() {
           </div>
         </div>
 
-        {/* Content */}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          {showOnboarding ? (
-            /* Onboarding — no project yet */
-            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24 }}>
-              <div style={{ fontSize: 56, marginBottom: 8 }}>📁</div>
-              <h2 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: 0 }}>Drop a folder to start</h2>
-              <p style={{ color: "#555", fontSize: 13, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
-                Drag a project folder here, or click the button below to browse.
-                Each folder becomes a workspace. All tasks run inside it.
-              </p>
-              <button
-                onClick={() => setShowBrowser(true)}
-                style={{
-                  padding: "10px 24px", borderRadius: 10, border: "1px solid #333",
-                  background: "#111", color: "#888", cursor: "pointer", fontSize: 13,
-                  fontWeight: 600, transition: "border-color 0.15s",
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.borderColor = "#2563eb"}
-                onMouseLeave={(e) => e.currentTarget.style.borderColor = "#333"}
-              >
-                📁 Browse for folder
-              </button>
+        {/* Content + Terminal */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          {/* Main content */}
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            {showOnboarding ? (
+              <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24 }}>
+                <div style={{ fontSize: 56, marginBottom: 8 }}>📁</div>
+                <h2 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: 0 }}>Drop a folder to start</h2>
+                <p style={{ color: "#555", fontSize: 13, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
+                  Drag a project folder here, or click the button below to browse.
+                  Each folder becomes a workspace. All tasks run inside it.
+                </p>
+                <button
+                  onClick={() => setShowBrowser(true)}
+                  style={{
+                    padding: "10px 24px", borderRadius: 10, border: "1px solid #333",
+                    background: "#111", color: "#888", cursor: "pointer", fontSize: 13,
+                    fontWeight: 600, transition: "border-color 0.15s",
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.borderColor = "#2563eb"}
+                  onMouseLeave={(e) => e.currentTarget.style.borderColor = "#333"}
+                >
+                  📁 Browse for folder
+                </button>
+              </div>
+            ) : mode === "agi" ? (
+              <AGIMode
+                activeThread={activeThread}
+                workingDir={activeProjectPath}
+                setWorkingDir={(dir) => addProject(dir)}
+                createThread={createThread}
+                updateThreadEvents={updateThreadEvents}
+              />
+            ) : (
+              <PairMode
+                activeThread={activeThread}
+                workingDir={activeProjectPath}
+                setWorkingDir={(dir) => addProject(dir)}
+                createThread={createThread}
+                updateThreadEvents={updateThreadEvents}
+              />
+            )}
+          </div>
+
+          {/* Terminal toggle bar */}
+          <div
+            onClick={() => setShowTerminal(!showTerminal)}
+            style={{
+              height: 28, borderTop: "1px solid #1a1a1a", display: "flex",
+              alignItems: "center", padding: "0 12px", gap: 6,
+              background: "#0a0a0a", cursor: "pointer", flexShrink: 0,
+              transition: "background 0.1s",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "#111"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "#0a0a0a"}
+          >
+            <span style={{ fontSize: 12, color: "#555" }}>{showTerminal ? "▼" : "▲"}</span>
+            <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>Terminal</span>
+            {activeProjectPath && (
+              <span style={{ fontSize: 10, color: "#444", fontFamily: "monospace", marginLeft: 8 }}>
+                {activeProjectPath.split("/").pop()}
+              </span>
+            )}
+          </div>
+
+          {/* Terminal panel */}
+          {showTerminal && activeProjectPath && (
+            <div style={{
+              height: 220, borderTop: "1px solid #1a1a1a", flexShrink: 0,
+              transition: "height 0.2s ease",
+            }}>
+              <Terminal workingDir={activeProjectPath} />
             </div>
-          ) : mode === "agi" ? (
-            <AGIMode
-              activeThread={activeThread}
-              workingDir={activeProjectPath}
-              setWorkingDir={(dir) => addProject(dir)}
-              createThread={createThread}
-              updateThreadEvents={updateThreadEvents}
-            />
-          ) : (
-            <PairMode
-              activeThread={activeThread}
-              workingDir={activeProjectPath}
-              setWorkingDir={(dir) => addProject(dir)}
-              createThread={createThread}
-              updateThreadEvents={updateThreadEvents}
-            />
           )}
         </div>
       </div>
