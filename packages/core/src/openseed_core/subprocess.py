@@ -55,6 +55,8 @@ async def run_streaming(
     """
     import os
     full_env = {**os.environ, **(env or {})}
+    # Remove CLAUDECODE to allow nested Claude CLI calls (e.g., when server runs inside Claude Code)
+    full_env.pop("CLAUDECODE", None)
 
     process = await asyncio.create_subprocess_exec(
         *command,
