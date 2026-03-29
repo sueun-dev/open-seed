@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 type Props = {
   workingDir: string;
   highlightFiles?: string[];
+  onOpenFilesChange?: (openFiles: string[], activeFile: string | null) => void;
 };
 
 type FileNode = {
@@ -18,12 +19,21 @@ type OpenTab = {
   content: string;
 };
 
-export default function CodeViewer({ workingDir, highlightFiles = [] }: Props) {
+export default function CodeViewer({ workingDir, highlightFiles = [], onOpenFilesChange }: Props) {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+
+  // Report open files to parent
+  useEffect(() => {
+    if (onOpenFilesChange) {
+      const files = openTabs.map((t) => t.path.replace(workingDir + "/", ""));
+      const active = activeTab ? activeTab.replace(workingDir + "/", "") : null;
+      onOpenFilesChange(files, active);
+    }
+  }, [openTabs.length, activeTab]);
 
   // Load file tree
   useEffect(() => {
