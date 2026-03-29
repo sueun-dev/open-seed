@@ -110,86 +110,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
     }
   };
 
-  // Empty state
-  if (messages.length === 0 && !streaming) {
-    return (
-      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24 }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>👥</div>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: "0 0 6px" }}>Pair Mode</h2>
-          <p style={{ color: "#555", fontSize: 13, maxWidth: 400 }}>
-            Code on the left, chat on the right. Review changes together.
-          </p>
-        </div>
-
-        {/* Suggested actions */}
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", maxWidth: 500 }}>
-          {[
-            { icon: "🔍", text: "Review the auth module for security issues" },
-            { icon: "🐛", text: "Fix the failing test in user.test.ts" },
-            { icon: "♻️", text: "Refactor the database layer" },
-          ].map((s) => (
-            <button key={s.text} onClick={() => setInput(s.text)} style={{
-              padding: "10px 14px", borderRadius: 10, border: "1px solid #222",
-              background: "#111", color: "#999", cursor: "pointer", fontSize: 12,
-              textAlign: "left", maxWidth: 180, transition: "border-color 0.15s",
-            }}
-              onMouseEnter={(e) => e.currentTarget.style.borderColor = "#333"}
-              onMouseLeave={(e) => e.currentTarget.style.borderColor = "#222"}
-            >
-              <span style={{ fontSize: 16, display: "block", marginBottom: 4 }}>{s.icon}</span>
-              {s.text}
-            </button>
-          ))}
-        </div>
-
-        {/* Provider selector */}
-        <div style={{ display: "flex", gap: 6 }}>
-          {(["claude", "codex", "both"] as const).map((p) => (
-            <button key={p} onClick={() => setProvider(p)} style={{
-              padding: "6px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
-              border: provider === p ? "1px solid #2563eb" : "1px solid #222",
-              background: provider === p ? "#1e3a5f" : "#111",
-              color: provider === p ? "#60a5fa" : "#666",
-              transition: "all 0.15s",
-            }}>
-              {p === "claude" ? "🟣 Claude" : p === "codex" ? "🟢 Codex" : "⚡ Both (Debate)"}
-            </button>
-          ))}
-        </div>
-
-        {/* Input */}
-        <div style={{ width: "100%", maxWidth: 560, padding: "0 24px" }}>
-          <div style={{
-            display: "flex", gap: 8, padding: "8px 12px",
-            background: "#0d0d0d", borderRadius: 12, border: "1px solid #222",
-          }}>
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-              placeholder="Ask anything..."
-              style={{
-                flex: 1, padding: "8px 4px", border: "none",
-                background: "transparent", color: "#eee", fontSize: 14, outline: "none",
-              }}
-            />
-            <button onClick={sendMessage} disabled={!input.trim()} style={{
-              width: 36, height: 36, borderRadius: 8, border: "none",
-              background: input.trim() ? "#2563eb" : "#222",
-              color: input.trim() ? "#fff" : "#555",
-              cursor: input.trim() ? "pointer" : "default",
-              fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              ↑
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Main layout: [Code Viewer] [Chat + Changes] ──
+  // ── Always show: [Code Viewer] [Chat + Changes] ──
   return (
     <div style={{ height: "100%", display: "flex" }}>
       {/* LEFT: Code Viewer */}
@@ -246,6 +167,47 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
             {/* Messages */}
             <div style={{ flex: 1, overflowY: "auto", padding: "10px 12px" }}>
+              {/* Welcome + provider selector when empty */}
+              {messages.length === 0 && !streaming && (
+                <div style={{ padding: "20px 8px", display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 28, marginBottom: 6 }}>👥</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#ddd" }}>Pair Mode</div>
+                    <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>Browse code, ask questions</div>
+                  </div>
+                  {/* Provider selector */}
+                  <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                    {(["claude", "codex", "both"] as const).map((p) => (
+                      <button key={p} onClick={() => setProvider(p)} style={{
+                        padding: "5px 10px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer",
+                        border: provider === p ? "1px solid #2563eb" : "1px solid #222",
+                        background: provider === p ? "#1e3a5f" : "#111",
+                        color: provider === p ? "#60a5fa" : "#666",
+                        transition: "all 0.15s",
+                      }}>
+                        {p === "claude" ? "🟣 Claude" : p === "codex" ? "🟢 Codex" : "⚡ Both"}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Suggestions */}
+                  {[
+                    "Review this file for issues",
+                    "Explain the architecture",
+                    "Fix the bug in this function",
+                  ].map((s) => (
+                    <button key={s} onClick={() => setInput(s)} style={{
+                      padding: "8px 10px", borderRadius: 8, border: "1px solid #1a1a1a",
+                      background: "#0d0d0d", color: "#888", cursor: "pointer", fontSize: 11,
+                      textAlign: "left", transition: "border-color 0.15s",
+                    }}
+                      onMouseEnter={(e) => e.currentTarget.style.borderColor = "#333"}
+                      onMouseLeave={(e) => e.currentTarget.style.borderColor = "#1a1a1a"}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
               {messages.map((msg, i) => (
                 <div key={i} style={{
                   marginBottom: 10, padding: "8px 10px", borderRadius: 8,
