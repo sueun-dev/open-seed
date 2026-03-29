@@ -91,6 +91,50 @@ def _build_plan_text(state: PipelineState) -> str:
     return "\n".join(parts)
 
 
+# ─── Skill-aware Prompt Resolution ────────────────────────────────────────────
+
+# Map specialist domains to relevant skill names for auto-matching
+_DOMAIN_TO_SKILLS: dict[str, list[str]] = {
+    "frontend": ["frontend-design", "frontend-skill", "webapp-testing"],
+    "backend": ["aspnet-core", "claude-api"],
+    "database": [],
+    "infra": ["cloudflare-deploy", "vercel-deploy", "netlify-deploy", "render-deploy", "gh-fix-ci"],
+    "fullstack": ["frontend-design", "frontend-skill"],
+}
+
+
+def _get_skill_or_specialist_prompt(domain: str, intake: dict) -> str:
+    """
+    Resolve the best prompt for a specialist domain.
+
+    Priority:
+    1. If intake_analysis has selected_skills matching this domain → use SKILL.md content
+    2. Fall back to hardcoded specialist prompt from specialists.py
+    """
+    selected = intake.get("selected_skills", [])
+    if selected:
+        try:
+            from openseed_brain.skill_loader import get_skill_content
+            # Find a selected skill that matches this domain
+            domain_skills = _DOMAIN_TO_SKILLS.get(domain, [])
+            for skill_name in selected:
+                if skill_name in domain_skills or domain in skill_name:
+                    content = get_skill_content(skill_name)
+                    if content:
+                        return content
+            # If no domain match, try any selected skill
+            for skill_name in selected:
+                content = get_skill_content(skill_name)
+                if content:
+                    return content
+        except Exception:
+            pass
+
+    # Fallback to hardcoded specialist
+    from openseed_brain.specialists import get_specialist_prompt
+    return get_specialist_prompt(domain)
+
+
 # ─── Specialist Runner ───────────────────────────────────────────────────────
 
 
@@ -114,8 +158,11 @@ async def _run_specialist(
     from openseed_brain.specialists import get_specialist_prompt
 
     agent = ClaudeAgent()
-    specialist_prompt = get_specialist_prompt(domain)
     intake = state.get("intake_analysis") or {}
+
+    # Use official skill content if selected, otherwise fall back to hardcoded specialist
+    specialist_prompt = _get_skill_or_specialist_prompt(domain, intake)
+
 
     task_descriptions = "\n".join(
         f"- {t.description} (files: {', '.join(t.files)})" for t in tasks
