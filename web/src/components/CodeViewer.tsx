@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Editor from "@monaco-editor/react";
 
 type Props = {
@@ -41,6 +41,19 @@ export default function CodeViewer({ workingDir, highlightFiles = [], onOpenFile
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+  const openTabsRef = useRef(openTabs);
+  openTabsRef.current = openTabs;
+
+  // Block browser Ctrl+S globally
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Report open files to parent
   useEffect(() => {
@@ -100,9 +113,9 @@ export default function CodeViewer({ workingDir, highlightFiles = [], onOpenFile
     });
   };
 
-  // Save file (Ctrl+S)
+  // Save file (Ctrl+S) — uses ref to avoid stale closure in Monaco onMount
   const saveFile = useCallback(async (path: string) => {
-    const tab = openTabs.find((t) => t.path === path);
+    const tab = openTabsRef.current.find((t) => t.path === path);
     if (!tab) return;
     setSaving(true);
     try {
@@ -117,7 +130,7 @@ export default function CodeViewer({ workingDir, highlightFiles = [], onOpenFile
     } catch {} finally {
       setSaving(false);
     }
-  }, [openTabs]);
+  }, []);
 
   // Handle editor content change
   const onEditorChange = (value: string | undefined, path: string) => {
