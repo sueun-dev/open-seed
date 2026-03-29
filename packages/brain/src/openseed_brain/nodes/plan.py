@@ -115,14 +115,29 @@ async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict) -> Plan
     do_not_touch = scope.get("do_not_touch", [])
     all_scope_files = [f.split("(")[0].strip() for f in modify_files + create_files]
 
+    # Build skill catalog for the prompt
+    skill_catalog = ""
+    if selected_skills:
+        try:
+            from openseed_brain.skill_loader import list_all_skills
+            all_skills = list_all_skills()
+            skill_info = []
+            for s in all_skills:
+                if s.name in selected_skills:
+                    skill_info.append(f"  - {s.name}: {s.description[:120]}")
+            if skill_info:
+                skill_catalog = "\n\nAvailable skills (assign to tasks that need them):\n" + "\n".join(skill_info)
+        except Exception:
+            pass
+
     agent = ClaudeAgent()
     response = await agent.invoke(
-        prompt=f"""Convert this approved plan into structured JSON tasks with accurate role assignments.
+        prompt=f"""Convert this approved plan into structured JSON tasks with accurate role and skill assignments.
 
 Task: {task}
 Approach: {approach}
 Tech stack: {tech_stack}
-Selected skills: {', '.join(selected_skills) if selected_skills else 'none'}
+Selected skills: {', '.join(selected_skills) if selected_skills else 'none'}{skill_catalog}
 
 Plan steps:
 {plan_text}
@@ -134,7 +149,7 @@ Files in scope:
 Respond with ONLY valid JSON:
 {{
   "tasks": [
-    {{"id": "T1", "description": "...", "role": "frontend|backend|database|infra|fullstack", "files": ["path1", "path2"]}}
+    {{"id": "T1", "description": "...", "role": "frontend|backend|database|infra|fullstack", "skills": ["skill-name-1", "skill-name-2"], "files": ["path1", "path2"]}}
   ],
   "file_manifest": [
     {{"path": "file/path", "purpose": "Create new|Modify existing"}}
@@ -147,6 +162,13 @@ Role assignment rules:
 - "database": Schema design, migrations, models, ORM setup, seed data, queries
 - "infra": Project setup, package.json, Docker, CI/CD, deploy config, env vars, build config, testing framework setup
 - "fullstack": Tasks that span multiple domains or are too intertwined to separate
+
+Skill assignment rules:
+- "skills" is a list of 0-3 skill names from the selected skills above
+- Assign skills that will help the specialist execute THIS specific task
+- A task can have 0 skills if none of the selected skills are relevant
+- Multiple tasks CAN share the same skill
+- Only use skill names from the selected skills list: {', '.join(selected_skills) if selected_skills else 'none'}
 
 File assignment rules:
 - Each file from scope MUST appear in exactly ONE task
@@ -200,6 +222,7 @@ def _parse_llm_converted_plan(
                     description=t.get("description", str(t)),
                     role=role,
                     files=t.get("files", []),
+                    skills=t.get("skills", []),
                 ))
 
             for f in data.get("file_manifest", []):
@@ -305,6 +328,7 @@ def _parse_claude_plan(task: str, text: str) -> Plan:
                     description=t.get("description", str(t)),
                     role=t.get("role", "executor"),
                     files=t.get("files", []),
+                    skills=t.get("skills", []),
                 ))
             for f in data.get("file_manifest", []):
                 if not isinstance(f, dict):
