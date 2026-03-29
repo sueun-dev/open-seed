@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 type DiffEntry = {
   files_created: string[];
@@ -9,11 +9,67 @@ type DiffEntry = {
 type Props = {
   diffs: DiffEntry[];
   onClose: () => void;
+  workingDir?: string;
 };
 
-export default function DiffPanel({ diffs, onClose }: Props) {
+export default function DiffPanel({ diffs, onClose, workingDir }: Props) {
+  const [committing, setCommitting] = useState(false);
+  const [commitMsg, setCommitMsg] = useState("");
+  const [showCommitInput, setShowCommitInput] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
   const totalCreated = diffs.reduce((acc, d) => acc + d.files_created.length, 0);
   const totalModified = diffs.reduce((acc, d) => acc + d.files_modified.length, 0);
+
+  const doCommit = async () => {
+    if (!commitMsg.trim() || !workingDir || committing) return;
+    setCommitting(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/terminal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: `git add -A && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`,
+          working_dir: workingDir,
+        }),
+      });
+      const data = await res.json();
+      if (data.exit_code === 0) {
+        setResult("Committed successfully");
+        setShowCommitInput(false);
+        setCommitMsg("");
+      } else {
+        setResult(`Error: ${data.output?.slice(0, 200) || "commit failed"}`);
+      }
+    } catch (err) {
+      setResult(`Error: ${err}`);
+    } finally {
+      setCommitting(false);
+    }
+  };
+
+  const doRevert = async () => {
+    if (!workingDir || !confirm("Revert all uncommitted changes? This cannot be undone.")) return;
+    setResult(null);
+    try {
+      const res = await fetch("/api/terminal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: "git checkout -- . && git clean -fd",
+          working_dir: workingDir,
+        }),
+      });
+      const data = await res.json();
+      if (data.exit_code === 0) {
+        setResult("Reverted all changes");
+      } else {
+        setResult(`Error: ${data.output?.slice(0, 200) || "revert failed"}`);
+      }
+    } catch (err) {
+      setResult(`Error: ${err}`);
+    }
+  };
 
   return (
     <div style={{
@@ -86,11 +142,71 @@ export default function DiffPanel({ diffs, onClose }: Props) {
         ))}
       </div>
 
+      {/* Result message */}
+      {result && (
+        <div style={{
+          padding: "8px 16px", fontSize: 11,
+          color: result.startsWith("Error") ? "#f87171" : "#4ade80",
+          background: result.startsWith("Error") ? "#1a1212" : "#0d1a0d",
+        }}>
+          {result}
+        </div>
+      )}
+
+      {/* Commit message input */}
+      {showCommitInput && (
+        <div style={{ padding: "8px 16px", borderTop: "1px solid #1a1a1a" }}>
+          <input
+            value={commitMsg}
+            onChange={(e) => setCommitMsg(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && commitMsg.trim()) {
+                doCommit();
+              } else if (e.key === "Escape") {
+                setShowCommitInput(false);
+              }
+            }}
+            placeholder="Commit message..."
+            autoFocus
+            style={{
+              width: "100%", padding: "6px 10px", borderRadius: 6,
+              border: "1px solid #333", background: "#111", color: "#eee",
+              fontSize: 12, outline: "none",
+            }}
+            onFocus={(e) => e.currentTarget.style.borderColor = "#2563eb"}
+            onBlur={(e) => e.currentTarget.style.borderColor = "#333"}
+          />
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <button
+              onClick={() => setShowCommitInput(false)}
+              style={{
+                flex: 1, padding: "6px", borderRadius: 6, border: "1px solid #333",
+                background: "transparent", color: "#888", cursor: "pointer", fontSize: 11,
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={doCommit}
+              disabled={!commitMsg.trim() || committing}
+              style={{
+                flex: 1, padding: "6px", borderRadius: 6, border: "none",
+                background: commitMsg.trim() ? "#2563eb" : "#222",
+                color: commitMsg.trim() ? "#fff" : "#555",
+                cursor: commitMsg.trim() ? "pointer" : "default", fontSize: 11, fontWeight: 600,
+              }}
+            >
+              {committing ? "..." : "Commit"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Actions */}
-      {(totalCreated > 0 || totalModified > 0) && (
+      {(totalCreated > 0 || totalModified > 0) && !showCommitInput && (
         <div style={{ padding: "12px 16px", borderTop: "1px solid #1a1a1a", display: "flex", gap: 8 }}>
           <button
-            onClick={() => { if (confirm("Revert all changes?")) { /* TODO: POST /api/revert */ } }}
+            onClick={doRevert}
             style={{
               flex: 1, padding: "8px 12px", borderRadius: 8,
               border: "1px solid #333", background: "#111",
@@ -103,7 +219,7 @@ export default function DiffPanel({ diffs, onClose }: Props) {
             Revert All
           </button>
           <button
-            onClick={() => { /* TODO: POST /api/commit */ }}
+            onClick={() => setShowCommitInput(true)}
             style={{
               flex: 1, padding: "8px 12px", borderRadius: 8,
               border: "none", background: "#2563eb",
