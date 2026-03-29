@@ -68,6 +68,7 @@ class PlanTask:
     role: str = "executor"
     dependencies: list[str] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
+    skills: list[str] = field(default_factory=list)  # Official skill names assigned to this task
 
 
 @dataclass

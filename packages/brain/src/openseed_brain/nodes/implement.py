@@ -93,46 +93,42 @@ def _build_plan_text(state: PipelineState) -> str:
 
 # ─── Skill-aware Prompt Resolution ────────────────────────────────────────────
 
-# Map specialist domains to relevant skill names for auto-matching
-_DOMAIN_TO_SKILLS: dict[str, list[str]] = {
-    "frontend": ["frontend-design", "frontend-skill", "webapp-testing"],
-    "backend": ["aspnet-core", "claude-api"],
-    "database": [],
-    "infra": ["cloudflare-deploy", "vercel-deploy", "netlify-deploy", "render-deploy", "gh-fix-ci"],
-    "fullstack": ["frontend-design", "frontend-skill"],
-}
 
-
-def _get_skill_or_specialist_prompt(domain: str, intake: dict) -> str:
+def _build_specialist_prompt(domain: str, tasks: list[PlanTask], intake: dict) -> str:
     """
-    Resolve the best prompt for a specialist domain.
+    Build specialist prompt by combining:
+    1. Hardcoded domain specialist prompt (base expertise)
+    2. All SKILL.md contents from task-assigned skills (specific knowledge)
 
-    Priority:
-    1. If intake_analysis has selected_skills matching this domain → use SKILL.md content
-    2. Fall back to hardcoded specialist prompt from specialists.py
+    Each task has a .skills list assigned by LLM during plan structuring.
+    Multiple skills are concatenated into the system prompt.
     """
-    selected = intake.get("selected_skills", [])
-    if selected:
+    from openseed_brain.specialists import get_specialist_prompt
+
+    # Start with hardcoded specialist as base
+    parts = [get_specialist_prompt(domain)]
+
+    # Collect unique skills from all tasks assigned to this specialist
+    skill_names: list[str] = []
+    seen: set[str] = set()
+    for t in tasks:
+        for s in t.skills:
+            if s not in seen:
+                skill_names.append(s)
+                seen.add(s)
+
+    # Load and append SKILL.md content for each assigned skill
+    if skill_names:
         try:
             from openseed_brain.skill_loader import get_skill_content
-            # Find a selected skill that matches this domain
-            domain_skills = _DOMAIN_TO_SKILLS.get(domain, [])
-            for skill_name in selected:
-                if skill_name in domain_skills or domain in skill_name:
-                    content = get_skill_content(skill_name)
-                    if content:
-                        return content
-            # If no domain match, try any selected skill
-            for skill_name in selected:
-                content = get_skill_content(skill_name)
+            for name in skill_names:
+                content = get_skill_content(name)
                 if content:
-                    return content
+                    parts.append(f"\n\n{'='*60}\nOFFICIAL SKILL: {name}\n{'='*60}\n{content}")
         except Exception:
             pass
 
-    # Fallback to hardcoded specialist
-    from openseed_brain.specialists import get_specialist_prompt
-    return get_specialist_prompt(domain)
+    return "\n\n".join(parts)
 
 
 # ─── Specialist Runner ───────────────────────────────────────────────────────
@@ -155,13 +151,12 @@ async def _run_specialist(
         Implementation result from the specialist.
     """
     from openseed_claude.agent import ClaudeAgent
-    from openseed_brain.specialists import get_specialist_prompt
 
     agent = ClaudeAgent()
     intake = state.get("intake_analysis") or {}
 
-    # Use official skill content if selected, otherwise fall back to hardcoded specialist
-    specialist_prompt = _get_skill_or_specialist_prompt(domain, intake)
+    # Build specialist prompt: base domain expertise + all assigned skill contents
+    specialist_prompt = _build_specialist_prompt(domain, tasks, intake)
 
 
     task_descriptions = "\n".join(
