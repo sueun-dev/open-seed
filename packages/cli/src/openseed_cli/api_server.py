@@ -257,6 +257,58 @@ Start with "VERDICT: [Engineer A/Engineer B/Combined] because..." then execute."
     return full_response, response.session_id or None
 
 
+@app.get("/api/files")
+async def list_files(path: str = "") -> dict:
+    """List files as a tree for the code viewer."""
+    import os
+
+    target = path or os.path.expanduser("~")
+    if not os.path.isdir(target):
+        return {"tree": []}
+
+    skip = {".git", "node_modules", "__pycache__", ".venv", "dist", "build", ".next", ".agent"}
+
+    def build_tree(dir_path: str, depth: int = 0) -> list:
+        if depth > 4:
+            return []
+        nodes = []
+        try:
+            entries = sorted(os.scandir(dir_path), key=lambda e: (not e.is_dir(), e.name.lower()))
+            for entry in entries:
+                if entry.name.startswith(".") and entry.name != ".env.example":
+                    continue
+                if entry.name in skip:
+                    continue
+                node = {"name": entry.name, "path": entry.path, "isDir": entry.is_dir()}
+                if entry.is_dir():
+                    node["children"] = build_tree(entry.path, depth + 1)
+                nodes.append(node)
+        except PermissionError:
+            pass
+        return nodes
+
+    return {"tree": build_tree(target)}
+
+
+@app.get("/api/file")
+async def read_file(path: str) -> dict:
+    """Read a single file's content for the code viewer."""
+    import os
+
+    if not os.path.isfile(path):
+        return {"content": "", "error": "File not found"}
+
+    # Limit to 500KB
+    try:
+        size = os.path.getsize(path)
+        if size > 500_000:
+            return {"content": "(File too large to display)", "error": "File exceeds 500KB"}
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return {"content": f.read()}
+    except Exception as e:
+        return {"content": "", "error": str(e)}
+
+
 @app.post("/api/intake")
 async def run_intake(req: IntakeRequest) -> dict:
     """Run intake analysis. Phase 1: questions. Phase 2 (with answers): plan."""
