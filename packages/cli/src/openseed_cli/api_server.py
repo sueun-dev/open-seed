@@ -259,28 +259,140 @@ Start with "VERDICT: [Engineer A/Engineer B/Combined] because..." then execute."
 
 @app.post("/api/terminal")
 async def run_terminal(body: dict) -> dict:
-    """Run a shell command in the working directory."""
+    """Run a shell command in the working directory with streaming support."""
     import subprocess
+    import os
 
     cmd = body.get("command", "")
     cwd = body.get("working_dir", ".")
+    timeout = body.get("timeout", 120)
 
     if not cmd:
         return {"output": "", "exit_code": 1}
 
+    # Expand ~ in cwd
+    cwd = os.path.expanduser(cwd)
+
     try:
         result = subprocess.run(
             cmd, shell=True, cwd=cwd,
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=timeout,
+            env={**os.environ, "TERM": "dumb", "NO_COLOR": "1"},
         )
         return {
-            "output": (result.stdout + result.stderr)[:10000],
+            "output": (result.stdout + result.stderr)[:50000],
             "exit_code": result.returncode,
         }
     except subprocess.TimeoutExpired:
-        return {"output": "Command timed out (30s limit)", "exit_code": 124}
+        return {"output": f"Command timed out ({timeout}s limit)", "exit_code": 124}
     except Exception as e:
         return {"output": str(e), "exit_code": 1}
+
+
+# Persistent shell sessions for terminal
+_shell_sessions: dict[str, Any] = {}
+
+
+@app.websocket("/ws/terminal")
+async def ws_terminal(ws: WebSocket) -> None:
+    """Persistent terminal session via WebSocket. Supports cd, env vars, long-running commands."""
+    import os
+    import subprocess
+    import signal
+
+    await ws.accept()
+
+    working_dir = os.path.expanduser("~")
+    current_process: subprocess.Popen | None = None
+
+    try:
+        while True:
+            data = json.loads(await ws.receive_text())
+            msg_type = data.get("type", "")
+
+            if msg_type == "init":
+                working_dir = data.get("working_dir", working_dir)
+                await ws.send_text(json.dumps({
+                    "type": "ready", "cwd": working_dir,
+                }))
+
+            elif msg_type == "command":
+                cmd = data.get("command", "")
+                if not cmd:
+                    continue
+
+                # Handle cd specially — update working_dir for next commands
+                stripped = cmd.strip()
+                if stripped == "cd" or stripped.startswith("cd "):
+                    target = stripped[3:].strip() if stripped.startswith("cd ") else os.path.expanduser("~")
+                    target = target.strip("'\"")
+                    if target == "-":
+                        pass  # skip cd -
+                    else:
+                        new_dir = os.path.join(working_dir, target) if not os.path.isabs(target) else target
+                        new_dir = os.path.normpath(new_dir)
+                        if os.path.isdir(new_dir):
+                            working_dir = new_dir
+                            await ws.send_text(json.dumps({
+                                "type": "output", "data": f"cd: {working_dir}\n",
+                            }))
+                        else:
+                            await ws.send_text(json.dumps({
+                                "type": "output", "data": f"cd: no such directory: {new_dir}\n",
+                            }))
+                    await ws.send_text(json.dumps({
+                        "type": "exit", "code": 0, "cwd": working_dir,
+                    }))
+                    continue
+
+                # Run command as subprocess
+                try:
+                    current_process = subprocess.Popen(
+                        cmd, shell=True, cwd=working_dir,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1,
+                        env={**os.environ, "TERM": "dumb", "NO_COLOR": "1"},
+                    )
+
+                    # Stream output line by line
+                    for line in iter(current_process.stdout.readline, ""):
+                        await ws.send_text(json.dumps({
+                            "type": "output", "data": line,
+                        }))
+
+                    current_process.wait()
+                    exit_code = current_process.returncode
+
+                except Exception as e:
+                    await ws.send_text(json.dumps({
+                        "type": "output", "data": f"Error: {e}\n",
+                    }))
+                    exit_code = 1
+                finally:
+                    current_process = None
+                    await ws.send_text(json.dumps({
+                        "type": "exit", "code": exit_code, "cwd": working_dir,
+                    }))
+
+            elif msg_type == "kill":
+                if current_process and current_process.poll() is None:
+                    try:
+                        os.killpg(os.getpgid(current_process.pid), signal.SIGTERM)
+                    except (ProcessLookupError, OSError):
+                        try:
+                            current_process.kill()
+                        except Exception:
+                            pass
+                    await ws.send_text(json.dumps({
+                        "type": "output", "data": "^C\n",
+                    }))
+
+    except WebSocketDisconnect:
+        if current_process and current_process.poll() is None:
+            try:
+                current_process.kill()
+            except Exception:
+                pass
 
 
 @app.get("/api/files")
