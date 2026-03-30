@@ -137,20 +137,42 @@ def _smart_truncate(content: str, max_chars: int) -> str:
 # ─── Mermaid Generation ──────────────────────────────────────────────────────
 
 
-SYSTEM_PROMPT = """You are an expert software architect.
-Given code files of a project, analyze the full architecture and create a comprehensive diagram.
+SYSTEM_PROMPT = """You are an expert software architect creating a clean, professional Mermaid.js architecture diagram.
 
-Rules:
-1. Output ONLY a Mermaid.js diagram inside a ```mermaid code block.
-2. Use `graph TD` (top-down) layout.
-3. Use `subgraph` for grouping related components (Frontend, Backend, Database, etc.).
-4. Show ALL connections: API calls, data flow, imports, event flows.
-5. For each component, show the key files/modules inside.
-6. Avoid naming a subgraph and a node within it with the same name.
-7. Avoid these characters in node labels: {, }, :, (, )
-8. Use descriptive edge labels for connections (e.g. -->|REST API| or -->|WebSocket|).
-9. Be thorough — show every major module, service, and data store.
-10. No explanations, ONLY the mermaid diagram."""
+## Output
+- Output ONLY a ```mermaid code block. No explanations before or after.
+
+## Layout
+- Use `graph TD` for architecture/hierarchy. Use `graph LR` only for simple linear pipelines.
+- Use `subgraph` to group related components (Frontend, Backend, Database, Infrastructure, etc.).
+- Maximum 3 levels of subgraph nesting.
+
+## Node Rules (CRITICAL)
+- 8-20 nodes total. This is the sweet spot. Compress small files into one group node.
+- Meaningful IDs: `authService`, `orderDB`, `reactApp` — NEVER use `A`, `B`, `C`.
+- All labels MUST use bracket syntax: `authService["Auth Service"]` — NEVER bare text.
+- Labels under 40 characters. Use `<br/>` for line breaks, NEVER `\\n`.
+- NEVER use ( ) in labels. Use `["..."]` for rectangles, `[("...")]` for circles.
+
+## Edge Rules
+- Verb-first edge labels: `-->|sends auth token|`, `-->|queries users|`, `-->|triggers rebuild|`.
+- Label every edge — no unlabeled arrows.
+- Edge labels under 6 words.
+
+## Styling
+- Define category styles with classDef at the end:
+  classDef frontend fill:#1e3a5f,stroke:#3b82f6,color:#e0e0e0
+  classDef backend fill:#1a2e1a,stroke:#4ade80,color:#e0e0e0
+  classDef database fill:#2e1a2e,stroke:#c084fc,color:#e0e0e0
+  classDef infra fill:#2e2e1a,stroke:#facc15,color:#e0e0e0
+  classDef external fill:#1a1a1a,stroke:#666,color:#999
+- Apply styles: `class authService,userAPI backend`
+
+## Quality
+- One concept per diagram. Show architecture, not implementation details.
+- Every node must have at least one connection — no orphans.
+- Subgraph names must differ from any node ID inside them.
+- Show data stores (DB, cache, queue) as cylindrical: `db[("PostgreSQL")]`."""
 
 
 VERIFY_PROMPT = """You are a senior software architect reviewing a Mermaid architecture diagram.
