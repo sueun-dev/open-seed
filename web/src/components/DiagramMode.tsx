@@ -48,6 +48,7 @@ export default function DiagramMode({ workingDir }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [rendered, setRendered] = useState(false);
+  const [progressLog, setProgressLog] = useState<string[]>([]);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -109,13 +110,16 @@ export default function DiagramMode({ workingDir }: Props) {
     };
   }, [checkCache]);
 
-  // Listen for diagram.complete WebSocket events (auto-generated after pipeline)
+  // Listen for diagram events (progress + complete)
   useEffect(() => {
     const ws = new WebSocket(`ws://${location.host}/ws/events`);
     ws.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data);
-        if (event.type === "diagram.complete") {
+        if (event.type === "diagram.progress") {
+          const msg = event.data?.message || "";
+          if (msg) setProgressLog((prev) => [...prev, msg]);
+        } else if (event.type === "diagram.complete") {
           checkCache();
         }
       } catch {}
@@ -183,6 +187,7 @@ export default function DiagramMode({ workingDir }: Props) {
     setError("");
     setDiagram("");
     setRendered(false);
+    setProgressLog([]);
     try {
       await fetch("/api/diagram/generate", {
         method: "POST",
@@ -214,17 +219,42 @@ export default function DiagramMode({ workingDir }: Props) {
     );
   }
 
-  // Loading state
+  // Loading state — show live progress
   if (loading && !diagram) {
     return (
-      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20 }}>
         <div style={{ fontSize: 48 }}>📊</div>
         <div style={{ fontSize: 14, color: "#60a5fa", fontWeight: 600 }}>
           <BrailleSpinner /> Generating architecture diagram...
         </div>
-        <p style={{ color: "#555", fontSize: 12 }}>
-          Scanning codebase, analyzing architecture, creating Mermaid diagram
-        </p>
+
+        {/* Live progress log */}
+        <div style={{
+          width: "100%", maxWidth: 500, maxHeight: 300,
+          background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: 10,
+          padding: "12px 16px", overflowY: "auto",
+          fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 11, lineHeight: 1.8,
+        }}>
+          {progressLog.length === 0 && (
+            <div style={{ color: "#333" }}>Waiting for events...</div>
+          )}
+          {progressLog.map((msg, i) => {
+            const isLast = i === progressLog.length - 1;
+            let icon = "✓";
+            let color = "#4ade80";
+            if (isLast) { icon = "▶"; color = "#60a5fa"; }
+            if (msg.includes("BLOCK")) { icon = "✗"; color = "#f87171"; }
+            if (msg.includes("WARN")) { icon = "⚠"; color = "#facc15"; }
+            if (msg.includes("PASS")) { icon = "✓"; color = "#4ade80"; }
+            if (msg.includes("error") || msg.includes("Failed")) { icon = "✗"; color = "#f87171"; }
+            return (
+              <div key={i} style={{ color: isLast ? color : "#555" }}>
+                <span style={{ marginRight: 8 }}>{isLast ? icon : "✓"}</span>
+                {msg}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }

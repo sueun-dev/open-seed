@@ -203,9 +203,17 @@ async def generate_diagram(working_dir: str) -> dict:
     PASS → done. WARN after 2 rounds → done. BLOCK keeps looping.
     Returns: {mermaid: str, share_url: str, files_scanned: int}
     """
+    from openseed_brain.progress import emit_progress
+
+    async def _emit(msg: str, **kw):
+        await emit_progress("diagram.progress", node="diagram", message=msg, **kw)
+
+    await _emit(f"Scanning project files...")
     files = scan_project_files(working_dir)
     if not files:
         return {"mermaid": "", "share_url": "", "files_scanned": 0, "error": "No source files found"}
+
+    await _emit(f"Found {len(files)} source files ({sum(len(f['content']) for f in files) // 1000}K chars)")
 
     file_block = "\n".join(
         f"{f['path']}\n{f['content']}\n{FILE_SEPARATOR}"
@@ -216,7 +224,7 @@ async def generate_diagram(working_dir: str) -> dict:
     agent = ClaudeAgent()
 
     # ── Step 1: Opus generates the diagram ──
-    logger.info("Diagram: Opus generating for %d files...", len(files))
+    await _emit("Claude Opus analyzing architecture...", step="generate")
     response = await agent.invoke(
         prompt=f"Analyze this codebase and create an architecture diagram.\n\n{file_block}",
         system_prompt=SYSTEM_PROMPT,
@@ -227,17 +235,20 @@ async def generate_diagram(working_dir: str) -> dict:
     mermaid_code = _extract_mermaid(response.text)
     if not mermaid_code:
         logger.warning("No mermaid block found in diagram response. Preview: %s", response.text[:500])
+        await _emit("Failed to generate diagram", step="error")
         return {"mermaid": "", "share_url": "", "files_scanned": len(files), "error": "Failed to generate diagram"}
+
+    await _emit("Opus generated diagram. Starting verification...", step="generated")
 
     # ── Step 2: Codex verify → Opus fix loop (max 3 rounds) ──
     warn_count = 0
     for round_num in range(1, MAX_VERIFY_ROUNDS + 1):
-        logger.info("Diagram: Codex verify round %d...", round_num)
+        await _emit(f"Codex (OpenAI) verifying... round {round_num}/{MAX_VERIFY_ROUNDS}", step="verify", round=round_num)
 
         verdict, fixed_code = await _codex_verify(file_block, mermaid_code)
 
         if verdict == "pass":
-            logger.info("Diagram: PASS on round %d", round_num)
+            await _emit(f"Codex: PASS on round {round_num}", step="pass", round=round_num)
             if fixed_code:
                 mermaid_code = fixed_code
             break
@@ -247,18 +258,18 @@ async def generate_diagram(working_dir: str) -> dict:
             if fixed_code:
                 mermaid_code = fixed_code
             if warn_count >= 2:
-                logger.info("Diagram: WARN x%d, accepting", warn_count)
+                await _emit(f"Codex: WARN x{warn_count}, accepting diagram", step="warn_accept")
                 break
-            # One more chance — Opus fixes the warnings
-            logger.info("Diagram: WARN, Opus fixing...")
+            await _emit(f"Codex: WARN — Opus fixing issues...", step="fix", round=round_num)
             mermaid_code = await _opus_fix(agent, file_block, mermaid_code, fixed_code or mermaid_code)
             continue
 
-        # BLOCK — Opus must fix
-        logger.info("Diagram: BLOCK on round %d, Opus fixing...", round_num)
+        # BLOCK
+        await _emit(f"Codex: BLOCK — Opus rewriting diagram...", step="fix", round=round_num)
         mermaid_code = await _opus_fix(agent, file_block, mermaid_code, fixed_code or mermaid_code)
 
     # ── Step 3: Deterministic cycle fix ──
+    await _emit("Fixing subgraph cycles...", step="cycles")
     mermaid_code = fix_mermaid_cycles(mermaid_code)
 
     share_url = create_mermaid_url(mermaid_code)
