@@ -36,7 +36,7 @@ SOURCE_EXTENSIONS = {
 SKIP_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "dist", "build",
     ".next", ".nuxt", "coverage", ".tox", ".mypy_cache", ".pytest_cache",
-    "vendor", "target", ".svelte-kit",
+    "vendor", "target", ".svelte-kit", "research", "tests", "test",
 }
 
 SKIP_FILES = {
@@ -182,7 +182,7 @@ async def generate_diagram(working_dir: str) -> dict:
     # Extract mermaid block
     mermaid_code = _extract_mermaid(response.text)
     if not mermaid_code:
-        logger.warning("No mermaid block found in diagram response")
+        logger.warning("No mermaid block found in diagram response. Response preview: %s", response.text[:500])
         return {"mermaid": "", "share_url": "", "files_scanned": len(files), "error": "Failed to generate diagram"}
 
     # Fix cycles
