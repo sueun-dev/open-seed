@@ -1,32 +1,45 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { BrailleSpinner } from "./Spinner";
-import mermaid from "mermaid";
 
 type Props = {
   workingDir: string;
 };
 
-mermaid.initialize({
-  startOnLoad: false,
-  theme: "dark",
-  themeVariables: {
-    darkMode: true,
-    background: "#0a0a0a",
-    primaryColor: "#1e3a5f",
-    primaryTextColor: "#e0e0e0",
-    primaryBorderColor: "#2563eb",
-    lineColor: "#444",
-    secondaryColor: "#1a2e1a",
-    tertiaryColor: "#1a1a2e",
-    fontSize: "14px",
-  },
-  flowchart: {
-    htmlLabels: true,
-    curve: "basis",
-    padding: 12,
-  },
-  securityLevel: "loose",
-});
+let mermaidInitialized = false;
+
+async function getMermaid() {
+  const m = (await import("mermaid")).default;
+  if (!mermaidInitialized) {
+    m.initialize({
+      startOnLoad: false,
+      theme: "dark",
+      themeVariables: {
+        darkMode: true,
+        background: "transparent",
+        primaryColor: "#1e3a5f",
+        primaryTextColor: "#e8e8e8",
+        primaryBorderColor: "#3b82f6",
+        lineColor: "#555",
+        secondaryColor: "#1a2e1a",
+        secondaryTextColor: "#d4d4d4",
+        tertiaryColor: "#1a1a2e",
+        tertiaryTextColor: "#d4d4d4",
+        noteBkgColor: "#1a1a2e",
+        noteTextColor: "#d4d4d4",
+        fontSize: "15px",
+        fontFamily: "'Inter', 'SF Pro', system-ui, sans-serif",
+        edgeLabelBackground: "#111",
+        clusterBkg: "#111118",
+        clusterBorder: "#2a2a3a",
+        titleColor: "#e8e8e8",
+      },
+      flowchart: { htmlLabels: true, curve: "basis", padding: 16, nodeSpacing: 40, rankSpacing: 60 },
+      securityLevel: "loose",
+    });
+    mermaidInitialized = true;
+  }
+  return m;
+}
 
 export default function DiagramMode({ workingDir }: Props) {
   const [diagram, setDiagram] = useState<string>("");
@@ -35,7 +48,12 @@ export default function DiagramMode({ workingDir }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [rendered, setRendered] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<number | null>(null);
 
   // Fetch diagram (cached or trigger generation)
@@ -89,7 +107,7 @@ export default function DiagramMode({ workingDir }: Props) {
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [fetchDiagram]);
+  }, [checkCache]);
 
   // Listen for diagram.complete WebSocket events (auto-generated after pipeline)
   useEffect(() => {
@@ -109,19 +127,23 @@ export default function DiagramMode({ workingDir }: Props) {
   useEffect(() => {
     if (!diagram || !containerRef.current) return;
     setRendered(false);
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
 
     const render = async () => {
       try {
         containerRef.current!.innerHTML = "";
         const id = `mermaid-${Date.now()}`;
-        const { svg } = await mermaid.render(id, diagram);
+        const m = await getMermaid();
+        const { svg } = await m.render(id, diagram);
         if (containerRef.current) {
           containerRef.current.innerHTML = svg;
-          // Make SVG fill container
           const svgEl = containerRef.current.querySelector("svg");
           if (svgEl) {
-            svgEl.style.maxWidth = "100%";
-            svgEl.style.height = "auto";
+            svgEl.style.width = "100%";
+            svgEl.style.height = "100%";
+            svgEl.style.minWidth = "800px";
+            svgEl.style.minHeight = "500px";
           }
           setRendered(true);
         }
@@ -133,6 +155,36 @@ export default function DiagramMode({ workingDir }: Props) {
     };
     render();
   }, [diagram]);
+
+  // Mouse wheel zoom (Ctrl/Cmd + scroll) and plain scroll to pan
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom((z) => Math.min(5, Math.max(0.2, z - e.deltaY * 0.003)));
+    };
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Drag to pan
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    setDragging(true);
+    dragStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, [pan]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragging) return;
+    const dx = e.clientX - dragStart.current.x;
+    const dy = e.clientY - dragStart.current.y;
+    setPan({ x: dragStart.current.panX + dx, y: dragStart.current.panY + dy });
+  }, [dragging]);
+
+  const onPointerUp = useCallback(() => {
+    setDragging(false);
+  }, []);
 
   // Generate (or regenerate)
   const generate = async () => {
@@ -157,6 +209,19 @@ export default function DiagramMode({ workingDir }: Props) {
   const copyCode = () => {
     navigator.clipboard.writeText(diagram);
   };
+
+  // No folder selected
+  if (!workingDir) {
+    return (
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20 }}>
+        <div style={{ fontSize: 48 }}>📊</div>
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: "#fff", margin: 0 }}>Diagram Mode</h2>
+        <p style={{ color: "#555", fontSize: 13, maxWidth: 400, textAlign: "center" }}>
+          Select a project folder first, then generate an architecture diagram.
+        </p>
+      </div>
+    );
+  }
 
   // Loading state
   if (loading && !diagram) {
@@ -221,69 +286,73 @@ export default function DiagramMode({ workingDir }: Props) {
     );
   }
 
+  // Toolbar button style
+  const tbBtn = (active?: boolean): React.CSSProperties => ({
+    padding: "5px 12px", borderRadius: 6, border: "1px solid #222",
+    background: active ? "#1e3a5f" : "#111", color: active ? "#60a5fa" : "#999",
+    cursor: "pointer", fontSize: 11, fontWeight: 500, transition: "all 0.15s",
+    whiteSpace: "nowrap",
+  });
+
   // Diagram view
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", background: "#060606" }}>
       {/* Toolbar */}
       <div style={{
-        display: "flex", alignItems: "center", gap: 8, padding: "8px 16px",
-        borderBottom: "1px solid #1a1a1a", flexShrink: 0,
+        display: "flex", alignItems: "center", gap: 6, padding: "6px 12px",
+        borderBottom: "1px solid #1a1a1a", flexShrink: 0, background: "#0a0a0a",
       }}>
-        <span style={{ fontSize: 14 }}>📊</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "#ccc" }}>Architecture Diagram</span>
-        <span style={{ fontSize: 10, color: "#555", fontFamily: "monospace" }}>
-          {filesScanned} files scanned
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#ccc" }}>Architecture</span>
+        <span style={{ fontSize: 10, color: "#444", fontFamily: "monospace" }}>
+          {filesScanned} files
         </span>
         <div style={{ flex: 1 }} />
 
         {loading && <span style={{ fontSize: 11, color: "#60a5fa" }}><BrailleSpinner /> Updating...</span>}
 
-        <button
-          onClick={copyCode}
-          title="Copy Mermaid code"
-          style={{
-            padding: "4px 10px", borderRadius: 6, border: "1px solid #222",
-            background: "#111", color: "#888", cursor: "pointer", fontSize: 11,
-          }}
-        >
-          Copy Code
-        </button>
+        {/* Zoom controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 2, marginRight: 8 }}>
+          <button onClick={() => setZoom((z) => Math.max(0.2, z - 0.2))} style={tbBtn()}> - </button>
+          <span style={{ fontSize: 10, color: "#666", minWidth: 36, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
+          <button onClick={() => setZoom((z) => Math.min(5, z + 0.2))} style={tbBtn()}> + </button>
+          <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} style={tbBtn(zoom === 1 && pan.x === 0 && pan.y === 0)}>Fit</button>
+        </div>
+
+        <button onClick={copyCode} style={tbBtn()}>Copy Code</button>
         {shareUrl && (
-          <a
-            href={shareUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              padding: "4px 10px", borderRadius: 6, border: "1px solid #222",
-              background: "#111", color: "#60a5fa", cursor: "pointer", fontSize: 11,
-              textDecoration: "none",
-            }}
-          >
-            Open in Mermaid Live
+          <a href={shareUrl} target="_blank" rel="noopener noreferrer"
+            style={{ ...tbBtn(), color: "#60a5fa", textDecoration: "none", display: "inline-block" }}>
+            Mermaid Live
           </a>
         )}
-        <button
-          onClick={generate}
-          disabled={loading}
-          title="Regenerate diagram"
-          style={{
-            padding: "4px 10px", borderRadius: 6, border: "1px solid #222",
-            background: "#111", color: loading ? "#444" : "#888", cursor: loading ? "default" : "pointer", fontSize: 11,
-          }}
-        >
-          Regenerate
+        <button onClick={generate} disabled={loading} style={tbBtn()}>
+          {loading ? "..." : "Regenerate"}
         </button>
       </div>
 
-      {/* Diagram */}
-      <div style={{
-        flex: 1, overflow: "auto", padding: 24,
-        display: "flex", justifyContent: "center", alignItems: "flex-start",
-        background: "#0a0a0a",
-      }}>
+      {/* Diagram viewport — drag to pan, Ctrl+scroll to zoom */}
+      <div
+        ref={viewportRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+        style={{
+          flex: 1, overflow: "hidden",
+          cursor: dragging ? "grabbing" : "grab",
+          background: "radial-gradient(circle at center, #0d0d0d 0%, #060606 100%)",
+          userSelect: "none",
+        }}
+      >
         <div
           ref={containerRef}
-          style={{ maxWidth: "100%", minHeight: 200 }}
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "center center",
+            padding: "32px 24px",
+            minWidth: "fit-content",
+            transition: dragging ? "none" : "transform 0.15s ease-out",
+          }}
         />
       </div>
     </div>
