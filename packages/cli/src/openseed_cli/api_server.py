@@ -554,20 +554,16 @@ async def get_status() -> dict:
 
 @app.get("/api/diagram")
 async def get_diagram(working_dir: str = ".") -> dict:
-    """Get cached diagram for a working directory, or generate one."""
+    """Get cached diagram. Does NOT auto-trigger generation — use POST /api/diagram/generate."""
     wd = str(Path(working_dir).resolve())
 
-    # Return cached if available
     if wd in _diagram_cache:
         return _diagram_cache[wd]
 
-    # If already generating, return status
     if wd in _diagram_generating:
         return {"status": "generating"}
 
-    # Kick off generation
-    asyncio.create_task(_generate_diagram_bg(wd))
-    return {"status": "generating"}
+    return {"status": "none"}
 
 
 @app.post("/api/diagram/generate")

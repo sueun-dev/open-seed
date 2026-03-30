@@ -39,76 +39,71 @@ export default function DiagramMode({ workingDir }: Props) {
   const pollingRef = useRef<number | null>(null);
 
   // Fetch diagram (cached or trigger generation)
-  const fetchDiagram = useCallback(async () => {
+  // Check cache only (no auto-generation)
+  const checkCache = useCallback(async () => {
     if (!workingDir) return;
-    setLoading(true);
-    setError("");
-
     try {
       const res = await fetch(`/api/diagram?working_dir=${encodeURIComponent(workingDir)}`);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      if (!res.ok) return;
       const data = await res.json();
 
       if (data.status === "generating") {
-        // Poll until ready
-        if (!pollingRef.current) {
-          pollingRef.current = window.setInterval(async () => {
-            try {
-              const r = await fetch(`/api/diagram?working_dir=${encodeURIComponent(workingDir)}`);
-              const d = await r.json();
-              if (d.status !== "generating") {
-                if (pollingRef.current) clearInterval(pollingRef.current);
-                pollingRef.current = null;
-                if (d.mermaid) {
-                  setDiagram(d.mermaid);
-                  setShareUrl(d.share_url || "");
-                  setFilesScanned(d.files_scanned || 0);
-                } else {
-                  setError(d.error || "Failed to generate diagram");
-                }
-                setLoading(false);
-              }
-            } catch {}
-          }, 2000);
-        }
+        setLoading(true);
+        startPolling();
         return;
       }
-
       if (data.mermaid) {
         setDiagram(data.mermaid);
         setShareUrl(data.share_url || "");
         setFilesScanned(data.files_scanned || 0);
-      } else if (data.error) {
-        setError(data.error);
       }
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setLoading(false);
-    }
+    } catch {}
   }, [workingDir]);
 
-  // Fetch on mount and workingDir change
+  // Poll for result
+  const startPolling = useCallback(() => {
+    if (pollingRef.current) return;
+    pollingRef.current = window.setInterval(async () => {
+      try {
+        const r = await fetch(`/api/diagram?working_dir=${encodeURIComponent(workingDir)}`);
+        const d = await r.json();
+        if (d.status !== "generating") {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          if (d.mermaid) {
+            setDiagram(d.mermaid);
+            setShareUrl(d.share_url || "");
+            setFilesScanned(d.files_scanned || 0);
+          } else {
+            setError(d.error || "Failed to generate diagram");
+          }
+          setLoading(false);
+        }
+      } catch {}
+    }, 2000);
+  }, [workingDir]);
+
+  // On mount: only check cache (don't auto-generate)
   useEffect(() => {
-    fetchDiagram();
+    checkCache();
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, [fetchDiagram]);
 
-  // Listen for diagram.complete WebSocket events
+  // Listen for diagram.complete WebSocket events (auto-generated after pipeline)
   useEffect(() => {
     const ws = new WebSocket(`ws://${location.host}/ws/events`);
     ws.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data);
         if (event.type === "diagram.complete") {
-          fetchDiagram();
+          checkCache();
         }
       } catch {}
     };
     return () => ws.close();
-  }, [fetchDiagram]);
+  }, [checkCache]);
 
   // Render mermaid when diagram changes
   useEffect(() => {
@@ -139,8 +134,8 @@ export default function DiagramMode({ workingDir }: Props) {
     render();
   }, [diagram]);
 
-  // Regenerate
-  const regenerate = async () => {
+  // Generate (or regenerate)
+  const generate = async () => {
     setLoading(true);
     setError("");
     setDiagram("");
@@ -151,27 +146,7 @@ export default function DiagramMode({ workingDir }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ working_dir: workingDir }),
       });
-      // Will get result via polling or WebSocket
-      if (!pollingRef.current) {
-        pollingRef.current = window.setInterval(async () => {
-          try {
-            const r = await fetch(`/api/diagram?working_dir=${encodeURIComponent(workingDir)}`);
-            const d = await r.json();
-            if (d.status !== "generating") {
-              if (pollingRef.current) clearInterval(pollingRef.current);
-              pollingRef.current = null;
-              if (d.mermaid) {
-                setDiagram(d.mermaid);
-                setShareUrl(d.share_url || "");
-                setFilesScanned(d.files_scanned || 0);
-              } else {
-                setError(d.error || "Failed to generate diagram");
-              }
-              setLoading(false);
-            }
-          } catch {}
-        }, 2000);
-      }
+      startPolling();
     } catch (err) {
       setError(String(err));
       setLoading(false);
@@ -209,7 +184,7 @@ export default function DiagramMode({ workingDir }: Props) {
           You can also generate one manually.
         </p>
         <button
-          onClick={regenerate}
+          onClick={generate}
           style={{
             padding: "10px 24px", borderRadius: 10, border: "none",
             background: "#2563eb", color: "#fff", cursor: "pointer",
@@ -234,7 +209,7 @@ export default function DiagramMode({ workingDir }: Props) {
         <div style={{ fontSize: 48 }}>⚠</div>
         <p style={{ color: "#f87171", fontSize: 13 }}>{error}</p>
         <button
-          onClick={regenerate}
+          onClick={generate}
           style={{
             padding: "8px 20px", borderRadius: 8, border: "1px solid #333",
             background: "transparent", color: "#888", cursor: "pointer", fontSize: 12,
@@ -288,7 +263,7 @@ export default function DiagramMode({ workingDir }: Props) {
           </a>
         )}
         <button
-          onClick={regenerate}
+          onClick={generate}
           disabled={loading}
           title="Regenerate diagram"
           style={{
