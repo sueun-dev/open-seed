@@ -38,6 +38,10 @@ _ws_clients: list[WebSocket] = []
 # Current pipeline state (simplified — will be replaced with proper state management)
 _current_run: dict[str, Any] | None = None
 
+# Cached diagram results per working directory
+_diagram_cache: dict[str, dict[str, Any]] = {}
+_diagram_generating: set[str] = set()
+
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -548,6 +552,60 @@ async def get_status() -> dict:
     return _current_run
 
 
+@app.get("/api/diagram")
+async def get_diagram(working_dir: str = ".") -> dict:
+    """Get cached diagram for a working directory, or generate one."""
+    wd = str(Path(working_dir).resolve())
+
+    # Return cached if available
+    if wd in _diagram_cache:
+        return _diagram_cache[wd]
+
+    # If already generating, return status
+    if wd in _diagram_generating:
+        return {"status": "generating"}
+
+    # Kick off generation
+    asyncio.create_task(_generate_diagram_bg(wd))
+    return {"status": "generating"}
+
+
+@app.post("/api/diagram/generate")
+async def trigger_diagram(body: dict) -> dict:
+    """Force (re)generate diagram for a working directory."""
+    wd = str(Path(body.get("working_dir", ".")).resolve())
+
+    if wd in _diagram_generating:
+        return {"status": "generating"}
+
+    # Clear cache and regenerate
+    _diagram_cache.pop(wd, None)
+    asyncio.create_task(_generate_diagram_bg(wd))
+    return {"status": "generating"}
+
+
+async def _generate_diagram_bg(working_dir: str) -> None:
+    """Background diagram generation + broadcast when done."""
+    _diagram_generating.add(working_dir)
+    try:
+        await _broadcast({"type": "diagram.start", "node": "diagram", "data": {"working_dir": working_dir}})
+
+        from openseed_brain.nodes.diagram import generate_diagram
+        result = await generate_diagram(working_dir)
+        _diagram_cache[working_dir] = result
+
+        await _broadcast({"type": "diagram.complete", "node": "diagram", "data": {
+            "working_dir": working_dir,
+            "files_scanned": result.get("files_scanned", 0),
+            "has_diagram": bool(result.get("mermaid")),
+        }})
+    except Exception as e:
+        _diagram_cache[working_dir] = {"mermaid": "", "error": str(e), "files_scanned": 0}
+        await _broadcast({"type": "diagram.fail", "node": "diagram", "data": {"error": str(e)}})
+    finally:
+        _diagram_generating.discard(working_dir)
+
+
 @app.get("/api/auth/status")
 async def auth_status() -> dict:
     """Check authentication status for Claude and OpenAI."""
@@ -944,6 +1002,10 @@ async def _execute_pipeline(
         if _current_run:
             _current_run["status"] = "completed"
         await _broadcast({"type": "pipeline.complete", "node": "brain", "data": {"status": "completed"}})
+
+        # Auto-generate diagram in background after successful pipeline
+        resolved_dir = str(Path(working_dir).resolve())
+        asyncio.create_task(_generate_diagram_bg(resolved_dir))
     except Exception as e:
         if _current_run:
             _current_run["status"] = "failed"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
 import Sidebar from "./components/Sidebar";
 import AGIMode from "./components/AGIMode";
 import PairMode from "./components/PairMode";
@@ -6,7 +6,9 @@ import Terminal from "./components/Terminal";
 import FolderBrowser from "./components/FolderBrowser";
 import Settings from "./components/Settings";
 
-export type Mode = "agi" | "pair";
+const DiagramMode = lazy(() => import("./components/DiagramMode"));
+
+export type Mode = "agi" | "pair" | "diagram";
 export type Project = { path: string; name: string };
 export type Thread = { id: string; name: string; mode: Mode; projectPath: string; updatedAt: string; events: any[]; running?: boolean };
 
@@ -339,6 +341,7 @@ export default function App() {
               {([
                 { key: "agi" as Mode, label: "AGI Mode", icon: "🤖" },
                 { key: "pair" as Mode, label: "Pair Mode", icon: "👥" },
+                { key: "diagram" as Mode, label: "Diagram", icon: "📊" },
               ]).map((m) => (
                 <button
                   key={m.key}
@@ -432,6 +435,10 @@ export default function App() {
                 appendThreadEvent={appendThreadEvent}
                 setThreadRunning={setThreadRunning}
               />
+            ) : mode === "diagram" ? (
+              <Suspense fallback={<div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#555" }}>Loading...</div>}>
+                <DiagramMode workingDir={activeProjectPath} />
+              </Suspense>
             ) : (
               <PairMode
                 activeThread={activeThread}
