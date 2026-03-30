@@ -12,8 +12,13 @@ import json
 import logging
 
 from openseed_brain.state import PipelineState, Plan, PlanTask, FileEntry
+from openseed_brain.progress import emit_progress
 
 logger = logging.getLogger(__name__)
+
+
+async def _emit(event_type: str, **data) -> None:
+    await emit_progress(event_type, node="plan", **data)
 
 
 async def plan_node(state: PipelineState) -> dict:
@@ -28,10 +33,17 @@ async def plan_node(state: PipelineState) -> dict:
 
     # ── Fast path: intake already has a user-approved plan ──
     intake_plan = intake_analysis.get("plan", "")
-    intake_scope = intake_analysis.get("scope", {})
-    intake_done_when = intake_analysis.get("done_when", [])
+    intake_scope_raw = intake_analysis.get("scope", {})
+    intake_scope = intake_scope_raw if isinstance(intake_scope_raw, dict) else {}
+    intake_done_when_raw = intake_analysis.get("done_when", [])
+    intake_done_when = intake_done_when_raw if isinstance(intake_done_when_raw, list) else []
+
+    logger.info("Plan fast-path check: plan=%s, scope=%s (type=%s), done_when=%s (type=%s)",
+                bool(intake_plan), bool(intake_scope), type(intake_scope_raw).__name__,
+                bool(intake_done_when), type(intake_done_when_raw).__name__)
 
     if intake_plan and (intake_scope or intake_done_when):
+        await _emit("plan.convert", message="Structuring user-approved plan into tasks...")
         plan = await _convert_intake_plan_via_llm(task, intake_analysis)
         logger.info("Using intake's user-approved plan (%d tasks, %d files)",
                      len(plan.tasks), len(plan.file_manifest))
@@ -41,6 +53,7 @@ async def plan_node(state: PipelineState) -> dict:
         }
 
     # ── Normal path: generate plan via Claude ──
+    await _emit("plan.generate", message="Generating implementation plan via Claude Opus...")
     analysis_context = _build_analysis_context(intake_analysis)
 
     from openseed_claude.agent import ClaudeAgent
@@ -105,8 +118,11 @@ async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict) -> Plan
 
     approach = intake_analysis.get("approach", "")
     plan_text = intake_analysis.get("plan", "")
-    scope = intake_analysis.get("scope", {})
-    done_when = intake_analysis.get("done_when", [])
+    scope_raw = intake_analysis.get("scope", {})
+    # scope can arrive as string from frontend — normalize to dict
+    scope: dict = scope_raw if isinstance(scope_raw, dict) else {}
+    done_when_raw = intake_analysis.get("done_when", [])
+    done_when: list = done_when_raw if isinstance(done_when_raw, list) else []
     selected_skills = intake_analysis.get("selected_skills", [])
     tech_stack = intake_analysis.get("tech_stack", "")
 

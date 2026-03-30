@@ -92,6 +92,62 @@ function formatEvent(e: any, i: number) {
     case "error":
       color = "#f87171"; icon = "✗"; text = msg || JSON.stringify(data);
       break;
+    // Intake sub-step progress events
+    case "intake.context":
+      color = "#818cf8"; icon = "🔍"; text = msg;
+      break;
+    case "intake.gaps":
+      color = "#c084fc"; icon = "🧠"; text = msg;
+      break;
+    case "intake.skills":
+      color = "#a78bfa"; icon = "🛠"; text = msg;
+      break;
+    case "intake.research":
+      color = "#60a5fa"; icon = "🌐"; text = msg;
+      break;
+    case "intake.questions":
+      color = "#818cf8"; icon = "❓"; text = msg;
+      break;
+    case "intake.plan":
+      color = "#c084fc"; icon = "📝"; text = msg;
+      break;
+    // Plan sub-step progress events
+    case "plan.convert":
+      color = "#c084fc"; icon = "🔄"; text = msg;
+      break;
+    case "plan.generate":
+      color = "#c084fc"; icon = "📋"; text = msg;
+      break;
+    // Implement sub-step progress events
+    case "implement.start":
+      color = "#60a5fa"; icon = "▶"; text = msg;
+      break;
+    case "implement.routing":
+      color = "#c084fc"; icon = "🔀"; text = msg;
+      break;
+    case "implement.specialists":
+      color = "#818cf8"; icon = "👥";
+      text = msg;
+      break;
+    case "implement.specialist_start":
+      color = "#a78bfa"; icon = "⚙";
+      text = msg;
+      break;
+    case "implement.specialist_done":
+      color = "#4ade80"; icon = "✓"; text = msg;
+      break;
+    case "implement.integration":
+      color = "#fbbf24"; icon = "🔗"; text = msg;
+      break;
+    case "implement.integration_done":
+      color = "#4ade80"; icon = "✓"; text = msg;
+      break;
+    case "implement.verify":
+      color = "#fb923c"; icon = "🔍"; text = msg;
+      break;
+    case "implement.done":
+      color = "#4ade80"; icon = "✓"; text = msg;
+      break;
     default:
       text = msg || JSON.stringify(data).slice(0, 120);
   }

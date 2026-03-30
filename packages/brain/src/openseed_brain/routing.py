@@ -40,9 +40,19 @@ def route_after_qa(state: PipelineState) -> Literal["deploy", "fix", "user_escal
     max_retries = state.get("max_retries", 10)
     errors = state.get("errors", [])
 
-    # Check if passed (PASS or PASS_WITH_WARNINGS both deploy)
+    # PASS or PASS_WITH_WARNINGS → always deploy
     if qa_result and qa_result.verdict in (Verdict.PASS, Verdict.PASS_WITH_WARNINGS):
         return "deploy"
+
+    # WARN = "works but has issues"
+    #   retry 0-1: Sonnet tries to fix
+    #   retry 2-3: Opus tries to fix
+    #   retry 4+:  deploy with warnings (remaining issues are cosmetic/unfixable)
+    # BLOCK = "broken" → must fix (no early deploy)
+    if qa_result and qa_result.verdict == Verdict.WARN:
+        if retry_count >= 4:
+            return "deploy"
+        return "fix"
 
     # Check for explicit abort signals
     for e in errors:
@@ -56,16 +66,15 @@ def route_after_qa(state: PipelineState) -> Literal["deploy", "fix", "user_escal
 
     # Stagnation check — 3+ retries with same error pattern
     if retry_count >= 3:
-        # Check if errors are repeating (same message)
         error_msgs = [e.message for e in errors[-6:]]
         if len(error_msgs) >= 4:
             unique = set(error_msgs[-4:])
-            if len(unique) <= 2:  # Same 1-2 errors repeating
+            if len(unique) <= 2:
                 return "user_escalate"
 
     # Still have retries
     if retry_count < max_retries:
         return "fix"
 
-    # Max retries exhausted → ask user instead of aborting
+    # Max retries exhausted
     return "user_escalate"

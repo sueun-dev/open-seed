@@ -849,6 +849,10 @@ async def _execute_pipeline(
     from openseed_core.config import load_config
     from openseed_brain import compile_graph, initial_state
 
+    # Wire up progress callback so nodes can broadcast sub-step events
+    from openseed_brain.progress import set_progress_callback
+    set_progress_callback(_broadcast)
+
     cfg = load_config(Path(config_path) if config_path else None)
 
     state = initial_state(task=task, working_dir=str(Path(working_dir).resolve()), provider=provider)
@@ -859,6 +863,7 @@ async def _execute_pipeline(
         state["intake_analysis"] = intake_analysis
     graph = compile_graph(
         checkpoint_dir=str(Path(str(cfg.brain.checkpoint_dir)).expanduser()),
+        interrupt_on_escalation=False,  # Web UI handles escalation via events, not interrupts
     )
 
     await _broadcast({"type": "pipeline.start", "node": "brain", "data": {"task": task, "working_dir": working_dir}})
@@ -870,6 +875,13 @@ async def _execute_pipeline(
         final_state = None
         async for event in graph.astream(state, config=config):
             for node_name, output in event.items():
+                # Skip non-dict outputs (e.g. LangGraph interrupt tuples)
+                if not isinstance(output, dict):
+                    await _broadcast({"type": "node.start", "node": node_name, "data": {}})
+                    await _broadcast({"type": "node.log", "node": node_name, "data": {"message": f"Interrupt: {node_name}"}})
+                    await _broadcast({"type": "node.complete", "node": node_name, "data": {}})
+                    continue
+
                 # Broadcast node start
                 await _broadcast({"type": "node.start", "node": node_name, "data": {}})
 
@@ -938,4 +950,4 @@ async def _execute_pipeline(
             _current_run["error"] = str(e)
         await _broadcast({"type": "pipeline.fail", "node": "brain", "data": {"error": str(e), "message": str(e)}})
     finally:
-        pass  # No local event_bus in this function; broadcasting uses _broadcast()
+        set_progress_callback(None)  # Clean up callback

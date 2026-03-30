@@ -19,8 +19,13 @@ import asyncio
 import logging
 
 from openseed_brain.state import PipelineState
+from openseed_brain.progress import emit_progress
 
 logger = logging.getLogger(__name__)
+
+
+async def _emit(event_type: str, **data) -> None:
+    await emit_progress(event_type, node="intake", **data)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -47,6 +52,7 @@ async def intake_node(state: PipelineState) -> dict:
     has_answers = bool(state.get("clarification_answers"))
 
     # ── Step 1: Context Collection (always runs) ──
+    await _emit("intake.context", message="Scanning codebase, recalling memories...")
     context = await _collect_context(task, working_dir)
 
     from openseed_claude.agent import ClaudeAgent
@@ -54,13 +60,16 @@ async def intake_node(state: PipelineState) -> dict:
 
     if has_answers:
         # Phase 2: Generate execution plan from user's answers
+        await _emit("intake.plan", message="Generating execution plan from your answers...")
         return await _phase2_plan(agent, state, context)
 
     # ── Step 2: Gap Analysis — AI identifies what it doesn't know ──
+    await _emit("intake.gaps", message="Analyzing task for knowledge gaps...")
     gaps = await _identify_gaps(agent, task, context)
     logger.info("Identified %d knowledge gaps", len(gaps))
 
     # ── Step 2.5: Select Skills — pick relevant official skills for this task ──
+    await _emit("intake.skills", message="Selecting relevant skills...")
     selected_skills = await _select_skills(agent, task, gaps, context)
     logger.info("Selected %d skills: %s", len(selected_skills), selected_skills)
 
@@ -77,10 +86,12 @@ async def intake_node(state: PipelineState) -> dict:
         }
 
     # ── Step 3: Per-Gap Research — parallel web search for each gap ──
+    await _emit("intake.research", message=f"Researching {len(gaps)} gaps in parallel...", count=len(gaps))
     research_results = await _research_gaps(agent, task, gaps, context)
     logger.info("Completed research for %d gaps", len(research_results))
 
     # ── Step 4: Formulate Questions — dynamic count, research-backed options ──
+    await _emit("intake.questions", message="Formulating clarification questions...")
     result = await _formulate_questions(agent, task, context, gaps, research_results)
 
     # Inject selected skills into intake_analysis
