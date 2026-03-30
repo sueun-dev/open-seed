@@ -162,24 +162,29 @@ The diagram was generated from a real codebase. Verify it for:
 4. MISSING LINKS: Are there any obvious connections between components that are missing?
 5. SUBGRAPH CYCLES: Is any subgraph named the same as a node inside it?
 
-If you find issues, output a FIXED version of the FULL diagram.
-If the diagram is correct, output it unchanged.
+Give a verdict:
+VERDICT: PASS — diagram is accurate and complete
+VERDICT: WARN — minor issues (cosmetic, non-critical missing details)
+VERDICT: BLOCK — major issues (wrong connections, missing critical modules, syntax errors)
 
-Either way, output ONLY a ```mermaid code block. No explanations."""
+Then output the diagram (fixed if needed) inside a ```mermaid code block.
+Format: VERDICT line first, then the mermaid block."""
+
+MAX_VERIFY_ROUNDS = 3
 
 
 async def generate_diagram(working_dir: str) -> dict:
     """
     Generate a Mermaid architecture diagram for the project.
 
-    Pipeline: Opus generates → Opus verifies/fixes → cycle detector → done.
+    Pipeline: Opus generates → Codex verifies → if BLOCK, Opus fixes → loop (max 3 rounds).
+    PASS → done. WARN after 2 rounds → done. BLOCK keeps looping.
     Returns: {mermaid: str, share_url: str, files_scanned: int}
     """
     files = scan_project_files(working_dir)
     if not files:
         return {"mermaid": "", "share_url": "", "files_scanned": 0, "error": "No source files found"}
 
-    # Build file content block
     file_block = "\n".join(
         f"{f['path']}\n{f['content']}\n{FILE_SEPARATOR}"
         for f in files
@@ -199,28 +204,41 @@ async def generate_diagram(working_dir: str) -> dict:
 
     mermaid_code = _extract_mermaid(response.text)
     if not mermaid_code:
-        logger.warning("No mermaid block found in diagram response. Response preview: %s", response.text[:500])
+        logger.warning("No mermaid block found in diagram response. Preview: %s", response.text[:500])
         return {"mermaid": "", "share_url": "", "files_scanned": len(files), "error": "Failed to generate diagram"}
 
-    # ── Step 2: Codex (OpenAI) verifies and fixes ──
-    logger.info("Diagram: Codex verifying...")
-    try:
-        from openseed_codex.agent import CodexAgent
-        codex = CodexAgent()
-        verify_response = await codex.invoke(
-            prompt=f"{VERIFY_PROMPT}\n\nCodebase files:\n{file_block}\n\nDiagram to verify:\n```mermaid\n{mermaid_code}\n```",
-        )
-        verified_code = _extract_mermaid(verify_response.text)
-        if verified_code:
-            mermaid_code = verified_code
-            logger.info("Diagram: Codex verification applied")
-    except Exception as exc:
-        logger.warning("Diagram: Codex verification skipped: %s", exc)
+    # ── Step 2: Codex verify → Opus fix loop (max 3 rounds) ──
+    warn_count = 0
+    for round_num in range(1, MAX_VERIFY_ROUNDS + 1):
+        logger.info("Diagram: Codex verify round %d...", round_num)
 
-    # ── Step 3: Cycle detector (deterministic fix) ──
+        verdict, fixed_code = await _codex_verify(file_block, mermaid_code)
+
+        if verdict == "pass":
+            logger.info("Diagram: PASS on round %d", round_num)
+            if fixed_code:
+                mermaid_code = fixed_code
+            break
+
+        if verdict == "warn":
+            warn_count += 1
+            if fixed_code:
+                mermaid_code = fixed_code
+            if warn_count >= 2:
+                logger.info("Diagram: WARN x%d, accepting", warn_count)
+                break
+            # One more chance — Opus fixes the warnings
+            logger.info("Diagram: WARN, Opus fixing...")
+            mermaid_code = await _opus_fix(agent, file_block, mermaid_code, fixed_code or mermaid_code)
+            continue
+
+        # BLOCK — Opus must fix
+        logger.info("Diagram: BLOCK on round %d, Opus fixing...", round_num)
+        mermaid_code = await _opus_fix(agent, file_block, mermaid_code, fixed_code or mermaid_code)
+
+    # ── Step 3: Deterministic cycle fix ──
     mermaid_code = fix_mermaid_cycles(mermaid_code)
 
-    # Generate share URL
     share_url = create_mermaid_url(mermaid_code)
 
     return {
@@ -228,6 +246,66 @@ async def generate_diagram(working_dir: str) -> dict:
         "share_url": share_url,
         "files_scanned": len(files),
     }
+
+
+async def _codex_verify(file_block: str, mermaid_code: str) -> tuple[str, str]:
+    """
+    Ask Codex (OpenAI) to verify the diagram. Returns (verdict, fixed_code).
+    verdict: "pass", "warn", or "block". fixed_code may be empty.
+    """
+    try:
+        from openseed_codex.agent import CodexAgent
+        codex = CodexAgent()
+        response = await codex.invoke(
+            prompt=f"{VERIFY_PROMPT}\n\nCodebase files:\n{file_block}\n\nDiagram to verify:\n```mermaid\n{mermaid_code}\n```",
+        )
+        verdict = _parse_verdict(response.text)
+        fixed = _extract_mermaid(response.text)
+        return verdict, fixed
+    except Exception as exc:
+        logger.warning("Codex verify failed: %s — treating as PASS", exc)
+        return "pass", ""
+
+
+async def _opus_fix(agent, file_block: str, original: str, codex_version: str) -> str:
+    """Ask Opus to fix the diagram based on Codex feedback."""
+    response = await agent.invoke(
+        prompt=f"""The diagram verifier found issues. Fix them.
+
+Original diagram:
+```mermaid
+{original}
+```
+
+Verifier's version (may have partial fixes):
+```mermaid
+{codex_version}
+```
+
+Codebase files for reference:
+{file_block}
+
+Output ONLY the corrected ```mermaid code block. Be thorough but do NOT over-engineer.""",
+        system_prompt=SYSTEM_PROMPT,
+        model="opus",
+        max_turns=1,
+    )
+    fixed = _extract_mermaid(response.text)
+    return fixed if fixed else original
+
+
+def _parse_verdict(text: str) -> str:
+    """Extract VERDICT from Codex response. Default to 'warn' if ambiguous."""
+    for line in text.splitlines():
+        upper = line.strip().upper()
+        if "VERDICT:" in upper:
+            if "PASS" in upper:
+                return "pass"
+            if "BLOCK" in upper:
+                return "block"
+            if "WARN" in upper:
+                return "warn"
+    return "warn"
 
 
 def _extract_mermaid(text: str) -> str:
