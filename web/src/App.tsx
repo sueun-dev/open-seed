@@ -404,7 +404,7 @@ export default function App() {
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           {/* Main content */}
           <div style={{ flex: 1, overflow: "hidden" }}>
-            {showOnboarding ? (
+            {showOnboarding && mode !== "diagram" ? (
               <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24 }}>
                 <div style={{ fontSize: 56, marginBottom: 8 }}>📁</div>
                 <h2 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: 0 }}>Drop a folder to start</h2>
