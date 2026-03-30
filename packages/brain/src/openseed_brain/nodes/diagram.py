@@ -153,10 +153,26 @@ Rules:
 10. No explanations, ONLY the mermaid diagram."""
 
 
+VERIFY_PROMPT = """You are a senior software architect reviewing a Mermaid architecture diagram.
+
+The diagram was generated from a real codebase. Verify it for:
+1. COMPLETENESS: Are all major modules, services, and data stores shown?
+2. ACCURACY: Do the connections (API calls, imports, data flow) match the actual code?
+3. MERMAID SYNTAX: Will this render without errors? Check for forbidden chars: {, }, :, (, )
+4. MISSING LINKS: Are there any obvious connections between components that are missing?
+5. SUBGRAPH CYCLES: Is any subgraph named the same as a node inside it?
+
+If you find issues, output a FIXED version of the FULL diagram.
+If the diagram is correct, output it unchanged.
+
+Either way, output ONLY a ```mermaid code block. No explanations."""
+
+
 async def generate_diagram(working_dir: str) -> dict:
     """
     Generate a Mermaid architecture diagram for the project.
 
+    Pipeline: Opus generates → Opus verifies/fixes → cycle detector → done.
     Returns: {mermaid: str, share_url: str, files_scanned: int}
     """
     files = scan_project_files(working_dir)
@@ -172,20 +188,35 @@ async def generate_diagram(working_dir: str) -> dict:
     from openseed_claude.agent import ClaudeAgent
     agent = ClaudeAgent()
 
+    # ── Step 1: Opus generates the diagram ──
+    logger.info("Diagram: Opus generating for %d files...", len(files))
     response = await agent.invoke(
         prompt=f"Analyze this codebase and create an architecture diagram.\n\n{file_block}",
         system_prompt=SYSTEM_PROMPT,
-        model="sonnet",
+        model="opus",
         max_turns=1,
     )
 
-    # Extract mermaid block
     mermaid_code = _extract_mermaid(response.text)
     if not mermaid_code:
         logger.warning("No mermaid block found in diagram response. Response preview: %s", response.text[:500])
         return {"mermaid": "", "share_url": "", "files_scanned": len(files), "error": "Failed to generate diagram"}
 
-    # Fix cycles
+    # ── Step 2: Opus verifies and fixes ──
+    logger.info("Diagram: Opus verifying...")
+    verify_response = await agent.invoke(
+        prompt=f"Verify this architecture diagram against the codebase.\n\nCodebase files:\n{file_block}\n\nDiagram to verify:\n```mermaid\n{mermaid_code}\n```",
+        system_prompt=VERIFY_PROMPT,
+        model="opus",
+        max_turns=1,
+    )
+
+    verified_code = _extract_mermaid(verify_response.text)
+    if verified_code:
+        mermaid_code = verified_code
+        logger.info("Diagram: verification applied")
+
+    # ── Step 3: Cycle detector (deterministic fix) ──
     mermaid_code = fix_mermaid_cycles(mermaid_code)
 
     # Generate share URL
