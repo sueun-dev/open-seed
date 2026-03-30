@@ -202,19 +202,20 @@ async def generate_diagram(working_dir: str) -> dict:
         logger.warning("No mermaid block found in diagram response. Response preview: %s", response.text[:500])
         return {"mermaid": "", "share_url": "", "files_scanned": len(files), "error": "Failed to generate diagram"}
 
-    # ── Step 2: Opus verifies and fixes ──
-    logger.info("Diagram: Opus verifying...")
-    verify_response = await agent.invoke(
-        prompt=f"Verify this architecture diagram against the codebase.\n\nCodebase files:\n{file_block}\n\nDiagram to verify:\n```mermaid\n{mermaid_code}\n```",
-        system_prompt=VERIFY_PROMPT,
-        model="opus",
-        max_turns=1,
-    )
-
-    verified_code = _extract_mermaid(verify_response.text)
-    if verified_code:
-        mermaid_code = verified_code
-        logger.info("Diagram: verification applied")
+    # ── Step 2: Codex (OpenAI) verifies and fixes ──
+    logger.info("Diagram: Codex verifying...")
+    try:
+        from openseed_codex.agent import CodexAgent
+        codex = CodexAgent()
+        verify_response = await codex.invoke(
+            prompt=f"{VERIFY_PROMPT}\n\nCodebase files:\n{file_block}\n\nDiagram to verify:\n```mermaid\n{mermaid_code}\n```",
+        )
+        verified_code = _extract_mermaid(verify_response.text)
+        if verified_code:
+            mermaid_code = verified_code
+            logger.info("Diagram: Codex verification applied")
+    except Exception as exc:
+        logger.warning("Diagram: Codex verification skipped: %s", exc)
 
     # ── Step 3: Cycle detector (deterministic fix) ──
     mermaid_code = fix_mermaid_cycles(mermaid_code)
