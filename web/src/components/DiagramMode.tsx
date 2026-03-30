@@ -156,17 +156,8 @@ export default function DiagramMode({ workingDir }: Props) {
     render();
   }, [diagram]);
 
-  // Mouse wheel zoom (Ctrl/Cmd + scroll) and plain scroll to pan
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      setZoom((z) => Math.min(5, Math.max(0.2, z - e.deltaY * 0.003)));
-    };
-    viewport.addEventListener("wheel", onWheel, { passive: false });
-    return () => viewport.removeEventListener("wheel", onWheel);
-  }, []);
+  // Mouse wheel zoom — attached via onWheel React prop instead of addEventListener
+  // (React onWheel is always non-passive, so preventDefault works)
 
   // Drag to pan
   const onPointerDown = useCallback((e: React.PointerEvent) => {
@@ -333,6 +324,11 @@ export default function DiagramMode({ workingDir }: Props) {
       {/* Diagram viewport — drag to pan, Ctrl+scroll to zoom */}
       <div
         ref={viewportRef}
+        onWheel={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setZoom((z) => Math.min(5, Math.max(0.2, z - e.deltaY * 0.003)));
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
