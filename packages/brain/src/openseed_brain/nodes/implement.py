@@ -17,6 +17,11 @@ from __future__ import annotations
 import asyncio
 
 from openseed_brain.state import PipelineState, Implementation, PlanTask
+from openseed_brain.progress import emit_progress
+
+
+async def _emit(event_type: str, **data) -> None:
+    await emit_progress(event_type, node="implement", **data)
 
 
 # ─── Implementation Rules (shared across all specialists) ────────────────────
@@ -587,15 +592,21 @@ async def implement_node(state: PipelineState) -> dict:
 
     # Legacy provider modes — backward compatibility
     if provider == "codex":
+        await _emit("implement.start", phase="codex", message="Starting Codex implementation...")
         impl = await _implement_codex(state)
+        await _emit("implement.verify", message="Running lint checks...")
         impl, extra = await _self_verify_and_fix(state, impl, "codex")
+        await _emit("implement.done", message="Codex implementation complete")
         return {
             "implementation": impl,
             "messages": [f"Implement [codex]: {impl.summary[:300]}"] + extra,
         }
     if provider == "both":
+        await _emit("implement.start", phase="both", message="Starting Claude + Codex implementation...")
         impl = await _implement_both(state)
+        await _emit("implement.verify", message="Running lint checks...")
         impl, extra = await _self_verify_and_fix(state, impl, "both")
+        await _emit("implement.done", message="Both-mode implementation complete")
         return {
             "implementation": impl,
             "messages": [f"Implement [both]: {impl.summary[:300]}"] + extra,
@@ -607,8 +618,11 @@ async def implement_node(state: PipelineState) -> dict:
 
     # No plan or empty plan — use fullstack specialist directly
     if not plan or not plan.tasks:
+        await _emit("implement.start", phase="fullstack", message="Starting fullstack implementation...")
         impl = await _implement_fullstack(state)
+        await _emit("implement.verify", message="Running lint checks...")
         impl, extra = await _self_verify_and_fix(state, impl, "fullstack")
+        await _emit("implement.done", message="Fullstack implementation complete")
         return {
             "implementation": impl,
             "messages": [f"Implement [fullstack]: {impl.summary[:300]}"] + extra,
@@ -617,12 +631,16 @@ async def implement_node(state: PipelineState) -> dict:
     # Route tasks to domain specialists via LLM
     from openseed_brain.task_router import route_tasks
 
+    await _emit("implement.routing", message=f"Routing {len(plan.tasks)} tasks to specialists...")
     routed = await route_tasks(plan, state["task"])
 
     if not routed:
         # Routing returned nothing — fall back to fullstack
+        await _emit("implement.start", phase="fullstack-fallback", message="Falling back to fullstack...")
         impl = await _implement_fullstack(state)
+        await _emit("implement.verify", message="Running lint checks...")
         impl, extra = await _self_verify_and_fix(state, impl, "fullstack-fallback")
+        await _emit("implement.done", message="Fullstack implementation complete")
         return {
             "implementation": impl,
             "messages": [f"Implement [fullstack-fallback]: {impl.summary[:300]}"] + extra,
@@ -633,12 +651,26 @@ async def implement_node(state: PipelineState) -> dict:
         (domain, tasks) for domain, tasks in routed.items() if tasks
     ]
 
+    domains_used = [d for d, _ in domain_tasks]
+    task_counts = {d: len(t) for d, t in domain_tasks}
+    await _emit(
+        "implement.specialists",
+        message=f"Running {len(domain_tasks)} specialists in parallel: {', '.join(domains_used)}",
+        specialists=task_counts,
+    )
+
+    async def _run_specialist_with_progress(domain: str, tasks: list[PlanTask], state: PipelineState) -> Implementation:
+        task_desc = ", ".join(t.description[:60] for t in tasks[:3])
+        await _emit("implement.specialist_start", specialist=domain, tasks=len(tasks), message=f"{domain}: {task_desc}")
+        result = await _run_specialist(domain, tasks, state)
+        await _emit("implement.specialist_done", specialist=domain, message=f"{domain} specialist finished")
+        return result
+
     specialist_results: list[Implementation] = await asyncio.gather(
-        *[_run_specialist(domain, tasks, state) for domain, tasks in domain_tasks]
+        *[_run_specialist_with_progress(domain, tasks, state) for domain, tasks in domain_tasks]
     )
 
     # Combine specialist summaries
-    domains_used = [d for d, _ in domain_tasks]
     combined_summary = " | ".join(r.summary[:150] for r in specialist_results)
     combined_output = "\n\n".join(
         f"=== {domain} specialist ===\n{r.raw_output}"
@@ -647,9 +679,11 @@ async def implement_node(state: PipelineState) -> dict:
 
     # Integration check — verify parallel outputs are compatible
     if len(specialist_results) > 1:
+        await _emit("implement.integration", message="Checking integration between specialists...")
         integration_result = await _integration_check(state, specialist_results)
         combined_output += f"\n\n=== Integration Check ===\n{integration_result.raw_output}"
         combined_summary += f" | {integration_result.summary[:100]}"
+        await _emit("implement.integration_done", message="Integration check complete")
 
     impl = Implementation(
         summary=combined_summary[:500],
@@ -657,8 +691,10 @@ async def implement_node(state: PipelineState) -> dict:
     )
 
     # Self-verify: lint/type check and auto-fix before QA Gate
+    await _emit("implement.verify", message="Running lint and type checks...")
     label = f"specialists: {', '.join(domains_used)}"
     impl, extra = await _self_verify_and_fix(state, impl, label)
+    await _emit("implement.done", message="Implementation complete")
 
     messages = [
         f"Implement [{label}]: {impl.summary[:300]}"

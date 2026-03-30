@@ -292,11 +292,14 @@ async def fix_node(state: PipelineState) -> dict:
     # Snapshot files BEFORE fix
     before = _snapshot_dir(working_dir)
 
+    # Escalate to Opus after initial Sonnet attempts fail
+    fix_model = "sonnet" if retry_count < 2 else "opus"
+
     # Use session continuity: first attempt creates session, subsequent reuse it
     response = await agent.invoke(
         prompt=prompt,
         system_prompt=skill_system_prompt if skill_system_prompt else None,
-        model="sonnet",
+        model=fix_model,
         working_dir=working_dir,
         max_turns=20,
         session_id=f"fix-{task_hash}" if retry_count == 0 else None,
