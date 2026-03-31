@@ -195,12 +195,13 @@ Format: VERDICT line first, then the mermaid block."""
 MAX_VERIFY_ROUNDS = 3
 
 
-async def generate_diagram(working_dir: str) -> dict:
+async def generate_diagram(working_dir: str, generator: str = "claude", verifier: str = "gpt") -> dict:
     """
     Generate a Mermaid architecture diagram for the project.
 
-    Pipeline: Opus generates → Codex verifies → if BLOCK, Opus fixes → loop (max 3 rounds).
-    PASS → done. WARN after 2 rounds → done. BLOCK keeps looping.
+    Args:
+        generator: "claude" or "gpt" — who creates the diagram
+        verifier: "claude" or "gpt" — who verifies it
     Returns: {mermaid: str, share_url: str, files_scanned: int}
     """
     from openseed_brain.progress import emit_progress
@@ -220,17 +221,25 @@ async def generate_diagram(working_dir: str) -> dict:
         for f in files
     )
 
-    from openseed_claude.agent import ClaudeAgent
-    agent = ClaudeAgent()
+    # ── Step 1: Generate diagram ──
+    gen_label = "Claude Opus" if generator == "claude" else "GPT (Codex)"
+    await _emit(f"{gen_label} analyzing architecture...", step="generate")
 
-    # ── Step 1: Opus generates the diagram ──
-    await _emit("Claude Opus analyzing architecture...", step="generate")
-    response = await agent.invoke(
-        prompt=f"Analyze this codebase and create an architecture diagram.\n\n{file_block}",
-        system_prompt=SYSTEM_PROMPT,
-        model="opus",
-        max_turns=1,
-    )
+    if generator == "claude":
+        from openseed_claude.agent import ClaudeAgent
+        agent = ClaudeAgent()
+        response = await agent.invoke(
+            prompt=f"Analyze this codebase and create an architecture diagram.\n\n{file_block}",
+            system_prompt=SYSTEM_PROMPT,
+            model="opus",
+            max_turns=1,
+        )
+    else:
+        from openseed_codex.agent import CodexAgent
+        codex_gen = CodexAgent()
+        response = await codex_gen.invoke(
+            prompt=f"{SYSTEM_PROMPT}\n\nAnalyze this codebase and create an architecture diagram.\n\n{file_block}",
+        )
 
     mermaid_code = _extract_mermaid(response.text)
     if not mermaid_code:
@@ -238,17 +247,19 @@ async def generate_diagram(working_dir: str) -> dict:
         await _emit("Failed to generate diagram", step="error")
         return {"mermaid": "", "share_url": "", "files_scanned": len(files), "error": "Failed to generate diagram"}
 
-    await _emit("Opus generated diagram. Starting verification...", step="generated")
+    await _emit(f"{gen_label} generated diagram. Starting verification...", step="generated")
 
-    # ── Step 2: Codex verify → Opus fix loop (max 3 rounds) ──
+    ver_label = "Claude" if verifier == "claude" else "Codex (OpenAI)"
+
+    # ── Step 2: Verify → Fix loop (max 3 rounds) ──
     warn_count = 0
     for round_num in range(1, MAX_VERIFY_ROUNDS + 1):
-        await _emit(f"Codex (OpenAI) verifying... round {round_num}/{MAX_VERIFY_ROUNDS}", step="verify", round=round_num)
+        await _emit(f"{ver_label} verifying... round {round_num}/{MAX_VERIFY_ROUNDS}", step="verify", round=round_num)
 
-        verdict, fixed_code = await _codex_verify(file_block, mermaid_code)
+        verdict, fixed_code = await _run_verify(verifier, file_block, mermaid_code)
 
         if verdict == "pass":
-            await _emit(f"Codex: PASS on round {round_num}", step="pass", round=round_num)
+            await _emit(f"{ver_label}: PASS on round {round_num}", step="pass", round=round_num)
             if fixed_code:
                 mermaid_code = fixed_code
             break
@@ -258,15 +269,15 @@ async def generate_diagram(working_dir: str) -> dict:
             if fixed_code:
                 mermaid_code = fixed_code
             if warn_count >= 2:
-                await _emit(f"Codex: WARN x{warn_count}, accepting diagram", step="warn_accept")
+                await _emit(f"{ver_label}: WARN x{warn_count}, accepting diagram", step="warn_accept")
                 break
-            await _emit(f"Codex: WARN — Opus fixing issues...", step="fix", round=round_num)
-            mermaid_code = await _opus_fix(agent, file_block, mermaid_code, fixed_code or mermaid_code)
+            await _emit(f"{ver_label}: WARN — {gen_label} fixing issues...", step="fix", round=round_num)
+            mermaid_code = await _run_fix(generator, file_block, mermaid_code, fixed_code or mermaid_code)
             continue
 
         # BLOCK
-        await _emit(f"Codex: BLOCK — Opus rewriting diagram...", step="fix", round=round_num)
-        mermaid_code = await _opus_fix(agent, file_block, mermaid_code, fixed_code or mermaid_code)
+        await _emit(f"{ver_label}: BLOCK — {gen_label} rewriting diagram...", step="fix", round=round_num)
+        mermaid_code = await _run_fix(generator, file_block, mermaid_code, fixed_code or mermaid_code)
 
     # ── Step 3: Deterministic cycle fix ──
     await _emit("Fixing subgraph cycles...", step="cycles")
@@ -281,29 +292,31 @@ async def generate_diagram(working_dir: str) -> dict:
     }
 
 
-async def _codex_verify(file_block: str, mermaid_code: str) -> tuple[str, str]:
+async def _run_verify(provider: str, file_block: str, mermaid_code: str) -> tuple[str, str]:
     """
-    Ask Codex (OpenAI) to verify the diagram. Returns (verdict, fixed_code).
-    verdict: "pass", "warn", or "block". fixed_code may be empty.
+    Verify diagram using specified provider. Returns (verdict, fixed_code).
     """
+    prompt = f"{VERIFY_PROMPT}\n\nCodebase files:\n{file_block}\n\nDiagram to verify:\n```mermaid\n{mermaid_code}\n```"
     try:
-        from openseed_codex.agent import CodexAgent
-        codex = CodexAgent()
-        response = await codex.invoke(
-            prompt=f"{VERIFY_PROMPT}\n\nCodebase files:\n{file_block}\n\nDiagram to verify:\n```mermaid\n{mermaid_code}\n```",
-        )
+        if provider == "claude":
+            from openseed_claude.agent import ClaudeAgent
+            agent = ClaudeAgent()
+            response = await agent.invoke(prompt=prompt, model="opus", max_turns=1)
+        else:
+            from openseed_codex.agent import CodexAgent
+            agent = CodexAgent()
+            response = await agent.invoke(prompt=prompt)
         verdict = _parse_verdict(response.text)
         fixed = _extract_mermaid(response.text)
         return verdict, fixed
     except Exception as exc:
-        logger.warning("Codex verify failed: %s — treating as PASS", exc)
+        logger.warning("Verify (%s) failed: %s — treating as PASS", provider, exc)
         return "pass", ""
 
 
-async def _opus_fix(agent, file_block: str, original: str, codex_version: str) -> str:
-    """Ask Opus to fix the diagram based on Codex feedback."""
-    response = await agent.invoke(
-        prompt=f"""The diagram verifier found issues. Fix them.
+async def _run_fix(provider: str, file_block: str, original: str, verifier_version: str) -> str:
+    """Fix diagram using specified provider."""
+    fix_prompt = f"""The diagram verifier found issues. Fix them.
 
 Original diagram:
 ```mermaid
@@ -312,19 +325,28 @@ Original diagram:
 
 Verifier's version (may have partial fixes):
 ```mermaid
-{codex_version}
+{verifier_version}
 ```
 
 Codebase files for reference:
 {file_block}
 
-Output ONLY the corrected ```mermaid code block. Be thorough but do NOT over-engineer.""",
-        system_prompt=SYSTEM_PROMPT,
-        model="opus",
-        max_turns=1,
-    )
-    fixed = _extract_mermaid(response.text)
-    return fixed if fixed else original
+Output ONLY the corrected ```mermaid code block. Be thorough but do NOT over-engineer."""
+
+    try:
+        if provider == "claude":
+            from openseed_claude.agent import ClaudeAgent
+            agent = ClaudeAgent()
+            response = await agent.invoke(prompt=fix_prompt, system_prompt=SYSTEM_PROMPT, model="opus", max_turns=1)
+        else:
+            from openseed_codex.agent import CodexAgent
+            agent = CodexAgent()
+            response = await agent.invoke(prompt=f"{SYSTEM_PROMPT}\n\n{fix_prompt}")
+        fixed = _extract_mermaid(response.text)
+        return fixed if fixed else original
+    except Exception as exc:
+        logger.warning("Fix (%s) failed: %s — returning original", provider, exc)
+        return original
 
 
 def _parse_verdict(text: str) -> str:

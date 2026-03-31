@@ -49,6 +49,8 @@ export default function DiagramMode({ workingDir }: Props) {
   const [error, setError] = useState<string>("");
   const [rendered, setRendered] = useState(false);
   const [progressLog, setProgressLog] = useState<string[]>([]);
+  const [generator, setGenerator] = useState<"claude" | "gpt">("claude");
+  const [verifier, setVerifier] = useState<"claude" | "gpt">("gpt");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -192,7 +194,7 @@ export default function DiagramMode({ workingDir }: Props) {
       await fetch("/api/diagram/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ working_dir: workingDir }),
+        body: JSON.stringify({ working_dir: workingDir, generator, verifier }),
       });
       startPolling();
     } catch (err) {
@@ -259,6 +261,22 @@ export default function DiagramMode({ workingDir }: Props) {
     );
   }
 
+  // Provider selector pill
+  const pill = (label: string, value: string, current: string, set: (v: any) => void) => (
+    <button
+      onClick={() => set(value)}
+      style={{
+        padding: "5px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer",
+        border: current === value ? "1px solid #2563eb" : "1px solid #222",
+        background: current === value ? "#1e3a5f" : "#111",
+        color: current === value ? "#60a5fa" : "#666",
+        transition: "all 0.15s",
+      }}
+    >
+      {label}
+    </button>
+  );
+
   // Empty state (no diagram yet, not loading)
   if (!diagram && !loading && !error) {
     return (
@@ -266,9 +284,28 @@ export default function DiagramMode({ workingDir }: Props) {
         <div style={{ fontSize: 48 }}>📊</div>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: "#fff", margin: 0 }}>Diagram Mode</h2>
         <p style={{ color: "#555", fontSize: 13, maxWidth: 400, textAlign: "center" }}>
-          Architecture diagrams are automatically generated after pipeline runs.
-          You can also generate one manually.
+          Generate an architecture diagram of your project.
         </p>
+
+        {/* Provider selectors */}
+        <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 10, color: "#555", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Generator</span>
+            <div style={{ display: "flex", gap: 4 }}>
+              {pill("Claude", "claude", generator, setGenerator)}
+              {pill("GPT", "gpt", generator, setGenerator)}
+            </div>
+          </div>
+          <div style={{ width: 1, height: 36, background: "#222" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 10, color: "#555", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Verifier</span>
+            <div style={{ display: "flex", gap: 4 }}>
+              {pill("Claude", "claude", verifier, setVerifier)}
+              {pill("GPT", "gpt", verifier, setVerifier)}
+            </div>
+          </div>
+        </div>
+
         <button
           onClick={generate}
           style={{
