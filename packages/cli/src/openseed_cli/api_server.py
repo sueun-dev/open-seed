@@ -576,18 +576,20 @@ async def trigger_diagram(body: dict) -> dict:
 
     # Clear cache and regenerate
     _diagram_cache.pop(wd, None)
-    asyncio.create_task(_generate_diagram_bg(wd))
+    gen = body.get("generator", "claude")
+    ver = body.get("verifier", "gpt")
+    asyncio.create_task(_generate_diagram_bg(wd, generator=gen, verifier=ver))
     return {"status": "generating"}
 
 
-async def _generate_diagram_bg(working_dir: str) -> None:
+async def _generate_diagram_bg(working_dir: str, generator: str = "claude", verifier: str = "gpt") -> None:
     """Background diagram generation + broadcast when done."""
     _diagram_generating.add(working_dir)
     try:
         await _broadcast({"type": "diagram.start", "node": "diagram", "data": {"working_dir": working_dir}})
 
         from openseed_brain.nodes.diagram import generate_diagram
-        result = await generate_diagram(working_dir)
+        result = await generate_diagram(working_dir, generator=generator, verifier=verifier)
         _diagram_cache[working_dir] = result
 
         await _broadcast({"type": "diagram.complete", "node": "diagram", "data": {
