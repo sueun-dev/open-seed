@@ -17,8 +17,9 @@
 | Build backend | `hatchling` | all packages use hatchling (see pyproject.toml) |
 
 ## Architecture Constraints
-- Dependency flow: core → brain/claude/codex → qa_gate/guard → deploy/memory → cli (no reverse)
-- Cross-peer imports forbidden (claude cannot import codex, qa_gate cannot import guard)
+- Dependency flow: core is the foundation; brain orchestrates all packages; cli sits on top
+- Enforced by `tests/test_architecture.py` — CI blocks violations
+- Cross-peer imports forbidden (claude cannot import codex)
 - core is the only shared dependency — all inter-package types live here
 - TypeScript for web UI only — all backend packages are Python
 - Web UI communicates via FastAPI + WebSocket only — no Python imports
