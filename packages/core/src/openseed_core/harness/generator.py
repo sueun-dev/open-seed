@@ -235,23 +235,61 @@ def _infer_description(name: str) -> str:
     return hints.get(name, f"{name} package")
 
 
-def generate_scaffold(scan: ScanResult) -> list[HarnessFile]:
-    """Generate harness scaffold files from scan result. Deterministic, no AI."""
+def generate_scaffold(scan: ScanResult, existing_files: set[str] | None = None) -> list[HarnessFile]:
+    """Generate harness scaffold files from scan result. Deterministic, no AI.
+
+    Only generates files that don't already exist (checks existing_files set
+    or defaults to checking the filesystem).
+    """
+    import os
+
+    if existing_files is None:
+        existing_files = set()
+        for candidate in ["AGENTS.md", ".pre-commit-config.yaml", ".github/workflows/ci.yml"]:
+            if os.path.exists(os.path.join(scan.root, candidate)):
+                existing_files.add(candidate)
+
     files: list[HarnessFile] = []
 
-    # Root AGENTS.md
-    files.append(HarnessFile(
-        path="AGENTS.md",
-        content=_generate_root_agents_md(scan),
-    ))
+    # ── Inform ──────────────────────────────────────────────────
 
-    # CLAUDE.md symlink instruction (actual symlink created by caller)
+    # Root AGENTS.md
+    if "AGENTS.md" not in existing_files:
+        files.append(HarnessFile(
+            path="AGENTS.md",
+            content=_generate_root_agents_md(scan),
+        ))
+
     # Sub-AGENTS.md for monorepo packages
     if scan.is_monorepo:
         for pkg in scan.packages:
+            pkg_agents = f"{pkg.path}/AGENTS.md"
+            if pkg_agents not in existing_files:
+                files.append(HarnessFile(
+                    path=pkg_agents,
+                    content=_generate_sub_agents_md(pkg, scan),
+                ))
+
+    # ── Constrain ───────────────────────────────────────────────
+
+    # Pre-commit config
+    if ".pre-commit-config.yaml" not in existing_files:
+        precommit = _generate_precommit_config(scan)
+        if precommit:
             files.append(HarnessFile(
-                path=f"{pkg.path}/AGENTS.md",
-                content=_generate_sub_agents_md(pkg, scan),
+                path=".pre-commit-config.yaml",
+                content=precommit,
+            ))
+
+    # ── Verify ──────────────────────────────────────────────────
+
+    # CI pipeline
+    if ".github/workflows/ci.yml" not in existing_files:
+        ci = _generate_ci_pipeline(scan)
+        if ci:
+            files.append(HarnessFile(
+                path=".github/workflows/ci.yml",
+                content=ci,
             ))
 
     return files
@@ -353,6 +391,144 @@ def _generate_sub_agents_md(pkg: PackageInfo, scan: ScanResult) -> str:
         sections.append(f"- Run: `{pm} --filter {pkg.name} test`")
 
     return "\n".join(sections)
+
+
+def _generate_precommit_config(scan: ScanResult) -> str | None:
+    """Generate .pre-commit-config.yaml based on detected toolchain."""
+    hooks: list[str] = []
+
+    if "Python" in scan.languages:
+        if scan.linter == "ruff":
+            hooks.append("""  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.6
+    hooks:
+      - id: ruff
+        args: [check, --fix]
+      - id: ruff-format""")
+        if scan.type_checker == "mypy":
+            hooks.append("""  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy .
+        language: system
+        types: [python]
+        pass_filenames: false""")
+
+    if "TypeScript" in scan.languages or "JavaScript" in scan.languages:
+        if scan.linter == "biome":
+            hooks.append("""  - repo: local
+    hooks:
+      - id: biome
+        name: biome check
+        entry: biome check --write
+        language: system
+        types_or: [javascript, jsx, ts, tsx, json]""")
+        elif scan.linter == "eslint":
+            hooks.append("""  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint
+        entry: eslint --fix
+        language: system
+        types_or: [javascript, jsx, ts, tsx]""")
+
+    if not hooks:
+        return None
+
+    return "repos:\n" + "\n".join(hooks) + "\n"
+
+
+def _generate_ci_pipeline(scan: ScanResult) -> str | None:
+    """Generate .github/workflows/ci.yml based on detected toolchain."""
+    steps: list[str] = []
+
+    steps.append("      - uses: actions/checkout@v4")
+
+    if "Python" in scan.languages:
+        pm = scan.package_manager or "pip"
+        if pm == "uv":
+            steps.append("""
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync""")
+        else:
+            steps.append("""
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt""")
+
+        run_prefix = "uv run " if pm == "uv" else ""
+
+        if scan.commands.get("lint"):
+            steps.append(f"""
+      - name: Lint
+        run: {run_prefix}{scan.commands['lint']}""")
+        if scan.commands.get("format"):
+            steps.append(f"""
+      - name: Format check
+        run: {run_prefix}{scan.commands['format']} --check""")
+        if scan.commands.get("typecheck"):
+            steps.append(f"""
+      - name: Type check
+        run: {run_prefix}{scan.commands['typecheck']}""")
+        if scan.commands.get("test"):
+            steps.append(f"""
+      - name: Test
+        run: {run_prefix}{scan.commands['test']}""")
+
+    elif "TypeScript" in scan.languages or "JavaScript" in scan.languages:
+        pm = scan.package_manager or "npm"
+        steps.append(f"""
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: {pm} install""")
+
+        for intent in ["lint", "typecheck", "test"]:
+            if scan.commands.get(intent):
+                steps.append(f"""
+      - name: {intent.capitalize()}
+        run: {scan.commands[intent]}""")
+
+    elif "Go" in scan.languages:
+        steps.append("""
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Test
+        run: go test ./...""")
+
+    if len(steps) <= 1:  # Only checkout, no meaningful steps
+        return None
+
+    return f"""name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+{"".join(steps)}
+"""
 
 
 def get_ai_guide() -> str:
