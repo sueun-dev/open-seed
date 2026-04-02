@@ -15,15 +15,14 @@ Pattern from: openhands/microagent/microagent.py
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 
 @dataclass
 class Microagent:
     """A single microagent loaded from the working directory."""
+
     name: str = ""
     type: str = "repo"  # "repo" or "knowledge"
     triggers: list[str] = field(default_factory=list)  # Keywords for knowledge type
@@ -72,12 +71,14 @@ def load_microagents(working_dir: str) -> list[Microagent]:
         if filepath.is_file():
             try:
                 content = filepath.read_text(encoding="utf-8")[:10_000]
-                agents.append(Microagent(
-                    name=agent_name,
-                    type="repo",
-                    content=content,
-                    source_file=str(filepath),
-                ))
+                agents.append(
+                    Microagent(
+                        name=agent_name,
+                        type="repo",
+                        content=content,
+                        source_file=str(filepath),
+                    )
+                )
             except Exception:
                 pass
 
@@ -165,40 +166,10 @@ async def select_relevant_microagents(
     repo_agents = [a for a in agents if a.type == "repo"]
     relevant.extend(repo_agents)
 
-    # Knowledge agents: check triggers
+    # Knowledge agents with triggers: include all that have matching triggers.
+    # LLM-based selection belongs in brain (orchestrator), not core (foundation).
     knowledge_agents = [a for a in agents if a.type == "knowledge" and a.triggers]
-    if not knowledge_agents:
-        return relevant
-
-    # Use LLM to match triggers against task
-    try:
-        from openseed_claude.agent import ClaudeAgent
-
-        agent = ClaudeAgent()
-        agent_list = "\n".join(
-            f"- {a.name}: triggers={a.triggers}"
-            for a in knowledge_agents
-        )
-        response = await agent.invoke(
-            prompt=(
-                f"Given this task: \"{task[:500]}\"\n\n"
-                f"Which of these knowledge agents are relevant?\n{agent_list}\n\n"
-                f"Return ONLY the agent names as a comma-separated list. "
-                f"If none are relevant, return 'none'."
-            ),
-            model="haiku",
-            max_turns=1,
-        )
-        selected_names = {
-            n.strip().lower()
-            for n in response.text.strip().split(",")
-        }
-        for a in knowledge_agents:
-            if a.name.lower() in selected_names:
-                relevant.append(a)
-    except Exception:
-        # Fallback: include all knowledge agents (safe default)
-        relevant.extend(knowledge_agents)
+    relevant.extend(knowledge_agents)
 
     return relevant
 
