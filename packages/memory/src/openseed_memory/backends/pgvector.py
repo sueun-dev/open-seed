@@ -61,10 +61,12 @@ except ImportError:
 
 try:
     from pgvector.psycopg2 import register_vector as _register_vector_v2
+
     _HAS_PGVECTOR = True
 except ImportError:
     try:
         from pgvector.psycopg import register_vector as _register_vector_v3  # noqa: F401
+
         _HAS_PGVECTOR = True
     except ImportError:
         _HAS_PGVECTOR = False
@@ -73,6 +75,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Embedding helper
 # ---------------------------------------------------------------------------
+
 
 def _pseudo_embedding(text: str, dims: int) -> list[float]:
     """Deterministic hash-based pseudo-embedding (dims floats in [-1, 1]).
@@ -92,18 +95,13 @@ def _pseudo_embedding(text: str, dims: int) -> list[float]:
 
 
 def _openai_embedding(text: str, model: str, dims: int) -> list[float]:
-    """Generate an embedding via the OpenAI client (OAuth, no API key needed).
+    """Generate an embedding vector for the given text.
 
-    Falls back to pseudo-embedding if the client is not configured.
+    Currently uses pseudo-embedding (hash-based).
+    When openseed_providers package is created, real OpenAI embeddings
+    can be plugged in here without changing the interface.
     """
-    try:
-        from openseed_providers.openai import get_openai_client  # type: ignore[import]
-        client = get_openai_client()
-        response = client.embeddings.create(input=text, model=model)
-        return response.data[0].embedding
-    except Exception as exc:
-        logger.debug("pgvector: OpenAI embedding unavailable (%s), using pseudo-embedding", exc)
-        return _pseudo_embedding(text, dims)
+    return _pseudo_embedding(text, dims)
 
 
 # ---------------------------------------------------------------------------
@@ -141,10 +139,7 @@ class PgVectorMemoryBackend(MemoryBackend):
                 "or:  pip install psycopg2-binary pgvector"
             )
         if not _HAS_PGVECTOR:
-            raise ImportError(
-                "The 'pgvector' Python adapter is not installed. "
-                "Run: pip install pgvector"
-            )
+            raise ImportError("The 'pgvector' Python adapter is not installed. Run: pip install pgvector")
 
         self._url = connection_url
         self._collection = collection
@@ -274,8 +269,7 @@ class PgVectorMemoryBackend(MemoryBackend):
                         (id, content, memory_type, metadata, user_id, agent_id, embedding, created_at, updated_at)
                     VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s::vector, %s, %s)
                     """,
-                    (mem_id, content, memory_type, meta_json, user_id, agent_id,
-                     str(embedding), now, now),
+                    (mem_id, content, memory_type, meta_json, user_id, agent_id, str(embedding), now, now),
                 )
                 cur.execute(
                     f"""
@@ -326,13 +320,15 @@ class PgVectorMemoryBackend(MemoryBackend):
             meta = row[3] if isinstance(row[3], dict) else json.loads(row[3] or "{}")
             if filters and not matches_filter(meta, filters):
                 continue
-            results.append({
-                "id": row[0],
-                "memory": row[1],
-                "memory_type": row[2],
-                "metadata": meta,
-                "score": float(row[4]) if row[4] is not None else 0.0,
-            })
+            results.append(
+                {
+                    "id": row[0],
+                    "memory": row[1],
+                    "memory_type": row[2],
+                    "metadata": meta,
+                    "score": float(row[4]) if row[4] is not None else 0.0,
+                }
+            )
             if len(results) >= limit:
                 break
         return results
