@@ -33,10 +33,7 @@ ALLOWED_DEPS: dict[str, set[str]] = {
 
 # Known violations to fix later (file path -> imported package)
 # Remove entries as violations are fixed.
-KNOWN_VIOLATIONS: set[tuple[str, str]] = {
-    ("packages/core/src/openseed_core/microagent.py", "claude"),
-    ("packages/memory/src/openseed_memory/backends/pgvector.py", "providers"),
-}
+KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
 
 
 def _collect_openseed_imports(filepath: Path) -> list[tuple[str, str]]:
