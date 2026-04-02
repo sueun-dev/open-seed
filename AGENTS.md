@@ -7,18 +7,20 @@
 | Intent | Command | Notes |
 |--------|---------|-------|
 | Install | `uv sync` | uv workspace, never pip directly |
-| Test | `pytest` | pytest-asyncio, asyncio_mode=auto |
+| Test | `pytest` | pytest-asyncio |
 | Test (single) | `pytest packages/<name>/tests/` | per-package |
 | Lint | `ruff check .` | see pyproject.toml [tool.ruff] |
 | Format | `ruff format .` | ruff handles both |
 | Type check | `mypy packages/` | strict mode, see pyproject.toml [tool.mypy] |
 | Dev (API) | `openseed serve` | FastAPI on port 8000 |
 | Dev (Web) | `cd web && npm run dev` | React + Vite |
+| Build backend | `hatchling` | all packages use hatchling (see pyproject.toml) |
 
 ## Architecture Constraints
 - Dependency flow: core → brain/claude/codex → qa_gate/guard → deploy/memory → cli (no reverse)
 - Cross-peer imports forbidden (claude cannot import codex, qa_gate cannot import guard)
 - core is the only shared dependency — all inter-package types live here
+- TypeScript for web UI only — all backend packages are Python
 - Web UI communicates via FastAPI + WebSocket only — no Python imports
 - Auth via subprocess delegation to CLI tools — never embed tokens
 
