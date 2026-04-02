@@ -51,9 +51,12 @@ async def intake_node(state: PipelineState) -> dict:
     working_dir = state["working_dir"]
     has_answers = bool(state.get("clarification_answers"))
 
-    # ── Step 0: Harness Quality Check ──
+    # ── Step 0: Harness Quality Gate ──
+    # Harness must pass before AGI/Pair can proceed.
     await _emit("intake.harness", message="Checking harness quality...")
-    await _auto_harness_setup(working_dir, state.get("provider", "claude"))
+    harness_result = await _harness_gate(working_dir, state.get("provider", "claude"))
+    if harness_result is not None:
+        return harness_result  # Blocked — harness insufficient, return to user
 
     # ── Step 1: Context Collection (always runs) ──
     await _emit("intake.context", message="Scanning codebase, recalling memories...")
@@ -1032,6 +1035,80 @@ def _parse_skip_planning(text: str) -> bool:
             value = stripped.split(":", 1)[1].strip().lower()
             return value == "yes"
     return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Harness Gate — must pass before AGI/Pair can proceed
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _harness_gate(working_dir: str, provider: str = "claude") -> dict | None:
+    """Check harness quality. If insufficient, attempt auto-setup. If still insufficient, block.
+
+    Returns None if harness passes (proceed normally).
+    Returns a dict (intake result) if harness is blocked (return to user).
+    """
+    try:
+        from openseed_core.harness.checker import check_harness_quality
+
+        score = check_harness_quality(working_dir)
+        logger.info("Harness gate: %d/100 (pass=%s)", score.total, score.passing)
+
+        if score.passing:
+            await _emit("intake.harness.pass", message=f"Harness OK ({score.total}/100)")
+            return None  # Pass — proceed to intake
+
+        # Attempt auto-setup
+        await _emit(
+            "intake.harness.setup",
+            message=f"Harness quality low ({score.total}/100). Auto-setting up...",
+        )
+        await _auto_harness_setup(working_dir, provider)
+
+        # Re-check after setup
+        new_score = check_harness_quality(working_dir)
+        logger.info("Harness gate after setup: %d/100", new_score.total)
+
+        if new_score.passing:
+            await _emit(
+                "intake.harness.pass",
+                message=f"Harness setup complete ({score.total} → {new_score.total}/100)",
+            )
+            return None  # Pass — proceed to intake
+
+        # Still insufficient — block and ask user
+        await _emit(
+            "intake.harness.blocked",
+            message=f"Harness still insufficient ({new_score.total}/100). Manual setup needed.",
+            score=new_score.total,
+            missing=new_score.missing,
+        )
+        return {
+            "skip_planning": True,
+            "intake_analysis": {
+                "skip_planning": True,
+                "harness_blocked": True,
+                "harness_score": new_score.total,
+                "harness_missing": new_score.missing,
+            },
+            "clarification_questions": [
+                {
+                    "question": (
+                        f"Your project's harness quality is {new_score.total}/100 (minimum: 60). "
+                        f"Please set up the following before proceeding:\n\n"
+                        + "\n".join(f"- {m}" for m in new_score.missing)
+                        + "\n\nOr click the Harness Setup button to auto-generate."
+                    ),
+                    "options": ["Run harness setup", "I'll set it up manually"],
+                    "category": "harness",
+                }
+            ],
+            "messages": ["Harness quality insufficient. Setup required before proceeding."],
+        }
+
+    except Exception as exc:
+        logger.debug("Harness gate skipped (non-blocking): %s", exc)
+        return None  # Don't block on harness check failures
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
