@@ -1,73 +1,32 @@
-"""Tests for harness quality checker."""
+"""Tests for harness quality checker — full Level 1 coverage."""
 
-import os
+import json
 import tempfile
 from pathlib import Path
 
-from openseed_core.harness.checker import HarnessScore, check_harness_quality
+from openseed_core.harness.checker import check_harness_quality
 
 
 class TestCheckHarnessQuality:
     def test_empty_directory_scores_low(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             score = check_harness_quality(tmp)
-            # sub_agents gives 15 for non-monorepo (not applicable)
-            assert score.total == 15
+            # sub_agents(10 non-monorepo) only
+            assert score.total == 10
             assert not score.passing
-            assert "AGENTS.md: create root AGENTS.md file" in score.missing
 
-    def test_minimal_agents_md_scores_low(self) -> None:
+    def test_agents_md_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "AGENTS.md").write_text("# My Project\nSome rules.\n")
             score = check_harness_quality(tmp)
-            # agents_md(20) + sub_agents(15 non-monorepo) = 35
-            assert score.total == 35
+            # mission partial(5) + sub_agents(10) = 15
             assert not score.passing
 
-    def test_full_agents_md_scores_high(self) -> None:
+    def test_full_inform_only(self) -> None:
+        """Full AGENTS.md but no constrain/verify → still not passing."""
         with tempfile.TemporaryDirectory() as tmp:
             content = """# AGENTS.md
-
-> **Project:** Test project — a demo app.
-
-## Key Commands
-| Intent | Command | Notes |
-|--------|---------|-------|
-| Test | `pytest` | test runner |
-
-## Boundaries
-
-### NEVER
-- Commit secrets
-
-### ASK
-- Before adding deps
-
-### ALWAYS
-- Run tests before marking done
-
-## Context Map
-```yaml
-monorepo: false
-```
-"""
-            (Path(tmp) / "AGENTS.md").write_text(content)
-            (Path(tmp) / "CLAUDE.md").symlink_to("AGENTS.md")
-            score = check_harness_quality(tmp)
-            # agents_md(20) + mission(15) + commands(15) + boundaries(15) + context_map(10) + claude(10) + sub(15 non-monorepo)
-            assert score.total == 100
-            assert score.passing
-
-    def test_monorepo_without_sub_agents_loses_points(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            # Make it look like a monorepo
-            (root / "pyproject.toml").write_text('[tool.uv.workspace]\nmembers = ["packages/*"]')
-            (root / "packages" / "core").mkdir(parents=True)
-            (root / "packages" / "api").mkdir(parents=True)
-            # AGENTS.md with all sections
-            content = """# AGENTS.md
-> **Project:** Mono project
+> **Project:** Test — a demo.
 ## Key Commands
 | Intent | Command |
 | Test | `pytest` |
@@ -80,53 +39,89 @@ monorepo: false
 - Run tests
 ## Context Map
 ```yaml
-monorepo: uv workspace
+monorepo: false
 ```
 """
-            (root / "AGENTS.md").write_text(content)
-            (root / "CLAUDE.md").symlink_to("AGENTS.md")
-
+            (Path(tmp) / "AGENTS.md").write_text(content)
+            (Path(tmp) / "CLAUDE.md").symlink_to("AGENTS.md")
             score = check_harness_quality(tmp)
-            # No sub-AGENTS.md → sub_agents = 0
-            assert score.details.get("sub_agents", 0) == 0
-            assert score.total < 100
+            # mission(15) + commands(10) + boundaries(10) + context_map(5) + claude(5) + sub(10) = 55
+            assert score.total == 55
+            assert not score.passing  # Need 60
 
-    def test_monorepo_with_sub_agents_full_score(self) -> None:
+    def test_full_level1_passes(self) -> None:
+        """Full Level 1 harness should score >= 60."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "pyproject.toml").write_text('[tool.uv.workspace]\nmembers = ["packages/*"]')
-            (root / "packages" / "core").mkdir(parents=True)
-            (root / "packages" / "api").mkdir(parents=True)
-            (root / "packages" / "core" / "AGENTS.md").write_text("# core rules")
-            (root / "packages" / "api" / "AGENTS.md").write_text("# api rules")
-
             content = """# AGENTS.md
-> **Project:** Mono project
+> **Project:** Test — a demo.
 ## Key Commands
 | Intent | Command |
 | Test | `pytest` |
 ## Boundaries
 ### NEVER
-- No
+- No secrets
 ### ASK
-- Ask
+- Before deps
 ### ALWAYS
-- Always
+- Run tests
 ## Context Map
 ```yaml
-monorepo: uv
+monorepo: false
 ```
 """
             (root / "AGENTS.md").write_text(content)
             (root / "CLAUDE.md").symlink_to("AGENTS.md")
+            # Constrain
+            (root / ".pre-commit-config.yaml").write_text("repos: []")
+            (root / "pyproject.toml").write_text("[tool.ruff]\nline-length = 120\n[tool.mypy]\nstrict = true\n")
+            # Verify
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "ci.yml").write_text("name: CI")
+            (root / "tests").mkdir()
+            (root / "tests" / "test_foo.py").write_text("def test_foo(): pass")
 
             score = check_harness_quality(tmp)
-            assert score.details["sub_agents"] == 15
-            assert score.total == 100
+            assert score.passing, f"Score {score.total}/100. Missing: {score.missing}"
+            assert score.total >= 90  # Should be very high
+
+    def test_constrain_scoring(self) -> None:
+        """Pre-commit + linter + type checker = 25 points."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".pre-commit-config.yaml").write_text("repos: []")
+            (root / "pyproject.toml").write_text("[tool.ruff]\n[tool.mypy]\n")
+            score = check_harness_quality(tmp)
+            assert score.details.get("pre_commit") == 10
+            assert score.details.get("linter_config") == 10
+            assert score.details.get("type_checker") == 5
+
+    def test_verify_scoring(self) -> None:
+        """CI + tests = 20 points."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "ci.yml").write_text("name: CI")
+            (root / "tests").mkdir()
+            (root / "tests" / "test_foo.py").write_text("")
+            score = check_harness_quality(tmp)
+            assert score.details.get("ci_pipeline") == 10
+            assert score.details.get("test_suite") == 10
+
+    def test_node_project_detection(self) -> None:
+        """Detect Node.js project toolchain."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg = {"devDependencies": {"vitest": "^1.0", "eslint": "^8.0"}}
+            (root / "package.json").write_text(json.dumps(pkg))
+            (root / "tsconfig.json").write_text("{}")
+            score = check_harness_quality(tmp)
+            assert score.details.get("linter_config") == 10  # eslint in deps
+            assert score.details.get("type_checker") == 5  # tsconfig.json
+            assert score.details.get("test_suite") == 10  # vitest in deps
 
     def test_openseed_own_harness_passes(self) -> None:
         """Verify openseed's own harness scores >= 60 (passing)."""
-        # packages/core/tests/test_harness_checker.py → packages/core/tests → packages/core → packages → mygent
         project_root = str(Path(__file__).resolve().parent.parent.parent.parent)
         score = check_harness_quality(project_root)
         assert score.passing, (
