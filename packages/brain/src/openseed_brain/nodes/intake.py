@@ -18,8 +18,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from openseed_brain.state import PipelineState
 from openseed_brain.progress import emit_progress
+from openseed_brain.state import PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +51,16 @@ async def intake_node(state: PipelineState) -> dict:
     working_dir = state["working_dir"]
     has_answers = bool(state.get("clarification_answers"))
 
+    # ── Step 0: Harness Quality Check ──
+    await _emit("intake.harness", message="Checking harness quality...")
+    await _auto_harness_setup(working_dir, state.get("provider", "claude"))
+
     # ── Step 1: Context Collection (always runs) ──
     await _emit("intake.context", message="Scanning codebase, recalling memories...")
     context = await _collect_context(task, working_dir)
 
     from openseed_claude.agent import ClaudeAgent
+
     agent = ClaudeAgent()
 
     if has_answers:
@@ -82,7 +87,7 @@ async def intake_node(state: PipelineState) -> dict:
             "skip_planning": analysis.get("skip_planning", True),
             "intake_analysis": analysis,
             "clarification_questions": [],
-            "messages": [f"Intake: simple task, no clarification needed"],
+            "messages": ["Intake: simple task, no clarification needed"],
         }
 
     # ── Step 3: Per-Gap Research — parallel web search for each gap ──
@@ -120,6 +125,7 @@ async def _collect_context(task: str, working_dir: str) -> dict:
     # Intent classification
     try:
         from openseed_guard.intent_gate import classify_intent
+
         intent = await classify_intent(task)
         context["intent_info"] = (
             f"\nIntent classification: {intent.intent_type.value} "
@@ -131,8 +137,9 @@ async def _collect_context(task: str, working_dir: str) -> dict:
 
     # Memory recall
     try:
-        from openseed_memory.store import MemoryStore
         from openseed_memory.failure import recall_similar_failures
+        from openseed_memory.store import MemoryStore
+
         store = MemoryStore()
         await store.initialize()
 
@@ -149,7 +156,8 @@ async def _collect_context(task: str, working_dir: str) -> dict:
                 context["memory_context"] += f"- {p.error_type[:200]} → fix: {p.successful_fix}\n"
 
         try:
-            from openseed_memory.wisdom import recall_wisdom, format_wisdom_for_prompt
+            from openseed_memory.wisdom import format_wisdom_for_prompt, recall_wisdom
+
             wisdoms = await recall_wisdom(store, task, limit=5)
             if wisdoms:
                 wisdom_text = format_wisdom_for_prompt(wisdoms)
@@ -179,10 +187,11 @@ async def _collect_context(task: str, working_dir: str) -> dict:
     # Microagents
     try:
         from openseed_core.microagent import (
+            format_microagent_context,
             load_microagents,
             select_relevant_microagents,
-            format_microagent_context,
         )
+
         all_agents = load_microagents(working_dir)
         relevant_agents = await select_relevant_microagents(all_agents, task)
         if relevant_agents:
@@ -215,6 +224,7 @@ async def _select_skills(agent, task: str, gaps: list[dict], context: dict) -> l
     """Select relevant official skills from Anthropic/OpenAI repos."""
     try:
         from openseed_brain.skill_loader import select_skills_for_task
+
         return await select_skills_for_task(
             agent,
             task=task,
@@ -297,7 +307,10 @@ def _parse_gaps(text: str) -> list[dict]:
 
 
 async def _research_gaps(
-    agent, task: str, gaps: list[dict], context: dict,
+    agent,
+    task: str,
+    gaps: list[dict],
+    context: dict,
 ) -> list[dict]:
     """
     Research each gap independently via web search.
@@ -313,8 +326,8 @@ async def _research_gaps(
 Use web search to find what's recommended RIGHT NOW (2025-2026).
 
 Task context: {task}{tech_hint}
-Decision: {gap['topic']}
-Why it matters: {gap['why']}
+Decision: {gap["topic"]}
+Why it matters: {gap["why"]}
 
 Find 2-4 concrete options. For each option, provide:
 OPTION: <name>
@@ -341,7 +354,11 @@ Include version numbers where relevant.""",
 
 
 async def _formulate_questions(
-    agent, task: str, context: dict, gaps: list[dict], research_results: list[dict],
+    agent,
+    task: str,
+    context: dict,
+    gaps: list[dict],
+    research_results: list[dict],
 ) -> dict:
     """
     Generate research-backed questions with dynamic count based on complexity.
@@ -460,8 +477,8 @@ async def _phase2_plan(agent, state: PipelineState, context: dict) -> dict:
     answers = state["clarification_answers"]
     questions = state.get("clarification_questions", [])
     answers_context = "\n\nUser's clarification answers:\n"
-    for i, (q, a) in enumerate(zip(questions, answers)):
-        answers_context += f"Q{i+1}: {q}\nA{i+1}: {a}\n"
+    for i, (q, a) in enumerate(zip(questions, answers, strict=False)):
+        answers_context += f"Q{i + 1}: {q}\nA{i + 1}: {a}\n"
 
     response = await agent.invoke(
         prompt=f"""You previously analyzed this task and the user answered your questions.
@@ -538,8 +555,8 @@ def _scan_working_dir(working_dir: str) -> tuple[str, list[str], list[str]]:
     Returns:
         Tuple of (context_string, detected_tech_stack_list, all_relative_paths).
     """
-    import os
     import json
+    import os
 
     if not os.path.isdir(working_dir):
         return "", [], []
@@ -625,7 +642,9 @@ def _scan_working_dir(working_dir: str) -> tuple[str, list[str], list[str]]:
     if os.path.exists(os.path.join(working_dir, "Dockerfile")):
         detected_configs.append("Dockerfile")
         tech_stack.append("Docker")
-    if os.path.exists(os.path.join(working_dir, "docker-compose.yml")) or os.path.exists(os.path.join(working_dir, "docker-compose.yaml")):
+    if os.path.exists(os.path.join(working_dir, "docker-compose.yml")) or os.path.exists(
+        os.path.join(working_dir, "docker-compose.yaml")
+    ):
         tech_stack.append("Docker Compose")
 
     top_exts = sorted(extensions.items(), key=lambda x: -x[1])[:5]
@@ -652,31 +671,104 @@ MAX_SINGLE_FILE_CHARS = 3_000
 MAX_FILES_TO_READ = 8
 
 _SOURCE_EXTENSIONS = {
-    ".py", ".js", ".ts", ".jsx", ".tsx", ".vue", ".svelte",
-    ".go", ".rs", ".java", ".rb", ".php", ".swift", ".kt",
-    ".css", ".scss", ".html", ".sql", ".graphql",
+    ".py",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".vue",
+    ".svelte",
+    ".go",
+    ".rs",
+    ".java",
+    ".rb",
+    ".php",
+    ".swift",
+    ".kt",
+    ".css",
+    ".scss",
+    ".html",
+    ".sql",
+    ".graphql",
 }
 
 _ENTRY_POINTS = {
-    "main.py", "app.py", "server.py", "manage.py", "wsgi.py", "asgi.py",
-    "index.ts", "index.js", "index.tsx", "index.jsx",
-    "main.ts", "main.tsx", "main.js",
-    "server.ts", "server.js",
-    "App.tsx", "App.jsx", "App.vue",
+    "main.py",
+    "app.py",
+    "server.py",
+    "manage.py",
+    "wsgi.py",
+    "asgi.py",
+    "index.ts",
+    "index.js",
+    "index.tsx",
+    "index.jsx",
+    "main.ts",
+    "main.tsx",
+    "main.js",
+    "server.ts",
+    "server.js",
+    "App.tsx",
+    "App.jsx",
+    "App.vue",
 }
 
 _STOPWORDS = {
-    "the", "a", "an", "is", "it", "to", "for", "in", "on", "of", "and", "or",
-    "fix", "add", "create", "build", "make", "update", "implement", "bug",
-    "issue", "please", "can", "you", "i", "my", "we", "should", "need",
-    "want", "would", "like", "this", "that", "with", "from", "into", "not",
-    "all", "some", "new", "use", "using", "help", "get", "set", "has", "have",
+    "the",
+    "a",
+    "an",
+    "is",
+    "it",
+    "to",
+    "for",
+    "in",
+    "on",
+    "of",
+    "and",
+    "or",
+    "fix",
+    "add",
+    "create",
+    "build",
+    "make",
+    "update",
+    "implement",
+    "bug",
+    "issue",
+    "please",
+    "can",
+    "you",
+    "i",
+    "my",
+    "we",
+    "should",
+    "need",
+    "want",
+    "would",
+    "like",
+    "this",
+    "that",
+    "with",
+    "from",
+    "into",
+    "not",
+    "all",
+    "some",
+    "new",
+    "use",
+    "using",
+    "help",
+    "get",
+    "set",
+    "has",
+    "have",
 }
 
 
 def _extract_task_keywords(task: str) -> list[str]:
     import re
-    words = re.findall(r'[a-zA-Z]{3,}', task.lower())
+
+    words = re.findall(r"[a-zA-Z]{3,}", task.lower())
     return [w for w in words if w not in _STOPWORDS]
 
 
@@ -685,12 +777,19 @@ def _smart_truncate(content: str, max_chars: int) -> str:
         return content
     lines = content.splitlines()
     head = lines[:20]
-    sig_patterns = ("def ", "async def ", "class ", "export ", "function ",
-                    "interface ", "type ", "const ", "router.", "@app.")
-    signatures = [
-        ln for ln in lines[20:]
-        if any(ln.lstrip().startswith(p) for p in sig_patterns)
-    ]
+    sig_patterns = (
+        "def ",
+        "async def ",
+        "class ",
+        "export ",
+        "function ",
+        "interface ",
+        "type ",
+        "const ",
+        "router.",
+        "@app.",
+    )
+    signatures = [ln for ln in lines[20:] if any(ln.lstrip().startswith(p) for p in sig_patterns)]
     result = "\n".join(head)
     if signatures:
         result += "\n\n# ... (truncated) key signatures:\n" + "\n".join(signatures[:30])
@@ -698,7 +797,10 @@ def _smart_truncate(content: str, max_chars: int) -> str:
 
 
 def _read_key_files(
-    working_dir: str, task: str, tech_stack: list[str], all_paths: list[str],
+    working_dir: str,
+    task: str,
+    tech_stack: list[str],
+    all_paths: list[str],
 ) -> str:
     import os
 
@@ -763,8 +865,18 @@ def _parse_analysis(text: str) -> dict:
     analysis: dict = {}
     requirements: list[str] = []
     current_key = ""
-    _END_SECTIONS = {"INTENT", "COMPLEXITY", "SKIP_PLANNING", "EXISTING_PROJECT",
-                     "APPROACH", "LESSONS", "QUESTIONS", "PLAN", "SCOPE", "DONE_WHEN"}
+    _END_SECTIONS = {
+        "INTENT",
+        "COMPLEXITY",
+        "SKIP_PLANNING",
+        "EXISTING_PROJECT",
+        "APPROACH",
+        "LESSONS",
+        "QUESTIONS",
+        "PLAN",
+        "SCOPE",
+        "DONE_WHEN",
+    }
 
     for line in text.splitlines():
         stripped = line.strip()
@@ -820,16 +932,30 @@ def _parse_questions_with_options(text: str) -> list[dict]:
 
 def _split_options(raw: str) -> list[str]:
     import re
-    parts = re.split(r',\s*(?=[A-Z]\.)', raw)
+
+    parts = re.split(r",\s*(?=[A-Z]\.)", raw)
     return [p.strip() for p in parts if p.strip()]
 
 
 def _parse_section(text: str, section_name: str) -> str:
     lines: list[str] = []
     in_section = False
-    known_sections = {"INTENT", "COMPLEXITY", "SKIP_PLANNING", "EXISTING_PROJECT",
-                      "REQUIREMENTS", "APPROACH", "LESSONS", "PLAN", "SCOPE",
-                      "DONE_WHEN", "QUESTIONS", "MODIFY", "CREATE", "DO_NOT_TOUCH"}
+    known_sections = {
+        "INTENT",
+        "COMPLEXITY",
+        "SKIP_PLANNING",
+        "EXISTING_PROJECT",
+        "REQUIREMENTS",
+        "APPROACH",
+        "LESSONS",
+        "PLAN",
+        "SCOPE",
+        "DONE_WHEN",
+        "QUESTIONS",
+        "MODIFY",
+        "CREATE",
+        "DO_NOT_TOUCH",
+    }
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.upper().startswith(f"{section_name}:"):
@@ -849,9 +975,22 @@ def _parse_section(text: str, section_name: str) -> str:
 def _parse_list_section(text: str, section_name: str) -> list[str]:
     items: list[str] = []
     in_section = False
-    known_sections = {"INTENT", "COMPLEXITY", "SKIP_PLANNING", "EXISTING_PROJECT",
-                      "REQUIREMENTS", "APPROACH", "LESSONS", "PLAN", "SCOPE",
-                      "DONE_WHEN", "QUESTIONS", "MODIFY", "CREATE", "DO_NOT_TOUCH"}
+    known_sections = {
+        "INTENT",
+        "COMPLEXITY",
+        "SKIP_PLANNING",
+        "EXISTING_PROJECT",
+        "REQUIREMENTS",
+        "APPROACH",
+        "LESSONS",
+        "PLAN",
+        "SCOPE",
+        "DONE_WHEN",
+        "QUESTIONS",
+        "MODIFY",
+        "CREATE",
+        "DO_NOT_TOUCH",
+    }
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.upper().startswith(f"{section_name}:"):
@@ -874,8 +1013,9 @@ def _parse_scope(text: str) -> dict:
             in_scope = True
             continue
         if in_scope:
-            if any(stripped.upper().startswith(f"{s}:") for s in
-                   ["DONE_WHEN", "QUESTIONS", "PLAN", "LESSONS", "INTENT"]):
+            if any(
+                stripped.upper().startswith(f"{s}:") for s in ["DONE_WHEN", "QUESTIONS", "PLAN", "LESSONS", "INTENT"]
+            ):
                 break
             for key in ["MODIFY", "CREATE", "DO_NOT_TOUCH"]:
                 if stripped.upper().startswith(f"- {key}:") or stripped.upper().startswith(f"{key}:"):
@@ -892,3 +1032,172 @@ def _parse_skip_planning(text: str) -> bool:
             value = stripped.split(":", 1)[1].strip().lower()
             return value == "yes"
     return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Harness Auto-Setup
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _auto_harness_setup(working_dir: str, provider: str = "claude") -> None:
+    """Check harness quality and auto-generate scaffold if below threshold.
+
+    This runs at the start of every intake. If AGENTS.md already exists and
+    scores well, this is a no-op (fast deterministic check only).
+
+    When scaffold is needed, AI (Claude or Codex) is used to enhance the
+    deterministic scaffold with project-specific context.
+    """
+    try:
+        from openseed_core.harness.checker import check_harness_quality
+        from openseed_core.harness.generator import generate_scaffold, get_ai_guide, scan_project
+
+        score = check_harness_quality(working_dir)
+        logger.info("Harness quality: %d/100 (pass=%s)", score.total, score.passing)
+
+        if score.passing:
+            return  # Harness is good enough
+
+        await _emit(
+            "intake.harness.setup",
+            message=f"Harness quality low ({score.total}/100). Setting up...",
+            score=score.total,
+            missing=score.missing,
+        )
+
+        # Step 1: Deterministic scan + scaffold
+        scan = scan_project(working_dir)
+        scaffold_files = generate_scaffold(scan)
+
+        # Step 2: AI enhancement — fill TODOs with project-specific content
+        ai_guide = get_ai_guide()
+        enhanced_files = await _enhance_scaffold_with_ai(
+            scaffold_files, scan, ai_guide, working_dir, provider,
+        )
+
+        # Step 3: Write files to disk
+        import os
+
+        for f in enhanced_files:
+            full_path = os.path.join(working_dir, f.path)
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            with open(full_path, "w") as fh:
+                fh.write(f.content)
+            logger.info("Harness: wrote %s", f.path)
+
+        # Step 4: Create CLAUDE.md symlink if missing
+        claude_md = os.path.join(working_dir, "CLAUDE.md")
+        agents_md = os.path.join(working_dir, "AGENTS.md")
+        if not os.path.exists(claude_md) and os.path.exists(agents_md):
+            try:
+                os.symlink("AGENTS.md", claude_md)
+                logger.info("Harness: created CLAUDE.md -> AGENTS.md symlink")
+            except OSError:
+                pass  # Symlink not supported (Windows without dev mode)
+
+        # Verify improvement
+        new_score = check_harness_quality(working_dir)
+        await _emit(
+            "intake.harness.done",
+            message=f"Harness setup complete ({score.total} → {new_score.total}/100)",
+            before=score.total,
+            after=new_score.total,
+        )
+        logger.info("Harness improved: %d → %d", score.total, new_score.total)
+
+    except Exception as exc:
+        logger.debug("Harness auto-setup skipped: %s", exc)
+
+
+async def _enhance_scaffold_with_ai(
+    scaffold_files: list,
+    scan,
+    ai_guide: str,
+    working_dir: str,
+    provider: str,
+) -> list:
+    """Use AI to replace [TODO] placeholders with project-specific content.
+
+    Reads key project files (README, main entry points) and asks AI to
+    fill in the Mission, Architecture Constraints, and other TODOs.
+    """
+    import os
+
+    # Gather project context for AI
+    context_parts: list[str] = []
+
+    readme = os.path.join(working_dir, "README.md")
+    if os.path.isfile(readme):
+        try:
+            with open(readme) as f:
+                context_parts.append(f"README.md:\n{f.read(3000)}")
+        except Exception:
+            pass
+
+    # Find root AGENTS.md scaffold
+    root_agents = None
+    for f in scaffold_files:
+        if f.path == "AGENTS.md":
+            root_agents = f
+            break
+
+    if not root_agents:
+        return scaffold_files
+
+    # Build AI prompt
+    prompt = (
+        f"You are setting up a harness for a project. Follow the guide below EXACTLY.\n\n"
+        f"## AI Harness Guide\n{ai_guide}\n\n"
+        f"## Detected Project Info\n"
+        f"- Name: {scan.name}\n"
+        f"- Languages: {', '.join(scan.languages) or 'unknown'}\n"
+        f"- Frameworks: {', '.join(scan.frameworks) or 'none'}\n"
+        f"- Package manager: {scan.package_manager or 'unknown'}\n"
+        f"- Monorepo: {scan.is_monorepo} ({scan.monorepo_tool or 'n/a'})\n"
+        f"- Commands: {scan.commands}\n\n"
+    )
+    if context_parts:
+        prompt += f"## Project Context\n{''.join(context_parts)}\n\n"
+
+    prompt += (
+        f"## Current AGENTS.md (scaffold with TODOs)\n"
+        f"```markdown\n{root_agents.content}\n```\n\n"
+        f"Replace ALL [TODO: ...] placeholders with accurate project-specific content. "
+        f"Return ONLY the complete AGENTS.md content, no explanations. "
+        f"Keep it under 150 lines. Follow the 5 principles from the guide."
+    )
+
+    try:
+        if provider == "codex":
+            from openseed_codex.agent import CodexAgent
+
+            agent = CodexAgent()
+            response = await agent.invoke(prompt=prompt, max_turns=1)
+        else:
+            from openseed_claude.agent import ClaudeAgent
+
+            agent = ClaudeAgent()
+            response = await agent.invoke(prompt=prompt, model="sonnet", max_turns=1)
+
+        enhanced_content = response.text.strip()
+
+        # Extract markdown content if wrapped in code fence
+        if "```markdown" in enhanced_content:
+            start = enhanced_content.index("```markdown") + len("```markdown")
+            end = enhanced_content.rindex("```")
+            enhanced_content = enhanced_content[start:end].strip()
+        elif enhanced_content.startswith("```"):
+            lines = enhanced_content.split("\n")
+            enhanced_content = "\n".join(lines[1:-1]).strip()
+
+        # Replace root AGENTS.md with enhanced version
+        for f in scaffold_files:
+            if f.path == "AGENTS.md":
+                f.content = enhanced_content
+                break
+
+    except Exception as exc:
+        logger.debug("AI enhancement skipped: %s", exc)
+        # Fall back to deterministic scaffold (still useful)
+
+    return scaffold_files

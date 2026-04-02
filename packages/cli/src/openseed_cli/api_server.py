@@ -88,8 +88,8 @@ async def health() -> dict:
 @app.post("/api/chat")
 async def chat(req: ChatRequest) -> dict:
     """Pair Mode: direct CLI call with provider selection + file change detection."""
-    import os
     import hashlib
+    import os
 
     await _broadcast({"type": "node.start", "node": "pair", "data": {"provider": req.provider}})
 
@@ -128,11 +128,17 @@ async def chat(req: ChatRequest) -> dict:
         await _broadcast({"type": "node.log", "node": "pair", "data": {"message": response_text}})
 
         if files_created or files_modified:
-            await _broadcast({"type": "node.implementation", "node": "pair", "data": {
-                "summary": response_text[:300],
-                "files_created": files_created,
-                "files_modified": files_modified,
-            }})
+            await _broadcast(
+                {
+                    "type": "node.implementation",
+                    "node": "pair",
+                    "data": {
+                        "summary": response_text[:300],
+                        "files_created": files_created,
+                        "files_modified": files_modified,
+                    },
+                }
+            )
 
         await _broadcast({"type": "pipeline.complete", "node": "pair", "data": {"status": "completed"}})
 
@@ -163,6 +169,7 @@ def _build_chat_prompt(req: ChatRequest) -> str:
 async def _chat_claude(req: ChatRequest) -> tuple[str, str | None]:
     """Direct Claude CLI call."""
     from openseed_claude.agent import ClaudeAgent
+
     agent = ClaudeAgent()
     response = await agent.invoke(
         prompt=_build_chat_prompt(req),
@@ -179,6 +186,7 @@ async def _chat_codex(req: ChatRequest) -> tuple[str, str | None]:
     """Direct Codex CLI call."""
     try:
         from openseed_codex.agent import CodexAgent
+
         agent = CodexAgent()
         response = await agent.invoke(
             prompt=_build_chat_prompt(req),
@@ -198,8 +206,13 @@ async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
     codex_agent = CodexAgent()
 
     # Step 1: Both analyze in parallel
-    await _broadcast({"type": "debate.start", "node": "pair", "data": {
-        "step": "analyzing", "message": "Claude and Codex are both analyzing your request..."}})
+    await _broadcast(
+        {
+            "type": "debate.start",
+            "node": "pair",
+            "data": {"step": "analyzing", "message": "Claude and Codex are both analyzing your request..."},
+        }
+    )
 
     chat_prompt = _build_chat_prompt(req)
 
@@ -224,15 +237,26 @@ async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
         codex_text = "(Codex unavailable)"
 
     # Step 2: Show both analyses to user
-    await _broadcast({"type": "debate.opinion", "node": "pair", "data": {
-        "speaker": "claude", "message": claude_analysis.text[:2000]}})
+    await _broadcast(
+        {
+            "type": "debate.opinion",
+            "node": "pair",
+            "data": {"speaker": "claude", "message": claude_analysis.text[:2000]},
+        }
+    )
 
-    await _broadcast({"type": "debate.opinion", "node": "pair", "data": {
-        "speaker": "codex", "message": codex_text[:2000]}})
+    await _broadcast(
+        {"type": "debate.opinion", "node": "pair", "data": {"speaker": "codex", "message": codex_text[:2000]}}
+    )
 
     # Step 3: Opus judges (neutral arbiter, not Claude judging itself)
-    await _broadcast({"type": "debate.deciding", "node": "pair", "data": {
-        "step": "deciding", "message": "Opus is judging both approaches..."}})
+    await _broadcast(
+        {
+            "type": "debate.deciding",
+            "node": "pair",
+            "data": {"step": "deciding", "message": "Opus is judging both approaches..."},
+        }
+    )
 
     judge = ClaudeAgent()
     response = await judge.invoke(
@@ -260,8 +284,9 @@ Start with "VERDICT: [Engineer A/Engineer B/Combined] because..." then execute."
 
     # Step 4: Show verdict
     verdict_line = response.text.split("\n")[0] if response.text else ""
-    await _broadcast({"type": "debate.verdict", "node": "pair", "data": {
-        "verdict": verdict_line, "message": response.text[:500]}})
+    await _broadcast(
+        {"type": "debate.verdict", "node": "pair", "data": {"verdict": verdict_line, "message": response.text[:500]}}
+    )
 
     # Build combined response showing the full debate
     full_response = f"""## Debate
@@ -282,8 +307,8 @@ Start with "VERDICT: [Engineer A/Engineer B/Combined] because..." then execute."
 @app.post("/api/terminal")
 async def run_terminal(body: dict) -> dict:
     """Run a shell command in the working directory with streaming support."""
-    import subprocess
     import os
+    import subprocess
 
     cmd = body.get("command", "")
     cwd = body.get("working_dir", ".")
@@ -297,8 +322,12 @@ async def run_terminal(body: dict) -> dict:
 
     try:
         result = subprocess.run(
-            cmd, shell=True, cwd=cwd,
-            capture_output=True, text=True, timeout=timeout,
+            cmd,
+            shell=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
             env={**os.environ, "TERM": "dumb", "NO_COLOR": "1"},
         )
         return {
@@ -319,8 +348,8 @@ _shell_sessions: dict[str, Any] = {}
 async def ws_terminal(ws: WebSocket) -> None:
     """Persistent terminal session via WebSocket. Supports cd, env vars, long-running commands."""
     import os
-    import subprocess
     import signal
+    import subprocess
 
     await ws.accept()
 
@@ -334,9 +363,14 @@ async def ws_terminal(ws: WebSocket) -> None:
 
             if msg_type == "init":
                 working_dir = data.get("working_dir", working_dir)
-                await ws.send_text(json.dumps({
-                    "type": "ready", "cwd": working_dir,
-                }))
+                await ws.send_text(
+                    json.dumps(
+                        {
+                            "type": "ready",
+                            "cwd": working_dir,
+                        }
+                    )
+                )
 
             elif msg_type == "command":
                 cmd = data.get("command", "")
@@ -355,46 +389,82 @@ async def ws_terminal(ws: WebSocket) -> None:
                         new_dir = os.path.normpath(new_dir)
                         if os.path.isdir(new_dir):
                             working_dir = new_dir
-                            await ws.send_text(json.dumps({
-                                "type": "output", "data": f"cd: {working_dir}\n",
-                            }))
+                            await ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "output",
+                                        "data": f"cd: {working_dir}\n",
+                                    }
+                                )
+                            )
                         else:
-                            await ws.send_text(json.dumps({
-                                "type": "output", "data": f"cd: no such directory: {new_dir}\n",
-                            }))
-                    await ws.send_text(json.dumps({
-                        "type": "exit", "code": 0, "cwd": working_dir,
-                    }))
+                            await ws.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "output",
+                                        "data": f"cd: no such directory: {new_dir}\n",
+                                    }
+                                )
+                            )
+                    await ws.send_text(
+                        json.dumps(
+                            {
+                                "type": "exit",
+                                "code": 0,
+                                "cwd": working_dir,
+                            }
+                        )
+                    )
                     continue
 
                 # Run command as subprocess
                 try:
                     current_process = subprocess.Popen(
-                        cmd, shell=True, cwd=working_dir,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        text=True, bufsize=1,
+                        cmd,
+                        shell=True,
+                        cwd=working_dir,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
                         env={**os.environ, "TERM": "dumb", "NO_COLOR": "1"},
                     )
 
                     # Stream output line by line
                     for line in iter(current_process.stdout.readline, ""):
-                        await ws.send_text(json.dumps({
-                            "type": "output", "data": line,
-                        }))
+                        await ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "output",
+                                    "data": line,
+                                }
+                            )
+                        )
 
                     current_process.wait()
                     exit_code = current_process.returncode
 
                 except Exception as e:
-                    await ws.send_text(json.dumps({
-                        "type": "output", "data": f"Error: {e}\n",
-                    }))
+                    await ws.send_text(
+                        json.dumps(
+                            {
+                                "type": "output",
+                                "data": f"Error: {e}\n",
+                            }
+                        )
+                    )
                     exit_code = 1
                 finally:
                     current_process = None
-                    await ws.send_text(json.dumps({
-                        "type": "exit", "code": exit_code, "cwd": working_dir,
-                    }))
+                    await ws.send_text(
+                        json.dumps(
+                            {
+                                "type": "exit",
+                                "code": exit_code,
+                                "cwd": working_dir,
+                            }
+                        )
+                    )
 
             elif msg_type == "kill":
                 if current_process and current_process.poll() is None:
@@ -405,9 +475,14 @@ async def ws_terminal(ws: WebSocket) -> None:
                             current_process.kill()
                         except Exception:
                             pass
-                    await ws.send_text(json.dumps({
-                        "type": "output", "data": "^C\n",
-                    }))
+                    await ws.send_text(
+                        json.dumps(
+                            {
+                                "type": "output",
+                                "data": "^C\n",
+                            }
+                        )
+                    )
 
     except WebSocketDisconnect:
         if current_process and current_process.poll() is None:
@@ -493,6 +568,7 @@ async def save_file(body: dict) -> dict:
 async def run_intake(req: IntakeRequest) -> dict:
     """Run intake analysis. Phase 1: questions. Phase 2 (with answers): plan."""
     import traceback
+
     from openseed_brain.nodes.intake import intake_node
     from openseed_brain.state import initial_state
 
@@ -503,8 +579,7 @@ async def run_intake(req: IntakeRequest) -> dict:
         state["clarification_answers"] = req.clarification_answers
         # Pass question texts so intake can reference them
         state["clarification_questions"] = [
-            q.get("question", q) if isinstance(q, dict) else q
-            for q in req.clarification_questions
+            q.get("question", q) if isinstance(q, dict) else q for q in req.clarification_questions
         ]
 
     try:
@@ -525,6 +600,47 @@ async def run_intake(req: IntakeRequest) -> dict:
     }
 
 
+class HarnessRequest(BaseModel):
+    working_dir: str
+    provider: str = "claude"
+
+
+@app.post("/api/harness/check")
+async def harness_check(req: HarnessRequest) -> dict:
+    """Check harness quality score for a project directory."""
+    from openseed_core.harness.checker import check_harness_quality
+
+    score = check_harness_quality(req.working_dir)
+    return {
+        "total": score.total,
+        "max_score": score.max_score,
+        "passing": score.passing,
+        "details": score.details,
+        "missing": score.missing,
+    }
+
+
+@app.post("/api/harness/setup")
+async def harness_setup(req: HarnessRequest) -> dict:
+    """Explicitly run harness setup for a project directory."""
+    from openseed_brain.nodes.intake import _auto_harness_setup
+    from openseed_core.harness.checker import check_harness_quality
+
+    before = check_harness_quality(req.working_dir)
+    await _auto_harness_setup(req.working_dir, req.provider)
+    after = check_harness_quality(req.working_dir)
+
+    return {
+        "before": before.total,
+        "after": after.total,
+        "passing": after.passing,
+        "missing": after.missing,
+        "files_created": [
+            m for m in after.details.keys() if m not in before.details
+        ],
+    }
+
+
 @app.post("/api/run")
 async def start_run(req: RunRequest) -> dict:
     """Start a pipeline run. Events streamed via WebSocket."""
@@ -536,11 +652,16 @@ async def start_run(req: RunRequest) -> dict:
     _current_run = {"task": req.task, "status": "running", "messages": []}
 
     # Run pipeline in background
-    asyncio.create_task(_execute_pipeline(
-        req.task, req.working_dir, req.config_path, req.provider,
-        clarification_answers=req.clarification_answers,
-        intake_analysis=req.intake_analysis,
-    ))
+    asyncio.create_task(
+        _execute_pipeline(
+            req.task,
+            req.working_dir,
+            req.config_path,
+            req.provider,
+            clarification_answers=req.clarification_answers,
+            intake_analysis=req.intake_analysis,
+        )
+    )
 
     return {"status": "started", "task": req.task}
 
@@ -589,14 +710,21 @@ async def _generate_diagram_bg(working_dir: str, generator: str = "claude", veri
         await _broadcast({"type": "diagram.start", "node": "diagram", "data": {"working_dir": working_dir}})
 
         from openseed_brain.nodes.diagram import generate_diagram
+
         result = await generate_diagram(working_dir, generator=generator, verifier=verifier)
         _diagram_cache[working_dir] = result
 
-        await _broadcast({"type": "diagram.complete", "node": "diagram", "data": {
-            "working_dir": working_dir,
-            "files_scanned": result.get("files_scanned", 0),
-            "has_diagram": bool(result.get("mermaid")),
-        }})
+        await _broadcast(
+            {
+                "type": "diagram.complete",
+                "node": "diagram",
+                "data": {
+                    "working_dir": working_dir,
+                    "files_scanned": result.get("files_scanned", 0),
+                    "has_diagram": bool(result.get("mermaid")),
+                },
+            }
+        )
     except Exception as e:
         _diagram_cache[working_dir] = {"mermaid": "", "error": str(e), "files_scanned": 0}
         await _broadcast({"type": "diagram.fail", "node": "diagram", "data": {"error": str(e)}})
@@ -636,9 +764,13 @@ async def auth_login(body: dict) -> dict:
 
     if provider == "claude":
         from openseed_core.auth.claude import get_claude_cli_path
+
         cli = get_claude_cli_path()
         if not cli:
-            return {"status": "error", "message": "Claude CLI not installed. Run: npm install -g @anthropic-ai/claude-code"}
+            return {
+                "status": "error",
+                "message": "Claude CLI not installed. Run: npm install -g @anthropic-ai/claude-code",
+            }
         try:
             result = subprocess.run([cli, "auth", "login"], capture_output=True, text=True, timeout=60)
             return {"status": "ok" if result.returncode == 0 else "error", "message": result.stdout or result.stderr}
@@ -647,6 +779,7 @@ async def auth_login(body: dict) -> dict:
 
     elif provider == "openai":
         from openseed_core.auth.openai import get_codex_cli_path
+
         cli = get_codex_cli_path()
         if not cli:
             return {"status": "error", "message": "Codex CLI not installed. Run: npm install -g @openai/codex"}
@@ -662,6 +795,7 @@ async def auth_login(body: dict) -> dict:
 @app.get("/api/config")
 async def get_config() -> dict:
     from openseed_core.config import load_config
+
     cfg = load_config()
     return cfg.model_dump()
 
@@ -670,11 +804,13 @@ async def get_config() -> dict:
 async def save_config(body: dict) -> dict:
     """Save config to ~/.openseed/config.yaml."""
     import os
+
     config_dir = os.path.expanduser("~/.openseed")
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, "config.yaml")
 
     import yaml
+
     with open(config_path, "w") as f:
         yaml.safe_dump(body, f, default_flow_style=False, sort_keys=False)
 
@@ -737,7 +873,12 @@ async def resolve_folder(name: str, children: str = "") -> dict:
                     dirnames.clear()
                     continue
                 # Skip hidden dirs and common noise
-                dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in ("node_modules", "__pycache__", ".git", "Library", "Applications")]
+                dirnames[:] = [
+                    d
+                    for d in dirnames
+                    if not d.startswith(".")
+                    and d not in ("node_modules", "__pycache__", ".git", "Library", "Applications")
+                ]
                 for d in dirnames:
                     if d.lower() == folder_name.lower():
                         full = os.path.join(dirpath, d)
@@ -756,7 +897,9 @@ async def resolve_folder(name: str, children: str = "") -> dict:
         try:
             result = subprocess.run(
                 ["mdfind", f"kMDItemFSName == '{folder_name}' && kMDItemContentType == 'public.folder'"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             for line in result.stdout.strip().split("\n"):
                 line = line.strip()
@@ -827,6 +970,7 @@ async def resolve_folder(name: str, children: str = "") -> dict:
 async def browse_folder(path: str = "") -> dict:
     """Browse folders on the server filesystem."""
     import os
+
     target = path or os.path.expanduser("~")
     target = os.path.expanduser(target)
 
@@ -850,15 +994,13 @@ async def browse_folder(path: str = "") -> dict:
 @app.get("/api/memory/search")
 async def search_memory(q: str, limit: int = 10) -> dict:
     from openseed_memory import MemoryStore
+
     store = MemoryStore()
     await store.initialize()
     results = await store.search(q, limit=limit)
     return {
         "query": q,
-        "results": [
-            {"id": r.entry.id, "content": r.entry.content, "score": r.score}
-            for r in results
-        ],
+        "results": [{"id": r.entry.id, "content": r.entry.content, "score": r.score} for r in results],
     }
 
 
@@ -895,18 +1037,22 @@ async def _broadcast(event: dict) -> None:
 
 
 async def _execute_pipeline(
-    task: str, working_dir: str, config_path: str | None,
-    provider: str = "claude", clarification_answers: list[str] | None = None,
+    task: str,
+    working_dir: str,
+    config_path: str | None,
+    provider: str = "claude",
+    clarification_answers: list[str] | None = None,
     intake_analysis: dict[str, Any] | None = None,
 ) -> None:
     """Run the full pipeline with event broadcasting."""
     global _current_run
 
-    from openseed_core.config import load_config
     from openseed_brain import compile_graph, initial_state
 
     # Wire up progress callback so nodes can broadcast sub-step events
     from openseed_brain.progress import set_progress_callback
+    from openseed_core.config import load_config
+
     set_progress_callback(_broadcast)
 
     cfg = load_config(Path(config_path) if config_path else None)
@@ -934,7 +1080,9 @@ async def _execute_pipeline(
                 # Skip non-dict outputs (e.g. LangGraph interrupt tuples)
                 if not isinstance(output, dict):
                     await _broadcast({"type": "node.start", "node": node_name, "data": {}})
-                    await _broadcast({"type": "node.log", "node": node_name, "data": {"message": f"Interrupt: {node_name}"}})
+                    await _broadcast(
+                        {"type": "node.log", "node": node_name, "data": {"message": f"Interrupt: {node_name}"}}
+                    )
                     await _broadcast({"type": "node.complete", "node": node_name, "data": {}})
                     continue
 
@@ -950,47 +1098,79 @@ async def _execute_pipeline(
                 # Broadcast plan details
                 if output.get("plan"):
                     p = output["plan"]
-                    await _broadcast({"type": "node.plan", "node": node_name, "data": {
-                        "summary": p.summary,
-                        "tasks": len(p.tasks),
-                        "files": len(p.file_manifest),
-                        "file_list": [f.path for f in p.file_manifest],
-                    }})
+                    await _broadcast(
+                        {
+                            "type": "node.plan",
+                            "node": node_name,
+                            "data": {
+                                "summary": p.summary,
+                                "tasks": len(p.tasks),
+                                "files": len(p.file_manifest),
+                                "file_list": [f.path for f in p.file_manifest],
+                            },
+                        }
+                    )
 
                 # Broadcast implementation details
                 if output.get("implementation"):
                     impl = output["implementation"]
-                    await _broadcast({"type": "node.implementation", "node": node_name, "data": {
-                        "summary": impl.summary[:500],
-                        "files_created": impl.files_created,
-                        "files_modified": impl.files_modified,
-                    }})
+                    await _broadcast(
+                        {
+                            "type": "node.implementation",
+                            "node": node_name,
+                            "data": {
+                                "summary": impl.summary[:500],
+                                "files_created": impl.files_created,
+                                "files_modified": impl.files_modified,
+                            },
+                        }
+                    )
 
                 # Broadcast QA result
                 if output.get("qa_result"):
                     qa = output["qa_result"]
-                    await _broadcast({"type": "node.qa", "node": node_name, "data": {
-                        "verdict": qa.verdict.value,
-                        "findings": len(qa.findings),
-                        "synthesis": qa.synthesis,
-                    }})
+                    await _broadcast(
+                        {
+                            "type": "node.qa",
+                            "node": node_name,
+                            "data": {
+                                "verdict": qa.verdict.value,
+                                "findings": len(qa.findings),
+                                "synthesis": qa.synthesis,
+                            },
+                        }
+                    )
 
                 # Broadcast deploy result
                 if output.get("deploy_result"):
                     d = output["deploy_result"]
-                    await _broadcast({"type": "node.deploy", "node": node_name, "data": {
-                        "success": d.success,
-                        "channel": d.channel,
-                        "message": d.message,
-                    }})
+                    await _broadcast(
+                        {
+                            "type": "node.deploy",
+                            "node": node_name,
+                            "data": {
+                                "success": d.success,
+                                "channel": d.channel,
+                                "message": d.message,
+                            },
+                        }
+                    )
 
                 # Broadcast retry count
                 if "retry_count" in output:
-                    await _broadcast({"type": "node.retry", "node": node_name, "data": {"retry_count": output["retry_count"]}})
+                    await _broadcast(
+                        {"type": "node.retry", "node": node_name, "data": {"retry_count": output["retry_count"]}}
+                    )
 
                 # Broadcast errors
                 for err in output.get("errors", []):
-                    await _broadcast({"type": "node.error", "node": node_name, "data": {"message": err.message, "severity": err.severity.value}})
+                    await _broadcast(
+                        {
+                            "type": "node.error",
+                            "node": node_name,
+                            "data": {"message": err.message, "severity": err.severity.value},
+                        }
+                    )
 
                 # Node complete
                 await _broadcast({"type": "node.complete", "node": node_name, "data": {}})
