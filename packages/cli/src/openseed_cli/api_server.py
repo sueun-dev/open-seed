@@ -52,7 +52,7 @@ class RunRequest(BaseModel):
     config_path: str | None = None
     provider: str = "claude"  # "claude", "codex", "both"
     clarification_answers: list[str] = []  # Answers to intake questions
-    intake_analysis: dict[str, Any] | None = None  # Plan from Phase 2 (scope, done_when, approach, etc.)
+    intake_analysis: Any = None  # Plan from Phase 2 — can be dict or string from frontend cache
 
 
 class IntakeRequest(BaseModel):
@@ -1090,7 +1090,8 @@ async def _execute_pipeline(
     if clarification_answers:
         state["clarification_answers"] = clarification_answers
     if intake_analysis:
-        state["intake_analysis"] = intake_analysis
+        # Ensure intake_analysis is always a dict (frontend cache can send string)
+        state["intake_analysis"] = intake_analysis if isinstance(intake_analysis, dict) else {}
     graph = compile_graph(
         checkpoint_dir=str(Path(str(cfg.brain.checkpoint_dir)).expanduser()),
         interrupt_on_escalation=False,  # Web UI handles escalation via events, not interrupts
