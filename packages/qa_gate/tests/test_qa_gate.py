@@ -13,11 +13,8 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from openseed_core.types import Finding, QAResult, Severity, Verdict
 from openseed_qa_gate.types import AgentDefinition, SpecialistResult, SynthesisStats
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -100,34 +97,38 @@ class TestSynthesizeWithLLMSuccess:
         """LLM returns valid JSON — findings are parsed and returned."""
         from openseed_qa_gate.synthesizer import synthesize
 
-        llm_response = json.dumps({
-            "verdict": "warn",
-            "summary": "One medium issue found",
-            "findings": [
-                {
-                    "severity": "medium",
-                    "title": "Missing null check",
-                    "description": "Variable x may be None",
-                    "file": "src/foo.py",
-                    "line": 42,
-                    "suggestion": "Add None guard",
-                    "confidence": "high",
-                    "source_agents": ["agent-a"],
-                    "evidence_type": "confirmed",
-                    "conflict_resolution": "",
-                }
-            ],
-            "conflicts_resolved": 0,
-            "false_positives_removed": 0,
-        })
+        llm_response = json.dumps(
+            {
+                "verdict": "warn",
+                "summary": "One medium issue found",
+                "findings": [
+                    {
+                        "severity": "medium",
+                        "title": "Missing null check",
+                        "description": "Variable x may be None",
+                        "file": "src/foo.py",
+                        "line": 42,
+                        "suggestion": "Add None guard",
+                        "confidence": "high",
+                        "source_agents": ["agent-a"],
+                        "evidence_type": "confirmed",
+                        "conflict_resolution": "",
+                    }
+                ],
+                "conflicts_resolved": 0,
+                "false_positives_removed": 0,
+            }
+        )
 
         mock_proc = _make_subprocess_result(stdout=llm_response)
 
         raw_finding = {"severity": "medium", "title": "Missing null check", "description": "Variable x may be None"}
         results = [_make_specialist_result(agent_name="agent-a", findings=[raw_finding])]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, summary, llm_verdict = await synthesize(results)
 
         assert len(findings) == 1
@@ -140,21 +141,25 @@ class TestSynthesizeWithLLMSuccess:
         """Claude sometimes wraps JSON in markdown fences — should still parse."""
         from openseed_qa_gate.synthesizer import synthesize
 
-        inner_json = json.dumps({
-            "verdict": "pass",
-            "summary": "No issues",
-            "findings": [],
-            "conflicts_resolved": 0,
-            "false_positives_removed": 0,
-        })
+        inner_json = json.dumps(
+            {
+                "verdict": "pass",
+                "summary": "No issues",
+                "findings": [],
+                "conflicts_resolved": 0,
+                "false_positives_removed": 0,
+            }
+        )
         wrapped = f"```json\n{inner_json}\n```"
 
         mock_proc = _make_subprocess_result(stdout=wrapped)
         raw_finding = {"severity": "info", "title": "Style note", "description": "Minor style issue"}
         results = [_make_specialist_result(agent_name="agent-a", findings=[raw_finding])]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, summary, llm_verdict = await synthesize(results)
 
         assert findings == []
@@ -165,33 +170,37 @@ class TestSynthesizeWithLLMSuccess:
         """Findings with evidence_type=false_positive must be excluded from output."""
         from openseed_qa_gate.synthesizer import synthesize
 
-        llm_response = json.dumps({
-            "verdict": "pass",
-            "summary": "One false positive filtered",
-            "findings": [
-                {
-                    "severity": "high",
-                    "title": "Looks like SQL injection",
-                    "description": "This is actually parameterised",
-                    "file": "",
-                    "line": None,
-                    "suggestion": "",
-                    "confidence": "low",
-                    "source_agents": ["security-auditor"],
-                    "evidence_type": "false_positive",
-                    "conflict_resolution": "",
-                }
-            ],
-            "conflicts_resolved": 0,
-            "false_positives_removed": 1,
-        })
+        llm_response = json.dumps(
+            {
+                "verdict": "pass",
+                "summary": "One false positive filtered",
+                "findings": [
+                    {
+                        "severity": "high",
+                        "title": "Looks like SQL injection",
+                        "description": "This is actually parameterised",
+                        "file": "",
+                        "line": None,
+                        "suggestion": "",
+                        "confidence": "low",
+                        "source_agents": ["security-auditor"],
+                        "evidence_type": "false_positive",
+                        "conflict_resolution": "",
+                    }
+                ],
+                "conflicts_resolved": 0,
+                "false_positives_removed": 1,
+            }
+        )
 
         mock_proc = _make_subprocess_result(stdout=llm_response)
         raw_finding = {"severity": "high", "title": "Looks like SQL injection", "description": "..."}
         results = [_make_specialist_result(agent_name="security-auditor", findings=[raw_finding])]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, summary, llm_verdict = await synthesize(results)
 
         assert findings == []
@@ -201,38 +210,64 @@ class TestSynthesizeWithLLMSuccess:
         """Output findings must be sorted critical → info."""
         from openseed_qa_gate.synthesizer import synthesize
 
-        llm_response = json.dumps({
-            "verdict": "block",
-            "summary": "Critical issue found",
-            "findings": [
-                {
-                    "severity": "info", "title": "Info note", "description": "...",
-                    "file": "", "line": None, "suggestion": "", "confidence": "high",
-                    "source_agents": ["agent-a"], "evidence_type": "confirmed",
-                    "conflict_resolution": "",
-                },
-                {
-                    "severity": "critical", "title": "Critical bug", "description": "...",
-                    "file": "", "line": None, "suggestion": "", "confidence": "high",
-                    "source_agents": ["agent-a"], "evidence_type": "confirmed",
-                    "conflict_resolution": "",
-                },
-                {
-                    "severity": "medium", "title": "Medium issue", "description": "...",
-                    "file": "", "line": None, "suggestion": "", "confidence": "medium",
-                    "source_agents": ["agent-a"], "evidence_type": "confirmed",
-                    "conflict_resolution": "",
-                },
-            ],
-            "conflicts_resolved": 0,
-            "false_positives_removed": 0,
-        })
+        llm_response = json.dumps(
+            {
+                "verdict": "block",
+                "summary": "Critical issue found",
+                "findings": [
+                    {
+                        "severity": "info",
+                        "title": "Info note",
+                        "description": "...",
+                        "file": "",
+                        "line": None,
+                        "suggestion": "",
+                        "confidence": "high",
+                        "source_agents": ["agent-a"],
+                        "evidence_type": "confirmed",
+                        "conflict_resolution": "",
+                    },
+                    {
+                        "severity": "critical",
+                        "title": "Critical bug",
+                        "description": "...",
+                        "file": "",
+                        "line": None,
+                        "suggestion": "",
+                        "confidence": "high",
+                        "source_agents": ["agent-a"],
+                        "evidence_type": "confirmed",
+                        "conflict_resolution": "",
+                    },
+                    {
+                        "severity": "medium",
+                        "title": "Medium issue",
+                        "description": "...",
+                        "file": "",
+                        "line": None,
+                        "suggestion": "",
+                        "confidence": "medium",
+                        "source_agents": ["agent-a"],
+                        "evidence_type": "confirmed",
+                        "conflict_resolution": "",
+                    },
+                ],
+                "conflicts_resolved": 0,
+                "false_positives_removed": 0,
+            }
+        )
 
         mock_proc = _make_subprocess_result(stdout=llm_response)
-        results = [_make_specialist_result(agent_name="agent-a", findings=[{"severity": "info", "title": "x", "description": "y"}])]
+        results = [
+            _make_specialist_result(
+                agent_name="agent-a", findings=[{"severity": "info", "title": "x", "description": "y"}]
+            )
+        ]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, _, llm_verdict = await synthesize(results)
 
         assert len(findings) == 3
@@ -254,8 +289,14 @@ class TestSynthesizeFallback:
             )
         ]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("subprocess failed")), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch(
+                "openseed_core.subprocess.run_streaming",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("subprocess failed"),
+            ),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, summary, llm_verdict = await synthesize(results)
 
         # Fallback path should still return the finding
@@ -276,8 +317,10 @@ class TestSynthesizeFallback:
             )
         ]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, summary, llm_verdict = await synthesize(results)
 
         assert len(findings) == 1
@@ -296,8 +339,10 @@ class TestSynthesizeFallback:
             )
         ]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, summary, llm_verdict = await synthesize(results)
 
         assert len(findings) >= 1
@@ -315,8 +360,10 @@ class TestSynthesizeDeduplicate:
             _make_specialist_result(agent_name="agent-a", findings=[dup_finding, dup_finding]),
         ]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, _, _ = await synthesize(results)
 
         # After dedup, the same finding should appear only once
@@ -331,8 +378,10 @@ class TestSynthesizeDeduplicate:
         f2 = {"severity": "low", "title": "Style issue", "description": "x", "file": "b.py", "line": 1}
         results = [_make_specialist_result(agent_name="agent-a", findings=[f1, f2])]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, _, _ = await synthesize(results)
 
         assert len(findings) == 2
@@ -347,8 +396,10 @@ class TestSynthesizeAgentFailures:
             _make_specialist_result(agent_name="broken-agent", success=False, error="Connection refused"),
         ]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, summary, _ = await synthesize(results)
 
         # The fallback should have normalised the failure finding
@@ -369,8 +420,10 @@ class TestSynthesizeAgentFailures:
             _make_specialist_result(agent_name="bad-agent", success=False, error="Timeout"),
         ]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             findings, _, _ = await synthesize(results)
 
         titles = {f.title for f in findings}
@@ -432,12 +485,16 @@ class TestSynthesizeConflictResolution:
         results = [
             _make_specialist_result(
                 agent_name="agent-low",
-                findings=[{"severity": "low", "title": "SQL query", "description": "Possibly slow", "confidence": "high"}],
+                findings=[
+                    {"severity": "low", "title": "SQL query", "description": "Possibly slow", "confidence": "high"}
+                ],
                 agent_description="Performance reviewer",
             ),
             _make_specialist_result(
                 agent_name="agent-high",
-                findings=[{"severity": "high", "title": "SQL query", "description": "N+1 problem", "confidence": "high"}],
+                findings=[
+                    {"severity": "high", "title": "SQL query", "description": "N+1 problem", "confidence": "high"}
+                ],
                 agent_description="Security reviewer",
             ),
         ]
@@ -449,8 +506,10 @@ class TestSynthesizeConflictResolution:
             # Simulate no JSON returned to trigger fallback
             raise RuntimeError("no claude")
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=fake_run), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=fake_run),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             await synthesize(results)  # returns 3-tuple but we only care about the prompt
 
         # The prompt (last element of cmd) should contain both agent names
@@ -493,8 +552,10 @@ class TestSelectAgentsLLMSelectsSubset:
         llm_response = json.dumps(["agent-1", "agent-3"])
         mock_proc = _make_subprocess_result(stdout=llm_response)
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             result = await select_agents("task", "summary", agents, max_agents=3)
 
         assert len(result) == 2
@@ -509,8 +570,10 @@ class TestSelectAgentsLLMSelectsSubset:
         llm_response = json.dumps([f"agent-{i}" for i in range(8)])
         mock_proc = _make_subprocess_result(stdout=llm_response)
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             result = await select_agents("task", "summary", agents, max_agents=3)
 
         assert len(result) == 3
@@ -523,8 +586,12 @@ class TestSelectAgentsFallback:
 
         agents = [_make_agent(name=f"agent-{i}") for i in range(6)]
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("timeout")), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch(
+                "openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("timeout")
+            ),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             result = await select_agents("task", "summary", agents, max_agents=3)
 
         # Fallback: all 6 agents returned
@@ -537,8 +604,10 @@ class TestSelectAgentsFallback:
         agents = [_make_agent(name=f"agent-{i}") for i in range(6)]
         mock_proc = _make_subprocess_result(stdout="", timed_out=True)
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             result = await select_agents("task", "summary", agents, max_agents=3)
 
         assert result == agents
@@ -554,8 +623,10 @@ class TestSelectAgentsValidatesNames:
         llm_response = json.dumps(["real-agent", "hallucinated-agent", "also-fake"])
         mock_proc = _make_subprocess_result(stdout=llm_response)
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             result = await select_agents("task", "summary", agents, max_agents=1)
 
         assert len(result) == 1
@@ -569,8 +640,10 @@ class TestSelectAgentsValidatesNames:
         llm_response = json.dumps(["fake-1", "fake-2"])
         mock_proc = _make_subprocess_result(stdout=llm_response)
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
             result = await select_agents("task", "summary", agents, max_agents=5)
 
         # Should fall back to returning all agents
@@ -674,8 +747,8 @@ class TestResolveVerdict:
 class TestRunQAGateFullFlow:
     async def test_run_qa_gate_full_flow(self):
         """Full integration: load agents → select → run specialists → synthesize → verdict."""
-        from openseed_qa_gate.gate import run_qa_gate
         from openseed_core.config import QAGateConfig
+        from openseed_qa_gate.gate import run_qa_gate
 
         agent = _make_agent(name="reviewer")
         specialist_result = _make_specialist_result(
@@ -683,14 +756,20 @@ class TestRunQAGateFullFlow:
             findings=[{"severity": "low", "title": "Minor style", "description": "A style issue"}],
         )
 
-        with patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]), \
-             patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]), \
-             patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=specialist_result), \
-             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=(
-                 [Finding(severity=Severity.LOW, title="Minor style", description="A style issue")],
-                 "1 finding (low)",
-                 "pass",
-             )):
+        with (
+            patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]),
+            patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]),
+            patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=specialist_result),
+            patch(
+                "openseed_qa_gate.gate.synthesize",
+                new_callable=AsyncMock,
+                return_value=(
+                    [Finding(severity=Severity.LOW, title="Minor style", description="A style issue")],
+                    "1 finding (low)",
+                    "pass",
+                ),
+            ),
+        ):
             cfg = QAGateConfig(active_agents=["reviewer"])
             result = await run_qa_gate("Review this code", "/tmp/project", config=cfg)
 
@@ -701,8 +780,8 @@ class TestRunQAGateFullFlow:
 
     async def test_run_qa_gate_no_agents(self):
         """When no agents are loaded, return WARN with empty findings."""
-        from openseed_qa_gate.gate import run_qa_gate
         from openseed_core.config import QAGateConfig
+        from openseed_qa_gate.gate import run_qa_gate
 
         with patch("openseed_qa_gate.gate.load_active_agents", return_value=[]):
             cfg = QAGateConfig(active_agents=[])
@@ -715,8 +794,8 @@ class TestRunQAGateFullFlow:
 
     async def test_run_qa_gate_blocks_on_critical(self):
         """Critical finding from specialist causes BLOCK verdict."""
-        from openseed_qa_gate.gate import run_qa_gate
         from openseed_core.config import QAGateConfig
+        from openseed_qa_gate.gate import run_qa_gate
 
         agent = _make_agent(name="security-auditor")
         specialist_result = _make_specialist_result(
@@ -725,12 +804,16 @@ class TestRunQAGateFullFlow:
         )
         critical_finding = Finding(severity=Severity.CRITICAL, title="RCE", description="Remote code execution")
 
-        with patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]), \
-             patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]), \
-             patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=specialist_result), \
-             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=(
-                 [critical_finding], "Critical: RCE found", "block"
-             )):
+        with (
+            patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]),
+            patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]),
+            patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=specialist_result),
+            patch(
+                "openseed_qa_gate.gate.synthesize",
+                new_callable=AsyncMock,
+                return_value=([critical_finding], "Critical: RCE found", "block"),
+            ),
+        ):
             cfg = QAGateConfig(active_agents=["security-auditor"], block_on_critical=True)
             result = await run_qa_gate("Review auth code", "/tmp/project", config=cfg)
 
@@ -738,16 +821,18 @@ class TestRunQAGateFullFlow:
 
     async def test_run_qa_gate_specialist_exception_handled(self):
         """If a specialist raises an exception (via gather), it is wrapped in SpecialistResult."""
-        from openseed_qa_gate.gate import run_qa_gate
         from openseed_core.config import QAGateConfig
+        from openseed_qa_gate.gate import run_qa_gate
 
         agent = _make_agent(name="flaky-agent")
 
         # run_specialist raises instead of returning
-        with patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]), \
-             patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]), \
-             patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, side_effect=RuntimeError("crashed")), \
-             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "0 findings", "pass")):
+        with (
+            patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]),
+            patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]),
+            patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, side_effect=RuntimeError("crashed")),
+            patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "0 findings", "pass")),
+        ):
             cfg = QAGateConfig(active_agents=["flaky-agent"])
             result = await run_qa_gate("task", "/tmp/project", config=cfg)
 
@@ -757,15 +842,19 @@ class TestRunQAGateFullFlow:
 
     async def test_run_qa_gate_duration_ms_populated(self):
         """duration_ms in QAResult should be a positive integer."""
-        from openseed_qa_gate.gate import run_qa_gate
         from openseed_core.config import QAGateConfig
+        from openseed_qa_gate.gate import run_qa_gate
 
         agent = _make_agent(name="reviewer")
 
-        with patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]), \
-             patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]), \
-             patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=_make_specialist_result()), \
-             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "No issues", "pass")):
+        with (
+            patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]),
+            patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]),
+            patch(
+                "openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=_make_specialist_result()
+            ),
+            patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "No issues", "pass")),
+        ):
             cfg = QAGateConfig(active_agents=["reviewer"])
             result = await run_qa_gate("task", "/tmp/project", config=cfg)
 

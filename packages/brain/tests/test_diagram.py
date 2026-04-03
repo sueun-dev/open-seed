@@ -1,19 +1,14 @@
 """Tests for diagram node — file scanning, cycle detection, URL generation."""
 
 import os
-import json
-import tempfile
-
-import pytest
 
 from openseed_brain.nodes.diagram import (
-    scan_project_files,
-    fix_mermaid_cycles,
-    create_mermaid_url,
     _extract_mermaid,
     _smart_truncate,
+    create_mermaid_url,
+    fix_mermaid_cycles,
+    scan_project_files,
 )
-
 
 # ─── scan_project_files ─────────────────────────────────────────────────────
 

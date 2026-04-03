@@ -23,9 +23,8 @@ from openseed_core.auth.claude import require_claude_auth
 from openseed_core.config import SentinelConfig
 from openseed_core.events import EventBus, EventType
 from openseed_core.subprocess import run_streaming
+
 from openseed_guard.evidence import (
-    auto_detect_test_commands,
-    verify_files_exist,
     verify_implementation,
 )
 from openseed_guard.prompts import (
@@ -39,6 +38,7 @@ from openseed_guard.prompts import (
 @dataclass
 class ExecutionResult:
     """Result of the full 7-step execution loop."""
+
     success: bool
     summary: str
     steps_completed: list[str]
@@ -67,8 +67,10 @@ async def _call_claude(
             cli_path,
             "--print",
             "--dangerously-skip-permissions",
-            "--model", model,
-            "--max-turns", "1",
+            "--model",
+            model,
+            "--max-turns",
+            "1",
             prompt,
         ],
         timeout_seconds=timeout_seconds,
@@ -84,7 +86,7 @@ def _parse_json_from_text(text: str) -> dict[str, Any]:
     end = text.rfind("}")
     if start != -1 and end > start:
         try:
-            return json.loads(text[start:end + 1])
+            return json.loads(text[start : end + 1])
         except (json.JSONDecodeError, ValueError):
             pass
     return {}
@@ -116,9 +118,7 @@ class ExecutionLoop:
         self.config = config or SentinelConfig()
         self.event_bus = event_bus
         self.model = model
-        self._model_family: ModelFamily = (
-            detect_model_family(model) if model else ModelFamily.CLAUDE
-        )
+        self._model_family: ModelFamily = detect_model_family(model) if model else ModelFamily.CLAUDE
         self._prompt_variant: PromptVariant = get_prompt_variant(self._model_family)
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -164,7 +164,8 @@ class ExecutionLoop:
 
         # ── Step 3.5: SECURITY PRE-VALIDATION (OpenHands pattern) ──────────
         try:
-            from openseed_guard.security import assess_risk, SecurityRisk
+            from openseed_guard.security import assess_risk
+
             security = await assess_risk(
                 plan_summary=plan.get("summary", ""),
                 files=plan.get("files_to_create", []),
@@ -172,8 +173,10 @@ class ExecutionLoop:
                 task=task,
             )
             await self._emit(
-                EventType.SECURITY_CHECK, node="security",
-                risk=security.risk.value, reason=security.reason[:200],
+                EventType.SECURITY_CHECK,
+                node="security",
+                risk=security.risk.value,
+                reason=security.reason[:200],
             )
             if security.requires_approval:
                 # HIGH risk — abort the loop and escalate to user
@@ -252,13 +255,12 @@ class ExecutionLoop:
         memory_context = ""
         try:
             from openseed_memory.store import MemoryStore
+
             store = MemoryStore()
             await store.initialize()
             results = await store.search(task, limit=5)
             if results:
-                memory_context = "\nPast experiences:\n" + "\n".join(
-                    f"- {r.entry.content[:200]}" for r in results
-                )
+                memory_context = "\nPast experiences:\n" + "\n".join(f"- {r.entry.content[:200]}" for r in results)
         except Exception:
             pass
 

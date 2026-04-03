@@ -10,6 +10,7 @@ from typing import Any
 @dataclass
 class DeployTarget:
     """A deployment target channel."""
+
     channel: str  # "git", "npm", "docker", "webhook"
     config: dict[str, Any] = field(default_factory=dict)
 
@@ -17,6 +18,7 @@ class DeployTarget:
 @dataclass
 class ChannelResult:
     """Result from a single deploy channel."""
+
     channel: str
     success: bool
     message: str = ""
@@ -27,6 +29,7 @@ class ChannelResult:
 @dataclass
 class CronJob:
     """A scheduled recurring task."""
+
     id: str
     name: str
     schedule: str  # cron expression or "every(5m)"

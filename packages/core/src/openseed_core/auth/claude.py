@@ -7,6 +7,7 @@ and has valid OAuth. The CLI handles all auth internally.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -23,6 +24,39 @@ class ClaudeAuthStatus:
     error: str | None = None
 
 
+def _is_executable_file(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def _npm_global_prefixes() -> list[str]:
+    prefixes: list[str] = []
+
+    for key in ("NPM_CONFIG_PREFIX", "npm_config_prefix"):
+        prefix = os.environ.get(key)
+        if prefix:
+            prefixes.append(prefix)
+
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        return prefixes
+
+    try:
+        result = subprocess.run(
+            [npm_path, "config", "get", "prefix"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return prefixes
+
+    prefix = result.stdout.strip()
+    if result.returncode == 0 and prefix and prefix != "undefined":
+        prefixes.append(prefix)
+
+    return prefixes
+
+
 def get_claude_cli_path() -> str | None:
     """
     Find the Claude CLI binary.
@@ -37,14 +71,18 @@ def get_claude_cli_path() -> str | None:
         return path
 
     # 2. Common locations
-    import os
     candidates = [
         os.path.expanduser("~/.npm/bin/claude"),
         "/usr/local/bin/claude",
         "/opt/homebrew/bin/claude",
     ]
+
+    # 3. Custom global npm prefixes (common in GUI apps without shell PATH)
+    for prefix in _npm_global_prefixes():
+        candidates.append(os.path.join(prefix, "bin", "claude"))
+
     for candidate in candidates:
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        if _is_executable_file(candidate):
             return candidate
 
     return None

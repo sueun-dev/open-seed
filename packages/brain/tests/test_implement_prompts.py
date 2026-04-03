@@ -10,18 +10,12 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
-
 from openseed_brain.nodes.implement import (
     _build_action_instruction,
     _build_intake_context,
     _build_rules,
     _resolve_max_turns,
-    _RULES_CORE,
-    _RULES_WEB,
-    _RULES_FIX,
 )
-
 
 # ─── _build_action_instruction ──────────────────────────────────────────────
 
@@ -45,18 +39,22 @@ class TestBuildActionInstruction:
         assert "Evaluate" in result
 
     def test_existing_project_implementation(self):
-        result = _build_action_instruction({
-            "intent": "implementation",
-            "existing_project": "yes",
-        })
+        result = _build_action_instruction(
+            {
+                "intent": "implementation",
+                "existing_project": "yes",
+            }
+        )
         assert "existing project" in result.lower()
         assert "Read" in result
 
     def test_new_project_implementation(self):
-        result = _build_action_instruction({
-            "intent": "implementation",
-            "existing_project": "no",
-        })
+        result = _build_action_instruction(
+            {
+                "intent": "implementation",
+                "existing_project": "no",
+            }
+        )
         assert "from scratch" in result.lower()
         assert "ALL files" in result
 
@@ -70,10 +68,12 @@ class TestBuildActionInstruction:
 
     def test_fix_ignores_existing_project_flag(self):
         """Fix intent should always return fix instruction, regardless of existing_project."""
-        result = _build_action_instruction({
-            "intent": "fix",
-            "existing_project": "no",
-        })
+        result = _build_action_instruction(
+            {
+                "intent": "fix",
+                "existing_project": "no",
+            }
+        )
         assert "Fix this issue" in result
 
 
@@ -82,23 +82,29 @@ class TestBuildActionInstruction:
 
 class TestBuildIntakeContext:
     def test_requirements_only(self):
-        result = _build_intake_context({
-            "requirements": ["Add login page", "Use OAuth"],
-        })
+        result = _build_intake_context(
+            {
+                "requirements": ["Add login page", "Use OAuth"],
+            }
+        )
         assert "Requirements:" in result
         assert "- Add login page" in result
         assert "- Use OAuth" in result
 
     def test_approach_only(self):
-        result = _build_intake_context({
-            "approach": "Modify auth.ts to add the endpoint",
-        })
+        result = _build_intake_context(
+            {
+                "approach": "Modify auth.ts to add the endpoint",
+            }
+        )
         assert "Approach: Modify auth.ts" in result
 
     def test_lessons_only(self):
-        result = _build_intake_context({
-            "lessons": "Similar bug last week — null guard missing",
-        })
+        result = _build_intake_context(
+            {
+                "lessons": "Similar bug last week — null guard missing",
+            }
+        )
         assert "Lessons from past" in result
         assert "null guard" in result
 
@@ -111,11 +117,13 @@ class TestBuildIntakeContext:
         assert result == ""
 
     def test_all_fields(self):
-        result = _build_intake_context({
-            "requirements": ["Fix bug"],
-            "approach": "Check null guard",
-            "lessons": "Happened before in auth module",
-        })
+        result = _build_intake_context(
+            {
+                "requirements": ["Fix bug"],
+                "approach": "Check null guard",
+                "lessons": "Happened before in auth module",
+            }
+        )
         assert "Requirements:" in result
         assert "Approach:" in result
         assert "Lessons from past" in result

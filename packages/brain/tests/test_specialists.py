@@ -13,24 +13,22 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from openseed_brain.specialists import (
     SPECIALIST_PROMPTS,
     VALID_DOMAINS,
     get_specialist_prompt,
     list_domains,
 )
+from openseed_brain.state import initial_state
 from openseed_brain.task_router import (
     _parse_routing_response,
     route_tasks,
 )
-from openseed_brain.state import initial_state
 from openseed_core.types import (
     FileEntry,
     Plan,
     PlanTask,
 )
-
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -172,10 +170,12 @@ class TestRoutingParser:
             _make_task("T1", "Build login page", ["src/Login.tsx"]),
             _make_task("T2", "Create user API", ["src/api/users.py"]),
         ]
-        text = json.dumps([
-            {"task_id": "T1", "domain": "frontend"},
-            {"task_id": "T2", "domain": "backend"},
-        ])
+        text = json.dumps(
+            [
+                {"task_id": "T1", "domain": "frontend"},
+                {"task_id": "T2", "domain": "backend"},
+            ]
+        )
 
         result = _parse_routing_response(text, tasks)
 
@@ -259,10 +259,14 @@ class TestRouteTasksLLM:
             ],
         )
 
-        mock_response = _mock_claude_response(json.dumps([
-            {"task_id": "T1", "domain": "frontend"},
-            {"task_id": "T2", "domain": "frontend"},
-        ]))
+        mock_response = _mock_claude_response(
+            json.dumps(
+                [
+                    {"task_id": "T1", "domain": "frontend"},
+                    {"task_id": "T2", "domain": "frontend"},
+                ]
+            )
+        )
 
         with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
@@ -285,12 +289,16 @@ class TestRouteTasksLLM:
             ],
         )
 
-        mock_response = _mock_claude_response(json.dumps([
-            {"task_id": "T1", "domain": "frontend"},
-            {"task_id": "T2", "domain": "backend"},
-            {"task_id": "T3", "domain": "database"},
-            {"task_id": "T4", "domain": "infra"},
-        ]))
+        mock_response = _mock_claude_response(
+            json.dumps(
+                [
+                    {"task_id": "T1", "domain": "frontend"},
+                    {"task_id": "T2", "domain": "backend"},
+                    {"task_id": "T3", "domain": "database"},
+                    {"task_id": "T4", "domain": "infra"},
+                ]
+            )
+        )
 
         with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
@@ -313,10 +321,14 @@ class TestRouteTasksLLM:
             ],
         )
 
-        mock_response = _mock_claude_response(json.dumps([
-            {"task_id": "T1", "domain": "backend"},
-            {"task_id": "T2", "domain": "backend"},
-        ]))
+        mock_response = _mock_claude_response(
+            json.dumps(
+                [
+                    {"task_id": "T1", "domain": "backend"},
+                    {"task_id": "T2", "domain": "backend"},
+                ]
+            )
+        )
 
         with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
@@ -338,9 +350,7 @@ class TestRouteTasksLLM:
         """Routing should use Haiku for speed and cost efficiency."""
         plan = _make_plan(tasks=[_make_task("T1", "Build something")])
 
-        mock_response = _mock_claude_response(
-            json.dumps([{"task_id": "T1", "domain": "fullstack"}])
-        )
+        mock_response = _mock_claude_response(json.dumps([{"task_id": "T1", "domain": "fullstack"}]))
 
         with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
             mock_invoke = AsyncMock(return_value=mock_response)
@@ -416,7 +426,7 @@ class TestImplementNode:
         }
 
         mock_specialist_response = _mock_claude_response("Implemented the code.")
-        mock_integration_response = _mock_claude_response("Everything looks good.")
+        _mock_claude_response("Everything looks good.")
 
         with (
             patch("openseed_brain.task_router.route_tasks", new_callable=AsyncMock) as mock_router,

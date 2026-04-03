@@ -17,6 +17,7 @@ from datetime import datetime
 @dataclass
 class LLMCallMetric:
     """A single LLM invocation metric."""
+
     model: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -34,6 +35,7 @@ class Metrics:
     Tracks cumulative cost, tokens, and latency across all LLM calls.
     Supports snapshot/diff for measuring per-phase cost.
     """
+
     total_cost_usd: float = 0.0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -67,14 +69,16 @@ class Metrics:
         self.total_cost_usd += cost_usd
         self.total_latency_ms += latency_ms
         self.llm_calls += 1
-        self.calls.append(LLMCallMetric(
-            model=model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cost_usd=cost_usd,
-            latency_ms=latency_ms,
-            node=node,
-        ))
+        self.calls.append(
+            LLMCallMetric(
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost_usd=cost_usd,
+                latency_ms=latency_ms,
+                node=node,
+            )
+        )
 
     def merge(self, other: Metrics) -> Metrics:
         """Merge another Metrics into a new combined Metrics (non-mutating)."""
@@ -103,7 +107,7 @@ class Metrics:
             cache_write_tokens=self.cache_write_tokens - before.cache_write_tokens,
             llm_calls=self.llm_calls - before.llm_calls,
             total_latency_ms=self.total_latency_ms - before.total_latency_ms,
-            calls=self.calls[len(before.calls):],
+            calls=self.calls[len(before.calls) :],
         )
 
     def summary(self) -> str:

@@ -10,24 +10,27 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # ─── Content Block Types ─────────────────────────────────────────────────────
+
 
 @dataclass
 class TextBlock:
     """Plain text content from the assistant."""
+
     text: str
 
 
 @dataclass
 class ThinkingBlock:
     """Extended thinking content (requires thinking_budget > 0)."""
+
     thinking: str
 
 
 @dataclass
 class ToolUseBlock:
     """A tool invocation by the assistant."""
+
     tool_id: str
     tool_name: str
     input: dict[str, Any]
@@ -36,6 +39,7 @@ class ToolUseBlock:
 @dataclass
 class ToolResultBlock:
     """The result returned from a tool call."""
+
     tool_use_id: str
     content: str
     is_error: bool = False
@@ -46,9 +50,11 @@ ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock
 
 # ─── Usage & Cost Types ───────────────────────────────────────────────────────
 
+
 @dataclass
 class UsageStats:
     """Token usage statistics from a Claude invocation."""
+
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
@@ -66,6 +72,7 @@ class CostEstimate:
     Note: When using OAuth (Pro/Team/Enterprise plan), the actual cost is $0
     within your included usage. These estimates are for budget awareness only.
     """
+
     input_cost: float = 0.0
     output_cost: float = 0.0
     total_cost: float = 0.0
@@ -115,9 +122,11 @@ def estimate_cost(usage: UsageStats, model: str) -> CostEstimate:
 
 # ─── Structured Response ─────────────────────────────────────────────────────
 
+
 @dataclass
 class StructuredResponse:
     """Parsed, structured output from a Claude CLI invocation."""
+
     text: str = ""
     thinking: str = ""
     tool_uses: list[ToolUseBlock] = field(default_factory=list)

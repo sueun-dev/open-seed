@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 
-from openseed_memory.types import SearchResult
+if TYPE_CHECKING:
+    from openseed_memory.types import SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ class Reranker:
             return self._cli_path
         try:
             from openseed_core.auth.claude import get_claude_cli_path
+
             return get_claude_cli_path()
         except Exception:
             return None
@@ -59,9 +62,7 @@ class Reranker:
         if not cli:
             return results
 
-        memories_text = "\n".join(
-            f"[{r.entry.id}] {r.entry.content[:300]}" for r in results
-        )
+        memories_text = "\n".join(f"[{r.entry.id}] {r.entry.content[:300]}" for r in results)
 
         prompt = _RERANK_PROMPT.format(
             query=query[:500],
@@ -72,13 +73,16 @@ class Reranker:
             cli,
             "--print",
             "--dangerously-skip-permissions",
-            "--model", self._model,
-            "--max-turns", "1",
+            "--model",
+            self._model,
+            "--max-turns",
+            "1",
             prompt,
         ]
 
         try:
             from openseed_core.subprocess import run_streaming
+
             result = await run_streaming(cmd, timeout_seconds=30)
             raw_output = result.stdout.strip()
         except Exception as exc:

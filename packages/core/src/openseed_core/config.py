@@ -15,7 +15,6 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field
 
-
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
 
@@ -62,15 +61,17 @@ class CodexConfig(BaseModel):
 
 class QAGateConfig(BaseModel):
     agents_dir: Path = Path("config/agents")
-    active_agents: list[str] = Field(default_factory=lambda: [
-        "reviewer",
-        "security-auditor",
-        "test-automator",
-        "performance-engineer",
-        "code-reviewer",
-        "architect-reviewer",
-        "qa-expert",
-    ])
+    active_agents: list[str] = Field(
+        default_factory=lambda: [
+            "reviewer",
+            "security-auditor",
+            "test-automator",
+            "performance-engineer",
+            "code-reviewer",
+            "architect-reviewer",
+            "qa-expert",
+        ]
+    )
     synthesizer: str = "knowledge-synthesizer"
     block_on_critical: bool = True
     max_parallel_agents: int = 6

@@ -18,7 +18,7 @@ def serve_cmd(host: str, port: int, reload: bool) -> None:
     """Start the API server for web UI and webhooks."""
     import uvicorn
 
-    console.print(f"[bold blue]Open Seed API Server[/bold blue]")
+    console.print("[bold blue]Open Seed API Server[/bold blue]")
     console.print(f"  http://{host}:{port}")
     console.print(f"  WebSocket: ws://{host}:{port}/ws/events")
     console.print()

@@ -9,13 +9,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from openseed_guard.stuck_detector import (
-    StuckAnalysis,
     _has_alternating_pattern,
     detect_stuck,
 )
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -135,9 +132,12 @@ class TestAlternatingPattern:
     @pytest.mark.asyncio
     async def test_alternating_steps_detected(self) -> None:
         steps = [
-            _step("pass"), _step("fail"),
-            _step("pass"), _step("fail"),
-            _step("pass"), _step("fail"),
+            _step("pass"),
+            _step("fail"),
+            _step("pass"),
+            _step("fail"),
+            _step("pass"),
+            _step("fail"),
         ]
         # Mock the LLM suggestion
         with patch(

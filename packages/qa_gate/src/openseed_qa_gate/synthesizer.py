@@ -26,6 +26,7 @@ import json
 import logging
 
 from openseed_core.types import Finding, Severity
+
 from openseed_qa_gate.types import SpecialistResult, SynthesisStats
 
 logger = logging.getLogger(__name__)
@@ -57,13 +58,15 @@ async def synthesize(
     for result in results:
         if not result.success:
             stats.agents_failed += 1
-            all_raw.append({
-                "agent": result.agent_name,
-                "severity": "info",
-                "title": "Agent failed",
-                "description": result.error or "Unknown error",
-                "confidence": "low",
-            })
+            all_raw.append(
+                {
+                    "agent": result.agent_name,
+                    "severity": "info",
+                    "title": "Agent failed",
+                    "description": result.error or "Unknown error",
+                    "confidence": "low",
+                }
+            )
             continue
 
         stats.agents_succeeded += 1
@@ -88,6 +91,7 @@ async def synthesize(
         if event_bus:
             try:
                 from openseed_core.events import EventType
+
                 await event_bus.emit_simple(
                     EventType.QA_SYNTHESIS_COMPLETE,
                     node="qa_gate",
@@ -123,12 +127,8 @@ async def synthesize(
     for f in deduped:
         counts[f.severity] = counts.get(f.severity, 0) + 1
 
-    summary = (
-        f"{len(deduped)} findings (basic dedup, LLM unavailable) — "
-        + ", ".join(
-            f"{s.value}: {c}"
-            for s, c in sorted(counts.items(), key=lambda x: severity_order.get(x[0], 5))
-        )
+    summary = f"{len(deduped)} findings (basic dedup, LLM unavailable) — " + ", ".join(
+        f"{s.value}: {c}" for s, c in sorted(counts.items(), key=lambda x: severity_order.get(x[0], 5))
     )
     return deduped, summary, None
 
@@ -145,8 +145,8 @@ async def _synthesize_with_llm(
     - Resolve conflicts, detect false positives
     - Return decision-oriented synthesis with traceability
     """
-    from openseed_core.subprocess import run_streaming
     from openseed_core.auth.claude import require_claude_auth
+    from openseed_core.subprocess import run_streaming
 
     cli = require_claude_auth()
 
@@ -236,8 +236,10 @@ Output ONLY valid JSON, no markdown, no explanation outside the JSON:
         cli,
         "--print",
         "--dangerously-skip-permissions",
-        "--model", "claude-sonnet-4-6",
-        "--max-turns", "1",
+        "--model",
+        "claude-sonnet-4-6",
+        "--max-turns",
+        "1",
         prompt,
     ]
 
@@ -246,9 +248,7 @@ Output ONLY valid JSON, no markdown, no explanation outside the JSON:
     if proc_result.timed_out:
         raise RuntimeError("Claude synthesis timed out after 120s")
     if proc_result.exit_code != 0 and not proc_result.stdout.strip():
-        raise RuntimeError(
-            f"Claude synthesis failed (exit {proc_result.exit_code}): {proc_result.stderr[:300]}"
-        )
+        raise RuntimeError(f"Claude synthesis failed (exit {proc_result.exit_code}): {proc_result.stderr[:300]}")
 
     raw_text = proc_result.stdout.strip()
 
@@ -258,7 +258,7 @@ Output ONLY valid JSON, no markdown, no explanation outside the JSON:
     if start == -1 or end <= start:
         raise RuntimeError(f"No JSON object found in Claude response: {raw_text[:300]}")
 
-    data = json.loads(raw_text[start:end + 1])
+    data = json.loads(raw_text[start : end + 1])
 
     findings: list[Finding] = []
     for raw_f in data.get("findings", []):

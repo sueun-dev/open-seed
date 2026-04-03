@@ -13,16 +13,14 @@ Categories:
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from openseed_core.config import MemoryConfig
 from openseed_memory.backends.sqlite import SQLiteMemoryBackend
 from openseed_memory.fact_extractor import FactExtractor, MemoryDecision
-from openseed_memory.failure import record_failure, recall_similar_failures
+from openseed_memory.failure import recall_similar_failures, record_failure
 from openseed_memory.procedural import (
     recall_fix_strategies,
     recall_procedures,
@@ -33,6 +31,8 @@ from openseed_memory.reranker import Reranker
 from openseed_memory.store import MemoryStore
 from openseed_memory.types import MemoryEntry, MemoryEvent, MemoryType, SearchResult
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -78,12 +78,7 @@ class TestSQLiteMemoryBackend:
         db = _make_sqlite_backend(tmp_path)
         assert db._conn is not None
         # Verify the three tables exist
-        tables = {
-            row[0]
-            for row in db._conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
+        tables = {row[0] for row in db._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert "memories" in tables
         assert "history" in tables
 
@@ -239,22 +234,22 @@ class TestFactExtractor:
     async def test_extract_returns_empty_on_no_cli(self) -> None:
         """When CLI path cannot be resolved, extract returns []."""
         extractor = FactExtractor(cli_path=None)
-        with patch(
-            "openseed_memory.fact_extractor.FactExtractor._get_cli", return_value=None
-        ):
+        with patch("openseed_memory.fact_extractor.FactExtractor._get_cli", return_value=None):
             decisions = await extractor.extract("some content", store=self._make_store_stub())
         assert decisions == []
 
     async def test_extract_returns_decisions_on_valid_json(self) -> None:
-        payload = json.dumps([
-            {
-                "action": "ADD",
-                "content": "Python is a programming language",
-                "memory_id": None,
-                "memory_type": "semantic",
-                "reasoning": "New fact",
-            }
-        ])
+        payload = json.dumps(
+            [
+                {
+                    "action": "ADD",
+                    "content": "Python is a programming language",
+                    "memory_id": None,
+                    "memory_type": "semantic",
+                    "reasoning": "New fact",
+                }
+            ]
+        )
         mock_result = _make_subprocess_result(stdout=payload)
 
         extractor = FactExtractor(cli_path="/fake/claude")
@@ -297,50 +292,46 @@ class TestFactExtractor:
 
     def test_parse_decisions_handles_add(self) -> None:
         extractor = FactExtractor()
-        raw = json.dumps([
-            {"action": "ADD", "content": "new fact", "memory_type": "semantic", "reasoning": "r"}
-        ])
+        raw = json.dumps([{"action": "ADD", "content": "new fact", "memory_type": "semantic", "reasoning": "r"}])
         decisions = extractor._parse_decisions(raw)
         assert len(decisions) == 1
         assert decisions[0].action == MemoryEvent.ADD
 
     def test_parse_decisions_handles_update(self) -> None:
         extractor = FactExtractor()
-        raw = json.dumps([
-            {
-                "action": "UPDATE",
-                "content": "corrected fact",
-                "memory_id": "abc123",
-                "memory_type": "semantic",
-                "reasoning": "supersedes old",
-            }
-        ])
+        raw = json.dumps(
+            [
+                {
+                    "action": "UPDATE",
+                    "content": "corrected fact",
+                    "memory_id": "abc123",
+                    "memory_type": "semantic",
+                    "reasoning": "supersedes old",
+                }
+            ]
+        )
         decisions = extractor._parse_decisions(raw)
         assert decisions[0].action == MemoryEvent.UPDATE
         assert decisions[0].memory_id == "abc123"
 
     def test_parse_decisions_handles_delete(self) -> None:
         extractor = FactExtractor()
-        raw = json.dumps([
-            {"action": "DELETE", "content": "", "memory_id": "del456", "reasoning": "outdated"}
-        ])
+        raw = json.dumps([{"action": "DELETE", "content": "", "memory_id": "del456", "reasoning": "outdated"}])
         decisions = extractor._parse_decisions(raw)
         assert decisions[0].action == MemoryEvent.DELETE
         assert decisions[0].memory_id == "del456"
 
     def test_parse_decisions_handles_noop(self) -> None:
         extractor = FactExtractor()
-        raw = json.dumps([
-            {"action": "NOOP", "content": "already known", "memory_type": "semantic", "reasoning": "dup"}
-        ])
+        raw = json.dumps(
+            [{"action": "NOOP", "content": "already known", "memory_type": "semantic", "reasoning": "dup"}]
+        )
         decisions = extractor._parse_decisions(raw)
         assert decisions[0].action == MemoryEvent.NONE
 
     def test_parse_decisions_handles_unknown_action(self) -> None:
         extractor = FactExtractor()
-        raw = json.dumps([
-            {"action": "INVENT", "content": "something", "reasoning": "???"}
-        ])
+        raw = json.dumps([{"action": "INVENT", "content": "something", "reasoning": "???"}])
         decisions = extractor._parse_decisions(raw)
         assert decisions[0].action == MemoryEvent.NONE
 
@@ -387,9 +378,8 @@ class TestReranker:
         single = [_make_search_result("id1", "only result")]
         # No mock needed — short-circuits before any CLI call
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
-            reranker.rerank(query="q", results=single)
-        )
+
+        result = asyncio.get_event_loop().run_until_complete(reranker.rerank(query="q", results=single))
         assert result == single
 
     async def test_rerank_applies_llm_ordering(self) -> None:
@@ -485,9 +475,7 @@ class TestReranker:
             _make_search_result("d", "four"),
         ]
         reranker = Reranker(cli_path=None)
-        with patch(
-            "openseed_memory.reranker.Reranker._get_cli", return_value=None
-        ):
+        with patch("openseed_memory.reranker.Reranker._get_cli", return_value=None):
             reranked = await reranker.rerank(query="q", results=results)
 
         assert reranked == results
@@ -533,7 +521,7 @@ class TestMemoryStore:
         store = _make_store(tmp_path)
         await store.initialize()
 
-        fake_decision = MemoryDecision(
+        MemoryDecision(
             action=MemoryEvent.ADD,
             content="extracted fact",
             memory_type="semantic",
@@ -689,8 +677,10 @@ class TestFailurePatterns:
     def _no_claude_cli(self, monkeypatch):
         """Disable LLM fact extraction — no real CLI in test env."""
         monkeypatch.setattr(
-            "openseed_memory.fact_extractor.FactExtractor._get_cli", lambda self: None,
+            "openseed_memory.fact_extractor.FactExtractor._get_cli",
+            lambda self: None,
         )
+
     async def test_record_failure_stores_entry(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         await store.initialize()
@@ -801,7 +791,8 @@ class TestProceduralMemory:
     def _no_claude_cli(self, monkeypatch):
         """Disable LLM fact extraction — no real CLI in test env."""
         monkeypatch.setattr(
-            "openseed_memory.fact_extractor.FactExtractor._get_cli", lambda self: None,
+            "openseed_memory.fact_extractor.FactExtractor._get_cli",
+            lambda self: None,
         )
 
     async def test_store_procedure(self, tmp_path: Path) -> None:

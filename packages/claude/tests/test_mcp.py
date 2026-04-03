@@ -17,14 +17,12 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from openseed_claude.mcp import MCPConfig, MCPServer, MCPTransport
+from openseed_claude.mcp import MCPConfig, MCPTransport
 from openseed_claude.structured_output import (
     OutputSchema,
     _validate_against_schema,
     validate_output,
 )
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. MCPConfig — add servers
@@ -495,14 +493,10 @@ class TestValidateAgainstSchemaTypes:
         assert _validate_against_schema({"key": "val"}, {"type": "array"}) is False
 
     def test_array_items_schema_valid(self):
-        assert _validate_against_schema(
-            [1, 2, 3], {"type": "array", "items": {"type": "integer"}}
-        ) is True
+        assert _validate_against_schema([1, 2, 3], {"type": "array", "items": {"type": "integer"}}) is True
 
     def test_array_items_schema_invalid(self):
-        assert _validate_against_schema(
-            [1, "two", 3], {"type": "array", "items": {"type": "integer"}}
-        ) is False
+        assert _validate_against_schema([1, "two", 3], {"type": "array", "items": {"type": "integer"}}) is False
 
     def test_no_type_constraint(self):
         assert _validate_against_schema("anything", {}) is True

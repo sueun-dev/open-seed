@@ -8,7 +8,6 @@ Pattern from: codex-rs multi-agent spawn + parallel tools
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from openseed_core.auth.openai import require_openai_auth
 from openseed_core.config import CodexConfig
@@ -19,6 +18,7 @@ from openseed_core.subprocess import StreamLine, run_streaming
 @dataclass
 class CodexResponse:
     """Response from a Codex agent invocation."""
+
     text: str = ""
     files_created: list[str] = field(default_factory=list)
     files_modified: list[str] = field(default_factory=list)
@@ -95,7 +95,8 @@ class CodexAgent:
 
             if self.event_bus:
                 await self.event_bus.emit_simple(
-                    EventType.AGENT_TEXT, node="codex",
+                    EventType.AGENT_TEXT,
+                    node="codex",
                     text=line.text[:500],
                 )
 

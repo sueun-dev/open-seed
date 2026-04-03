@@ -10,12 +10,9 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from openseed_brain.retry import (
     DEPLOY_RETRY,
     IMPLEMENT_RETRY,
@@ -31,7 +28,6 @@ from openseed_core.types import (
     Severity,
     Verdict,
 )
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -189,9 +185,8 @@ class TestWithRetryDecorator:
         async def record_sleep(t: float):
             sleep_calls.append(t)
 
-        with patch("openseed_brain.retry.asyncio.sleep", side_effect=record_sleep):
-            with pytest.raises(RuntimeError):
-                await wrapped({})
+        with patch("openseed_brain.retry.asyncio.sleep", side_effect=record_sleep), pytest.raises(RuntimeError):
+            await wrapped({})
 
         # Two sleeps expected (between attempt 1→2 and 2→3)
         assert len(sleep_calls) == 2
@@ -217,9 +212,8 @@ class TestWithRetryDecorator:
         async def record_sleep(t: float):
             sleep_calls.append(t)
 
-        with patch("openseed_brain.retry.asyncio.sleep", side_effect=record_sleep):
-            with pytest.raises(RuntimeError):
-                await wrapped({})
+        with patch("openseed_brain.retry.asyncio.sleep", side_effect=record_sleep), pytest.raises(RuntimeError):
+            await wrapped({})
 
         # max_attempts=2 → one inter-attempt sleep, no sleep after final failure
         assert len(sleep_calls) == 1
@@ -465,7 +459,17 @@ class TestBuildGraph:
         """build_graph registers every required pipeline node."""
         graph = self._get_graph()
         node_ids = set(graph.nodes.keys())
-        expected = {"intake", "plan", "implement", "qa_gate", "sentinel_check", "fix", "user_escalate", "deploy", "memorize"}
+        expected = {
+            "intake",
+            "plan",
+            "implement",
+            "qa_gate",
+            "sentinel_check",
+            "fix",
+            "user_escalate",
+            "deploy",
+            "memorize",
+        }
         assert expected.issubset(node_ids), f"Missing nodes: {expected - node_ids}"
 
     def test_build_graph_has_all_edges(self):
@@ -521,10 +525,10 @@ class TestCompileGraph:
         """compile_graph with a checkpoint_dir creates the directory and compiles."""
         from openseed_brain.graph import compile_graph
 
-        ckpt_dir = str(tmp_path / "checkpoints")
+        str(tmp_path / "checkpoints")
 
         # Patch the SQLite savers to avoid needing aiosqlite installed in test env
-        mock_checkpointer = MagicMock()
+        MagicMock()
         with (
             patch.multiple("openseed_brain.graph", **self._patch_nodes()),
             patch("openseed_brain.graph.AsyncSqliteSaver", create=True),

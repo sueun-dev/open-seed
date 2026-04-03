@@ -12,16 +12,13 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
-
 from openseed_memory.wisdom import (
     Wisdom,
-    _parse_wisdom,
     _heuristic_wisdom,
     _parse_stored_wisdom,
+    _parse_wisdom,
     format_wisdom_for_prompt,
 )
-
 
 # ─── Wisdom dataclass ───────────────────────────────────────────────────────
 

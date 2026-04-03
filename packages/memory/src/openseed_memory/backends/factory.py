@@ -14,10 +14,12 @@ unreachable server silently falls through to the next option.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from openseed_core.config import MemoryConfig
 from openseed_memory.backends.base import MemoryBackend
+
+if TYPE_CHECKING:
+    from openseed_core.config import MemoryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +91,7 @@ def create_backend(config: MemoryConfig) -> MemoryBackend:
 # Thin wrapper so mem0.Memory objects satisfy the MemoryBackend interface
 # ---------------------------------------------------------------------------
 
+
 class _Mem0Wrapper(MemoryBackend):
     """Adapts a ``mem0.Memory`` instance to the ``MemoryBackend`` protocol."""
 
@@ -98,8 +101,14 @@ class _Mem0Wrapper(MemoryBackend):
     def initialize(self) -> None:
         pass  # mem0 initialises itself in from_config
 
-    def add(self, content: str, user_id: str = "default", agent_id: str = "",
-            memory_type: str = "semantic", metadata: dict | None = None) -> str:
+    def add(
+        self,
+        content: str,
+        user_id: str = "default",
+        agent_id: str = "",
+        memory_type: str = "semantic",
+        metadata: dict | None = None,
+    ) -> str:
         result = self._m.add(
             messages=[{"role": "user", "content": content}],
             user_id=user_id,
@@ -120,11 +129,11 @@ class _Mem0Wrapper(MemoryBackend):
         items = result.get("results", [])
         if filters:
             from openseed_memory.filters import matches_filter
+
             items = [r for r in items if matches_filter(r.get("metadata", {}), filters)]
         return items
 
-    def update(self, memory_id: str, content: str, metadata: dict | None = None,
-               user_id: str = "default") -> bool:
+    def update(self, memory_id: str, content: str, metadata: dict | None = None, user_id: str = "default") -> bool:
         self._m.delete(memory_id)
         result = self._m.add(
             messages=[{"role": "user", "content": content}],
@@ -147,6 +156,7 @@ class _Mem0Wrapper(MemoryBackend):
         items = result.get("results", [])
         if filters:
             from openseed_memory.filters import matches_filter
+
             items = [r for r in items if matches_filter(r.get("metadata", {}), filters)]
         return items
 

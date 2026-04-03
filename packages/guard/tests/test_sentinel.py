@@ -20,12 +20,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ─── Core types ───────────────────────────────────────────────────────────────
-
 from openseed_core.config import SentinelConfig
 from openseed_core.types import Finding, QAResult, Verdict
 
 # ─── Sentinel modules ─────────────────────────────────────────────────────────
-
 from openseed_guard.backoff import compute_backoff_ms, should_retry
 from openseed_guard.delegation import build_delegation_prompt
 from openseed_guard.evidence import (
@@ -33,13 +31,12 @@ from openseed_guard.evidence import (
     VerificationResult,
     verify_files_exist,
 )
-from openseed_guard.execution_loop import ExecutionLoop, ExecutionResult
-from openseed_guard.intent_gate import IntentClassification, IntentType, classify_intent
-from openseed_guard.loop import LoopDecision, LoopState, evaluate_loop
+from openseed_guard.execution_loop import ExecutionLoop
 from openseed_guard.insight import InsightAdvice
+from openseed_guard.intent_gate import IntentType, classify_intent
+from openseed_guard.loop import LoopState, evaluate_loop
 from openseed_guard.progress import ProgressSnapshot, ProgressTracker, ProgressUpdate
 from openseed_guard.stagnation import is_stagnated, stagnation_message
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -169,6 +166,7 @@ class TestIntentGate:
 
     async def test_classify_intent_fallback_on_cli_failure(self, _patch_auth):
         """When run_streaming produces no stdout lines → graceful fallback."""
+
         async def _noop(command, timeout_seconds, on_line):  # noqa: ARG001
             pass  # never calls on_line
 
@@ -181,10 +179,7 @@ class TestIntentGate:
     # ── Unknown intent_type in JSON → coerced to open_ended ──────────────────
 
     async def test_classify_intent_unknown_type_coerced(self, _patch_auth):
-        json_text = (
-            '{"intent_type": "banana", "confidence": 0.7, '
-            '"reasoning": "unknown", "suggested_approach": "?"}'
-        )
+        json_text = '{"intent_type": "banana", "confidence": 0.7, "reasoning": "unknown", "suggested_approach": "?"}'
         with patch(
             "openseed_guard.intent_gate.run_streaming",
             side_effect=_make_streaming_side_effect(json_text),
@@ -198,10 +193,10 @@ class TestIntentGate:
     async def test_classify_intent_json_embedded_in_prose(self, _patch_auth):
         """Parser should extract JSON even when surrounded by markdown text."""
         json_text = (
-            'Sure! Here is my answer:\n'
+            "Sure! Here is my answer:\n"
             '{"intent_type": "evaluation", "confidence": 0.75, '
             '"reasoning": "User wants a review.", "suggested_approach": "evaluate → propose"}'
-            '\nHope that helps!'
+            "\nHope that helps!"
         )
         with patch(
             "openseed_guard.intent_gate.run_streaming",
@@ -217,8 +212,7 @@ class TestIntentGate:
         """Verify that long codebase_context doesn't cause a crash."""
         long_context = "x" * 5000
         json_text = (
-            '{"intent_type": "open_ended", "confidence": 0.5, '
-            '"reasoning": "ok", "suggested_approach": "assess"}'
+            '{"intent_type": "open_ended", "confidence": 0.5, "reasoning": "ok", "suggested_approach": "assess"}'
         )
         with patch(
             "openseed_guard.intent_gate.run_streaming",
@@ -350,17 +344,20 @@ class TestExecutionLoop:
         )
         verify_mock = AsyncMock(side_effect=[fail, ok])
 
-        with patch(
-            "openseed_guard.execution_loop.verify_implementation",
-            verify_mock,
-        ), patch(
-            "openseed_guard.execution_loop.run_streaming",
-            side_effect=[
-                self._explore_side_effect(),
-                self._plan_side_effect(),
-                self._route_side_effect(),
-                self._retry_side_effect(),  # retry step calls Claude
-            ],
+        with (
+            patch(
+                "openseed_guard.execution_loop.verify_implementation",
+                verify_mock,
+            ),
+            patch(
+                "openseed_guard.execution_loop.run_streaming",
+                side_effect=[
+                    self._explore_side_effect(),
+                    self._plan_side_effect(),
+                    self._route_side_effect(),
+                    self._retry_side_effect(),  # retry step calls Claude
+                ],
+            ),
         ):
             loop = ExecutionLoop()
             result = await loop.run(task="Create file", working_dir="/tmp")
@@ -716,9 +713,9 @@ class TestProgress:
     def test_progress_tracker_detects_stagnation(self):
         tracker = ProgressTracker()
         snap = ProgressSnapshot(incomplete_count=5, completed_count=2)
-        tracker.track(snap)         # baseline
-        tracker.track(snap)         # stagnation 1
-        tracker.track(snap)         # stagnation 2
+        tracker.track(snap)  # baseline
+        tracker.track(snap)  # stagnation 1
+        tracker.track(snap)  # stagnation 2
         update = tracker.track(snap)  # stagnation 3
         assert update.has_progressed is False
         assert update.stagnation_count == 3
@@ -797,10 +794,13 @@ class TestEvaluateLoop:
             should_abandon=False,
         )
 
-        with patch("openseed_guard.loop.is_stagnated", return_value=True), patch(
-            "openseed_guard.loop.consult_insight",
-            new_callable=AsyncMock,
-            return_value=insight_advice,
+        with (
+            patch("openseed_guard.loop.is_stagnated", return_value=True),
+            patch(
+                "openseed_guard.loop.consult_insight",
+                new_callable=AsyncMock,
+                return_value=insight_advice,
+            ),
         ):
             decision = await evaluate_loop(qa, vr, state, config=cfg, task="some task")
 
@@ -859,10 +859,13 @@ class TestEvaluateLoop:
             reason="The task cannot be completed with available tools.",
         )
 
-        with patch("openseed_guard.loop.is_stagnated", return_value=True), patch(
-            "openseed_guard.loop.consult_insight",
-            new_callable=AsyncMock,
-            return_value=abandon_advice,
+        with (
+            patch("openseed_guard.loop.is_stagnated", return_value=True),
+            patch(
+                "openseed_guard.loop.consult_insight",
+                new_callable=AsyncMock,
+                return_value=abandon_advice,
+            ),
         ):
             decision = await evaluate_loop(qa, vr, state, config=cfg, task="hopeless")
 

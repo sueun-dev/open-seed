@@ -7,9 +7,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from openseed_guard.security import (
-    SecurityCheck,
     SecurityRisk,
     _parse_security_response,
     assess_risk,

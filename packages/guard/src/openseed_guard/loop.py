@@ -11,23 +11,27 @@ Escalation chain:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING
 
 from openseed_core.config import SentinelConfig
 from openseed_core.events import EventBus, EventType
 from openseed_core.types import QAResult, Verdict
+
 from openseed_guard.backoff import compute_backoff_ms, should_retry
-from openseed_guard.evidence import VerificationResult
 from openseed_guard.execution_loop import ExecutionLoop, ExecutionResult
-from openseed_guard.intent_gate import classify_intent
 from openseed_guard.insight import InsightAdvice, consult_insight
+from openseed_guard.intent_gate import classify_intent
 from openseed_guard.progress import ProgressSnapshot, ProgressTracker
 from openseed_guard.stagnation import is_stagnated
+
+if TYPE_CHECKING:
+    from openseed_guard.evidence import VerificationResult
 
 
 @dataclass
 class LoopState:
     """Sentinel loop state."""
+
     retry_count: int = 0
     consecutive_failures: int = 0
     insight_consulted: bool = False
@@ -39,6 +43,7 @@ class LoopState:
 @dataclass
 class LoopDecision:
     """What the Sentinel loop decides to do next."""
+
     action: str  # "retry", "insight", "user_escalate", "pass", "abort"
     reason: str
     backoff_ms: int = 0

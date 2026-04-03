@@ -10,6 +10,7 @@ Pattern from: openhands/resolver/resolve_issue.py
 from __future__ import annotations
 
 from openseed_core.subprocess import run_simple
+
 from openseed_deploy.channels.base import DeployChannel
 from openseed_deploy.types import ChannelResult
 
@@ -117,10 +118,15 @@ class PRChannel(DeployChannel):
         pr_body = _build_pr_body(issue_number, commit_msg)
 
         pr_cmd = [
-            "gh", "pr", "create",
-            "--title", pr_title,
-            "--body", pr_body,
-            "--base", self.base_branch,
+            "gh",
+            "pr",
+            "create",
+            "--title",
+            pr_title,
+            "--body",
+            pr_body,
+            "--base",
+            self.base_branch,
         ]
 
         pr = await run_simple(pr_cmd, cwd=working_dir, timeout_seconds=30)
@@ -142,7 +148,7 @@ class PRChannel(DeployChannel):
 
 def _build_pr_body(issue_number: int | None, commit_msg: str) -> str:
     """Build PR description body."""
-    parts = ["## Summary", f"Automated fix by Open Seed v2 pipeline.\n"]
+    parts = ["## Summary", "Automated fix by Open Seed v2 pipeline.\n"]
     if issue_number:
         parts.append(f"Closes #{issue_number}\n")
     parts.append("## Changes")

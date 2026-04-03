@@ -15,14 +15,15 @@ Each hook is an async callable that receives a HookContext.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable, Awaitable
+from enum import StrEnum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class HookEvent(str, Enum):
+class HookEvent(StrEnum):
     PRE_TOOL_USE = "PreToolUse"
     POST_TOOL_USE = "PostToolUse"
     STOP = "Stop"
@@ -33,6 +34,7 @@ class HookEvent(str, Enum):
 @dataclass
 class HookContext:
     """Context passed to hook callbacks."""
+
     event: HookEvent
     tool_name: str = ""
     tool_input: dict[str, Any] = field(default_factory=dict)
@@ -47,9 +49,10 @@ class HookContext:
 @dataclass
 class HookResult:
     """Result from a hook callback — can modify behavior."""
-    allow: bool = True                          # False = block the action
+
+    allow: bool = True  # False = block the action
     modified_input: dict[str, Any] | None = None  # Override tool input
-    reason: str = ""                            # Explanation if blocked
+    reason: str = ""  # Explanation if blocked
 
 
 # Hook callback type
@@ -73,9 +76,7 @@ class HookRegistry:
     """
 
     def __init__(self) -> None:
-        self._hooks: dict[HookEvent, list[HookCallback]] = {
-            event: [] for event in HookEvent
-        }
+        self._hooks: dict[HookEvent, list[HookCallback]] = {event: [] for event in HookEvent}
 
     def on(self, event: HookEvent, callback: HookCallback) -> None:
         """Register a hook callback for an event."""

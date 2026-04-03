@@ -12,9 +12,9 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from openseed_brain.nodes.implement import _self_verify_and_fix
 from openseed_core.types import Implementation
 
@@ -51,6 +51,7 @@ def _make_impl(summary="Built the API"):
 
 def _make_evidence(passed: bool, detail: str = ""):
     from openseed_guard.evidence import Evidence
+
     return Evidence(check="lint: tsc", passed=passed, detail=detail)
 
 
@@ -83,14 +84,17 @@ async def test_lint_passes_no_fix():
     state = _make_state()
     impl = _make_impl()
 
-    with patch(
-        "openseed_guard.evidence.auto_detect_lint_commands",
-        new_callable=AsyncMock,
-        return_value=["npx tsc --noEmit"],
-    ), patch(
-        "openseed_guard.evidence.verify_command",
-        new_callable=AsyncMock,
-        return_value=_make_evidence(passed=True),
+    with (
+        patch(
+            "openseed_guard.evidence.auto_detect_lint_commands",
+            new_callable=AsyncMock,
+            return_value=["npx tsc --noEmit"],
+        ),
+        patch(
+            "openseed_guard.evidence.verify_command",
+            new_callable=AsyncMock,
+            return_value=_make_evidence(passed=True),
+        ),
     ):
         result_impl, messages = await _self_verify_and_fix(state, impl, "fullstack")
 
@@ -122,16 +126,20 @@ async def test_lint_fails_fix_succeeds():
     mock_agent = MagicMock()
     mock_agent.invoke = AsyncMock(return_value=MagicMock(text="Fixed the type error"))
 
-    with patch(
-        "openseed_guard.evidence.auto_detect_lint_commands",
-        new_callable=AsyncMock,
-        return_value=["npx tsc --noEmit"],
-    ), patch(
-        "openseed_guard.evidence.verify_command",
-        side_effect=mock_verify_command,
-    ), patch(
-        "openseed_claude.agent.ClaudeAgent",
-        return_value=mock_agent,
+    with (
+        patch(
+            "openseed_guard.evidence.auto_detect_lint_commands",
+            new_callable=AsyncMock,
+            return_value=["npx tsc --noEmit"],
+        ),
+        patch(
+            "openseed_guard.evidence.verify_command",
+            side_effect=mock_verify_command,
+        ),
+        patch(
+            "openseed_claude.agent.ClaudeAgent",
+            return_value=mock_agent,
+        ),
     ):
         result_impl, messages = await _self_verify_and_fix(state, impl, "fullstack")
 
@@ -156,16 +164,20 @@ async def test_lint_fails_fix_still_fails():
     mock_agent = MagicMock()
     mock_agent.invoke = AsyncMock(return_value=MagicMock(text="Tried to fix"))
 
-    with patch(
-        "openseed_guard.evidence.auto_detect_lint_commands",
-        new_callable=AsyncMock,
-        return_value=["npx tsc --noEmit", "ruff check ."],
-    ), patch(
-        "openseed_guard.evidence.verify_command",
-        side_effect=mock_verify_always_fails,
-    ), patch(
-        "openseed_claude.agent.ClaudeAgent",
-        return_value=mock_agent,
+    with (
+        patch(
+            "openseed_guard.evidence.auto_detect_lint_commands",
+            new_callable=AsyncMock,
+            return_value=["npx tsc --noEmit", "ruff check ."],
+        ),
+        patch(
+            "openseed_guard.evidence.verify_command",
+            side_effect=mock_verify_always_fails,
+        ),
+        patch(
+            "openseed_claude.agent.ClaudeAgent",
+            return_value=mock_agent,
+        ),
     ):
         result_impl, messages = await _self_verify_and_fix(state, impl, "test")
 
@@ -201,27 +213,33 @@ async def test_multiple_lint_commands_partial_failure():
     state = _make_state()
     impl = _make_impl()
 
-    results = iter([
-        _make_evidence(passed=True),   # tsc passes
-        _make_evidence(passed=False, detail="ruff: E302"),  # ruff fails
-        # After fix re-check:
-        _make_evidence(passed=True),   # tsc still passes
-        _make_evidence(passed=True),   # ruff now passes
-    ])
+    results = iter(
+        [
+            _make_evidence(passed=True),  # tsc passes
+            _make_evidence(passed=False, detail="ruff: E302"),  # ruff fails
+            # After fix re-check:
+            _make_evidence(passed=True),  # tsc still passes
+            _make_evidence(passed=True),  # ruff now passes
+        ]
+    )
 
     mock_agent = MagicMock()
     mock_agent.invoke = AsyncMock(return_value=MagicMock(text="Fixed"))
 
-    with patch(
-        "openseed_guard.evidence.auto_detect_lint_commands",
-        new_callable=AsyncMock,
-        return_value=["npx tsc --noEmit", "ruff check ."],
-    ), patch(
-        "openseed_guard.evidence.verify_command",
-        side_effect=lambda *a, **kw: next(results),
-    ), patch(
-        "openseed_claude.agent.ClaudeAgent",
-        return_value=mock_agent,
+    with (
+        patch(
+            "openseed_guard.evidence.auto_detect_lint_commands",
+            new_callable=AsyncMock,
+            return_value=["npx tsc --noEmit", "ruff check ."],
+        ),
+        patch(
+            "openseed_guard.evidence.verify_command",
+            side_effect=lambda *a, **kw: next(results),
+        ),
+        patch(
+            "openseed_claude.agent.ClaudeAgent",
+            return_value=mock_agent,
+        ),
     ):
         result_impl, messages = await _self_verify_and_fix(state, impl, "test")
 

@@ -25,9 +25,12 @@ Directory layout supported:
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from openseed_qa_gate.types import AgentDefinition
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def load_agent(toml_path: Path) -> AgentDefinition:

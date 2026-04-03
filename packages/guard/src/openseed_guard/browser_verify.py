@@ -20,6 +20,7 @@ from typing import Any
 @dataclass
 class BrowserEvidence:
     """Result of browser-based UI verification."""
+
     passed: bool
     url: str = ""
     screenshot_b64: str = ""  # Base64 PNG for AI analysis
@@ -150,8 +151,8 @@ async def _start_dev_server(
     Start the project's dev server and return (process, port).
     Auto-detects the start command and port from output.
     """
-    import os
     import json
+    import os
     import re
 
     # Detect start command
@@ -159,7 +160,8 @@ async def _start_dev_server(
     cmd = None
     if os.path.exists(pkg_json):
         try:
-            data = json.loads(open(pkg_json).read())
+            with open(pkg_json) as f:
+                data = json.loads(f.read())
             scripts = data.get("scripts", {})
             if "dev" in scripts:
                 cmd = "npm run dev"
@@ -202,7 +204,7 @@ async def _start_dev_server(
                     match = re.search(r"port\s+(\d+)", text, re.IGNORECASE)
                     if match:
                         return int(match.group(1))
-                except (asyncio.TimeoutError, Exception):
+                except (TimeoutError, Exception):
                     continue
         return None
 
@@ -261,9 +263,7 @@ async def _ai_analyze_ui(
         agent = ClaudeAgent()
         interaction_text = ""
         if interactions:
-            interaction_text = "\nInteraction results:\n" + "\n".join(
-                f"- {i}" for i in interactions
-            )
+            interaction_text = "\nInteraction results:\n" + "\n".join(f"- {i}" for i in interactions)
 
         response = await agent.invoke(
             prompt=(

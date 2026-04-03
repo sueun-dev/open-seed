@@ -9,8 +9,12 @@ Pattern from: mem0 procedural memory + SQLite history
 
 from __future__ import annotations
 
-from openseed_memory.store import MemoryStore
-from openseed_memory.types import MemoryType, FailurePattern
+from typing import TYPE_CHECKING
+
+from openseed_memory.types import FailurePattern, MemoryType
+
+if TYPE_CHECKING:
+    from openseed_memory.store import MemoryStore
 
 
 async def record_failure(
@@ -74,12 +78,14 @@ async def recall_similar_failures(
     for r in results:
         meta = r.entry.metadata or {}
         if meta.get("type") == "failure_pattern":
-            patterns.append(FailurePattern(
-                task_pattern=meta.get("task_summary", ""),
-                error_type=r.entry.content[:200],
-                root_cause="",
-                successful_fix="resolved" if meta.get("resolved") else "unresolved",
-                occurrences=1,
-            ))
+            patterns.append(
+                FailurePattern(
+                    task_pattern=meta.get("task_summary", ""),
+                    error_type=r.entry.content[:200],
+                    root_cause="",
+                    successful_fix="resolved" if meta.get("resolved") else "unresolved",
+                    occurrences=1,
+                )
+            )
 
     return patterns

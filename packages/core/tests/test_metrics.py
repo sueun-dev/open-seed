@@ -4,7 +4,7 @@ Tests for LLM metrics aggregation — OpenHands pattern integration.
 
 from __future__ import annotations
 
-from openseed_core.metrics import LLMCallMetric, Metrics
+from openseed_core.metrics import Metrics
 
 
 class TestMetrics:
@@ -95,7 +95,16 @@ class TestMetrics:
 
     def test_cache_tokens(self) -> None:
         m = Metrics()
-        m.add(model="sonnet", prompt_tokens=100, completion_tokens=50, cache_read_tokens=80, cache_write_tokens=20, cost_usd=0.001, latency_ms=100, node="x")
+        m.add(
+            model="sonnet",
+            prompt_tokens=100,
+            completion_tokens=50,
+            cache_read_tokens=80,
+            cache_write_tokens=20,
+            cost_usd=0.001,
+            latency_ms=100,
+            node="x",
+        )
         assert m.cache_read_tokens == 80
         assert m.cache_write_tokens == 20
 

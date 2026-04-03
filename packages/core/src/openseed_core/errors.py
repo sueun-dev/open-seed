@@ -15,6 +15,7 @@ class AuthError(OpenSeedError):
 
 class AgentError(OpenSeedError):
     """Agent (Claude/Codex) execution failed."""
+
     def __init__(self, agent: str, message: str) -> None:
         self.agent = agent
         super().__init__(f"[{agent}] {message}")
@@ -42,6 +43,7 @@ class ConfigError(OpenSeedError):
 
 class SubprocessError(OpenSeedError):
     """CLI subprocess failed."""
+
     def __init__(self, command: str, exit_code: int, stderr: str = "") -> None:
         self.command = command
         self.exit_code = exit_code

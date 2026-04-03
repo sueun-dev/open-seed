@@ -12,6 +12,7 @@ class AgentDefinition:
     A specialist agent loaded from TOML.
     Pattern from: awesome-codex-subagents TOML format.
     """
+
     name: str
     description: str
     model: str = "gpt-5.4"
@@ -24,6 +25,7 @@ class AgentDefinition:
 @dataclass
 class SpecialistResult:
     """Result from a single specialist agent run."""
+
     agent_name: str
     agent_description: str = ""  # For evidence traceability — what this agent specializes in
     findings: list[dict[str, Any]] = field(default_factory=list)
@@ -36,6 +38,7 @@ class SpecialistResult:
 @dataclass
 class SynthesisStats:
     """Statistics from the synthesis process."""
+
     total_raw_findings: int = 0
     agents_succeeded: int = 0
     agents_failed: int = 0

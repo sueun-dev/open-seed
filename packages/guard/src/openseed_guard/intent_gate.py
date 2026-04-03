@@ -17,14 +17,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from openseed_core.auth.claude import require_claude_auth
 from openseed_core.subprocess import StreamLine, run_streaming
+
 from openseed_guard.prompts import ModelFamily, detect_model_family
 
 
-class IntentType(str, Enum):
+class IntentType(StrEnum):
     RESEARCH = "research"
     IMPLEMENTATION = "implementation"
     INVESTIGATION = "investigation"
@@ -36,6 +37,7 @@ class IntentType(str, Enum):
 @dataclass
 class IntentClassification:
     """Classification of a task's intent."""
+
     intent_type: IntentType
     confidence: float  # 0.0 – 1.0
     reasoning: str
@@ -135,8 +137,10 @@ async def classify_intent(
         cli_path,
         "--print",
         "--dangerously-skip-permissions",
-        "--model", call_model,
-        "--max-turns", "1",
+        "--model",
+        call_model,
+        "--max-turns",
+        "1",
         prompt,
     ]
 
@@ -155,7 +159,7 @@ async def classify_intent(
     end = raw.rfind("}")
     if start != -1 and end > start:
         try:
-            data = json.loads(raw[start:end + 1])
+            data = json.loads(raw[start : end + 1])
             raw_type = data.get("intent_type", "open_ended")
             try:
                 intent_type = IntentType(raw_type)

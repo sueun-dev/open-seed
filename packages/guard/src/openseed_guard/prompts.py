@@ -13,10 +13,10 @@ Gemini: Needs corrective overlays — tends to be aggressive.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class ModelFamily(str, Enum):
+class ModelFamily(StrEnum):
     CLAUDE = "claude"
     GPT = "gpt"
     GEMINI = "gemini"
@@ -25,6 +25,7 @@ class ModelFamily(str, Enum):
 @dataclass
 class PromptVariant:
     """A model-specific prompt variant."""
+
     model_family: ModelFamily
     explore_prompt: str
     plan_prompt: str

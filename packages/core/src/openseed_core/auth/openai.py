@@ -31,6 +31,7 @@ def get_codex_cli_path() -> str | None:
         return path
 
     import os
+
     candidates = [
         os.path.expanduser("~/.npm/bin/codex"),
         "/usr/local/bin/codex",

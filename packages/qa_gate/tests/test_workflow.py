@@ -19,20 +19,17 @@ Covers:
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch, call
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from openseed_core.types import Finding, QAResult, Severity, Verdict
 from openseed_qa_gate.types import AgentDefinition, SpecialistResult
 from openseed_qa_gate.workflow import (
-    WorkflowStage,
+    _STAGE_CATEGORIES,
+    StageResult,
     WorkflowOrchestrator,
     WorkflowResult,
-    StageResult,
-    _STAGE_CATEGORIES,
+    WorkflowStage,
 )
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -144,9 +141,7 @@ class TestWorkflowStageMapping:
             WorkflowStage.VALIDATION,
             WorkflowStage.SYNTHESIS,
         ):
-            assert len(_STAGE_CATEGORIES[stage]) >= 1, (
-                f"Stage {stage.value} has no category mappings"
-            )
+            assert len(_STAGE_CATEGORIES[stage]) >= 1, f"Stage {stage.value} has no category mappings"
 
 
 # ─── 3. _finalize combines and deduplicates findings ─────────────────────────
@@ -157,6 +152,7 @@ class TestFinalize:
         """_finalize merges findings from all stages into all_findings."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         import time
+
         start = time.monotonic()
 
         stage_results = [
@@ -181,6 +177,7 @@ class TestFinalize:
         """_finalize removes duplicate findings (same title+file+line) across stages."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         import time
+
         start = time.monotonic()
 
         dup = _make_finding(title="Dup finding", file="x.py", line=5, severity=Severity.MEDIUM)
@@ -198,6 +195,7 @@ class TestFinalize:
         """_finalize returns block verdict when critical finding is present."""
         orchestrator = WorkflowOrchestrator(config=_make_config(block_on_critical=True))
         import time
+
         start = time.monotonic()
 
         stage_results = [
@@ -215,6 +213,7 @@ class TestFinalize:
         """High finding with block_on_critical=False → warn verdict."""
         orchestrator = WorkflowOrchestrator(config=_make_config(block_on_critical=False))
         import time
+
         start = time.monotonic()
 
         stage_results = [
@@ -231,6 +230,7 @@ class TestFinalize:
         """Only low/info findings → pass verdict."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         import time
+
         start = time.monotonic()
 
         stage_results = [
@@ -247,6 +247,7 @@ class TestFinalize:
         """_finalize synthesis text mentions the completed stages."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         import time
+
         start = time.monotonic()
 
         stage_results = [
@@ -327,11 +328,7 @@ class TestWorkflowRun:
         orchestrator = WorkflowOrchestrator(config=_make_config(block_on_critical=True))
 
         async def fake_run_stage(stage, context, working_dir, task):
-            findings = (
-                [_make_finding(severity=Severity.CRITICAL, title="RCE")]
-                if stage == WorkflowStage.REVIEW
-                else []
-            )
+            findings = [_make_finding(severity=Severity.CRITICAL, title="RCE")] if stage == WorkflowStage.REVIEW else []
             return _make_stage_result(stage=stage, findings=findings, should_continue=True)
 
         with patch.object(orchestrator, "_run_stage", side_effect=fake_run_stage):
@@ -346,18 +343,19 @@ class TestWorkflowRun:
 class TestWorkflowDefaultIsFlat:
     async def test_workflow_default_is_flat(self):
         """run_qa_gate without staged=True uses the flat (non-orchestrated) path."""
-        from openseed_qa_gate.gate import run_qa_gate
         from openseed_core.config import QAGateConfig
-        from openseed_qa_gate.types import SpecialistResult
+        from openseed_qa_gate.gate import run_qa_gate
 
         agent = AgentDefinition(name="reviewer", description="Review agent")
         sr = SpecialistResult(agent_name="reviewer", findings=[], success=True)
 
-        with patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]), \
-             patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]), \
-             patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=sr), \
-             patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "no issues", None)), \
-             patch("openseed_qa_gate.gate._run_staged", new_callable=AsyncMock) as mock_staged:
+        with (
+            patch("openseed_qa_gate.gate.load_active_agents", return_value=[agent]),
+            patch("openseed_qa_gate.gate.select_agents", new_callable=AsyncMock, return_value=[agent]),
+            patch("openseed_qa_gate.gate.run_specialist", new_callable=AsyncMock, return_value=sr),
+            patch("openseed_qa_gate.gate.synthesize", new_callable=AsyncMock, return_value=([], "no issues", None)),
+            patch("openseed_qa_gate.gate._run_staged", new_callable=AsyncMock) as mock_staged,
+        ):
             cfg = QAGateConfig(active_agents=["reviewer"])
             await run_qa_gate("context", "/tmp", config=cfg)  # staged defaults to False
 
@@ -365,8 +363,8 @@ class TestWorkflowDefaultIsFlat:
 
     async def test_workflow_staged_true_calls_orchestrator(self):
         """run_qa_gate with staged=True delegates to _run_staged."""
-        from openseed_qa_gate.gate import run_qa_gate
         from openseed_core.config import QAGateConfig
+        from openseed_qa_gate.gate import run_qa_gate
 
         expected_result = QAResult(
             verdict=Verdict.PASS,
@@ -376,7 +374,9 @@ class TestWorkflowDefaultIsFlat:
             duration_ms=42,
         )
 
-        with patch("openseed_qa_gate.gate._run_staged", new_callable=AsyncMock, return_value=expected_result) as mock_staged:
+        with patch(
+            "openseed_qa_gate.gate._run_staged", new_callable=AsyncMock, return_value=expected_result
+        ) as mock_staged:
             cfg = QAGateConfig()
             result = await run_qa_gate("context", "/tmp", config=cfg, staged=True)
 
@@ -399,9 +399,7 @@ class TestEvaluateGate:
             new_callable=AsyncMock,
             side_effect=RuntimeError("LLM unavailable"),
         ):
-            should_continue, reason = await orchestrator._evaluate_gate(
-                WorkflowStage.DISCOVERY, findings
-            )
+            should_continue, reason = await orchestrator._evaluate_gate(WorkflowStage.DISCOVERY, findings)
 
         assert should_continue is True
         assert "default" in reason.lower() or "fail" in reason.lower()
@@ -419,9 +417,7 @@ class TestEvaluateGate:
             "_llm_gate_decision",
             new_callable=AsyncMock,
         ) as mock_llm:
-            should_continue, _ = await orchestrator._evaluate_gate(
-                WorkflowStage.DISCOVERY, findings
-            )
+            should_continue, _ = await orchestrator._evaluate_gate(WorkflowStage.DISCOVERY, findings)
 
         mock_llm.assert_not_called()
         assert should_continue is True
@@ -434,11 +430,11 @@ class TestEvaluateGate:
         gate_response = json.dumps({"continue": False, "reason": "Build is broken"})
         mock_proc = _make_subprocess_result(stdout=gate_response)
 
-        with patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc), \
-             patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"):
-            should_continue, reason = await orchestrator._llm_gate_decision(
-                WorkflowStage.DISCOVERY, findings
-            )
+        with (
+            patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
+            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+        ):
+            should_continue, reason = await orchestrator._llm_gate_decision(WorkflowStage.DISCOVERY, findings)
 
         assert should_continue is False
         assert "broken" in reason.lower()
@@ -448,9 +444,7 @@ class TestEvaluateGate:
         orchestrator = WorkflowOrchestrator(config=_make_config())
 
         with patch.object(orchestrator, "_select_agents_for_stage", return_value=[]):
-            result = await orchestrator._run_stage(
-                WorkflowStage.DISCOVERY, "ctx", "/tmp", "task"
-            )
+            result = await orchestrator._run_stage(WorkflowStage.DISCOVERY, "ctx", "/tmp", "task")
 
         assert result.stage == WorkflowStage.DISCOVERY
         assert result.findings == []

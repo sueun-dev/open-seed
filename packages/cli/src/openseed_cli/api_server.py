@@ -14,6 +14,7 @@ Pattern from: OpenClaw gateway/server.impl.ts (WebSocket protocol)
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
@@ -483,10 +484,8 @@ async def ws_terminal(ws: WebSocket) -> None:
                     try:
                         os.killpg(os.getpgid(current_process.pid), signal.SIGTERM)
                     except (ProcessLookupError, OSError):
-                        try:
+                        with contextlib.suppress(Exception):
                             current_process.kill()
-                        except Exception:
-                            pass
                     await ws.send_text(
                         json.dumps(
                             {
@@ -498,10 +497,8 @@ async def ws_terminal(ws: WebSocket) -> None:
 
     except WebSocketDisconnect:
         if current_process and current_process.poll() is None:
-            try:
+            with contextlib.suppress(Exception):
                 current_process.kill()
-            except Exception:
-                pass
 
 
 @app.get("/api/files")
@@ -682,7 +679,7 @@ async def harness_setup(req: HarnessRequest) -> dict:
         "passing": after.passing,
         "missing": after.missing,
         "files_created": [
-            m for m in after.details.keys() if m not in before.details
+            m for m in after.details if m not in before.details
         ],
     }
 
@@ -1139,7 +1136,6 @@ async def _execute_pipeline(
 
     try:
         # Use astream to get node-by-node events in real time
-        final_state = None
         async for event in graph.astream(state, config=config):
             for node_name, output in event.items():
                 # Skip non-dict outputs (e.g. LangGraph interrupt tuples)
@@ -1240,7 +1236,6 @@ async def _execute_pipeline(
                 # Node complete
                 await _broadcast({"type": "node.complete", "node": node_name, "data": {}})
 
-                final_state = output
 
         if _current_run:
             _current_run["status"] = "completed"

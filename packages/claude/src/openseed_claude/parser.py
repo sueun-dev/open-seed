@@ -25,8 +25,6 @@ from typing import Any
 
 from openseed_claude.messages import (
     StructuredResponse,
-    TextBlock,
-    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     UsageStats,
@@ -36,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 # ─── JSON (NDJSON) parser ─────────────────────────────────────────────────────
+
 
 def _parse_content_blocks(
     blocks: list[dict[str, Any]],
@@ -57,26 +56,29 @@ def _parse_content_blocks(
                 if th:
                     thinking_parts.append(th)
             case "tool_use":
-                tool_uses.append(ToolUseBlock(
-                    tool_id=block.get("id", ""),
-                    tool_name=block.get("name", ""),
-                    input=block.get("input") or {},
-                ))
+                tool_uses.append(
+                    ToolUseBlock(
+                        tool_id=block.get("id", ""),
+                        tool_name=block.get("name", ""),
+                        input=block.get("input") or {},
+                    )
+                )
             case "tool_result":
                 raw_content = block.get("content", "")
                 if isinstance(raw_content, list):
                     # Content can be a list of {type: "text", text: "..."} blocks
                     content_str = "\n".join(
-                        c.get("text", "") for c in raw_content
-                        if isinstance(c, dict) and c.get("type") == "text"
+                        c.get("text", "") for c in raw_content if isinstance(c, dict) and c.get("type") == "text"
                     )
                 else:
                     content_str = str(raw_content) if raw_content is not None else ""
-                tool_results.append(ToolResultBlock(
-                    tool_use_id=block.get("tool_use_id", ""),
-                    content=content_str,
-                    is_error=bool(block.get("is_error", False)),
-                ))
+                tool_results.append(
+                    ToolResultBlock(
+                        tool_use_id=block.get("tool_use_id", ""),
+                        content=content_str,
+                        is_error=bool(block.get("is_error", False)),
+                    )
+                )
             case _:
                 pass  # Forward-compatible: skip unknown block types
 
@@ -88,13 +90,9 @@ def _extract_usage(usage_dict: dict[str, Any] | None) -> UsageStats:
     return UsageStats(
         input_tokens=int(usage_dict.get("input_tokens", 0)),
         output_tokens=int(usage_dict.get("output_tokens", 0)),
-        cache_read_tokens=int(
-            usage_dict.get("cache_read_input_tokens", 0)
-            or usage_dict.get("cache_read_tokens", 0)
-        ),
+        cache_read_tokens=int(usage_dict.get("cache_read_input_tokens", 0) or usage_dict.get("cache_read_tokens", 0)),
         cache_write_tokens=int(
-            usage_dict.get("cache_creation_input_tokens", 0)
-            or usage_dict.get("cache_write_tokens", 0)
+            usage_dict.get("cache_creation_input_tokens", 0) or usage_dict.get("cache_write_tokens", 0)
         ),
     )
 
@@ -145,9 +143,7 @@ def parse_json_output(raw: str) -> StructuredResponse:
                     model = msg.get("model", "")
                 content = msg.get("content", [])
                 if isinstance(content, list):
-                    _parse_content_blocks(
-                        content, text_parts, thinking_parts, tool_uses, tool_results
-                    )
+                    _parse_content_blocks(content, text_parts, thinking_parts, tool_uses, tool_results)
                 # Per-message usage (aggregated into result; use result message instead)
                 # but capture here as fallback if no result message comes
                 msg_usage = msg.get("usage")
@@ -197,6 +193,7 @@ def parse_json_output(raw: str) -> StructuredResponse:
 
 # ─── Plain text (--print) parser ──────────────────────────────────────────────
 
+
 def parse_text_output(raw: str) -> StructuredResponse:
     """Parse plain text output from Claude CLI --print mode.
 
@@ -207,6 +204,7 @@ def parse_text_output(raw: str) -> StructuredResponse:
 
 
 # ─── Stderr usage extraction ─────────────────────────────────────────────────
+
 
 def _try_extract_usage_from_stderr(stderr: str) -> UsageStats | None:
     """Attempt to extract usage stats from stderr lines (opportunistic).
@@ -228,6 +226,7 @@ def _try_extract_usage_from_stderr(stderr: str) -> UsageStats | None:
 
 
 # ─── Main entry point ─────────────────────────────────────────────────────────
+
 
 def parse_output(raw: str, stderr: str = "") -> StructuredResponse:
     """Parse Claude CLI output — tries JSON first, falls back to plain text.

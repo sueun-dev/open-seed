@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class MemoryType(str, Enum):
-    SEMANTIC = "semantic"       # Facts, preferences, knowledge
-    EPISODIC = "episodic"       # Events, conversations
-    PROCEDURAL = "procedural"   # Workflows, how-to, skills
+class MemoryType(StrEnum):
+    SEMANTIC = "semantic"  # Facts, preferences, knowledge
+    EPISODIC = "episodic"  # Events, conversations
+    PROCEDURAL = "procedural"  # Workflows, how-to, skills
 
 
-class MemoryEvent(str, Enum):
+class MemoryEvent(StrEnum):
     ADD = "ADD"
     UPDATE = "UPDATE"
     DELETE = "DELETE"
@@ -24,6 +24,7 @@ class MemoryEvent(str, Enum):
 @dataclass
 class MemoryEntry:
     """A single memory entry."""
+
     id: str = ""
     content: str = ""
     memory_type: MemoryType = MemoryType.SEMANTIC
@@ -35,6 +36,7 @@ class MemoryEntry:
 @dataclass
 class HistoryRecord:
     """A single history record tracking memory changes."""
+
     id: str = ""
     memory_id: str = ""
     old_content: str = ""
@@ -46,6 +48,7 @@ class HistoryRecord:
 @dataclass
 class SearchResult:
     """A memory search result with relevance score."""
+
     entry: MemoryEntry
     score: float = 0.0
 
@@ -53,6 +56,7 @@ class SearchResult:
 @dataclass
 class FailurePattern:
     """A learned failure pattern from past pipeline runs."""
+
     task_pattern: str = ""
     error_type: str = ""
     root_cause: str = ""

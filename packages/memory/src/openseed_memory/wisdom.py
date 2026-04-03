@@ -17,10 +17,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from openseed_memory.store import MemoryStore
 from openseed_memory.types import MemoryType
+
+if TYPE_CHECKING:
+    from openseed_memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,7 @@ _WISDOM_TYPE = "wisdom"
 @dataclass
 class Wisdom:
     """Structured wisdom extracted from a pipeline run."""
+
     conventions: list[str] = field(default_factory=list)
     successes: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
@@ -89,6 +92,7 @@ async def extract_wisdom(
 
     try:
         from openseed_claude.agent import ClaudeAgent
+
         agent = ClaudeAgent()
         response = await agent.invoke(
             prompt=_EXTRACT_PROMPT.format(summary=summary),
@@ -108,7 +112,7 @@ def _parse_wisdom(raw: str) -> Wisdom:
     if start == -1 or end == -1:
         return Wisdom()
     try:
-        data = json.loads(raw[start:end + 1])
+        data = json.loads(raw[start : end + 1])
         return Wisdom(
             conventions=_to_str_list(data.get("conventions", [])),
             successes=_to_str_list(data.get("successes", [])),

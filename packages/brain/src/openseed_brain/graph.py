@@ -15,21 +15,21 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from openseed_brain.state import PipelineState
-from openseed_brain.nodes.intake import intake_node
-from openseed_brain.nodes.plan import plan_node
-from openseed_brain.nodes.implement import implement_node
-from openseed_brain.nodes.qa_gate import qa_gate_node
-from openseed_brain.nodes.sentinel import sentinel_check_node, fix_node
 from openseed_brain.nodes.deploy import deploy_node
+from openseed_brain.nodes.implement import implement_node
+from openseed_brain.nodes.intake import intake_node
 from openseed_brain.nodes.memorize import memorize_node
-from openseed_brain.routing import route_after_qa, route_after_intake
-from openseed_brain.retry import IMPLEMENT_RETRY, QA_RETRY, DEPLOY_RETRY
-from openseed_brain.subgraphs.qa_subgraph import build_qa_subgraph
+from openseed_brain.nodes.plan import plan_node
+from openseed_brain.nodes.qa_gate import qa_gate_node
+from openseed_brain.nodes.sentinel import fix_node, sentinel_check_node
+from openseed_brain.retry import DEPLOY_RETRY, IMPLEMENT_RETRY, QA_RETRY
+from openseed_brain.routing import route_after_intake, route_after_qa
+from openseed_brain.state import PipelineState
 from openseed_brain.subgraphs.fix_subgraph import build_fix_subgraph
+from openseed_brain.subgraphs.qa_subgraph import build_qa_subgraph
 
 
 def route_plan_to_specialists(state: PipelineState) -> list[Send] | Literal["implement"]:
@@ -55,17 +55,21 @@ def route_plan_to_specialists(state: PipelineState) -> list[Send] | Literal["imp
 
     try:
         # Import here to avoid circular deps at module level
-        from openseed_brain.task_router import _parse_routing_response
 
         # We can't await in a routing function, so we use Send() to dispatch
         # each task as a separate parallel branch. The implement_task node
         # will handle the actual specialist invocation.
         sends = []
         for task in plan.tasks:
-            sends.append(Send("implement_task", {
-                **state,
-                "_specialist_task": task,
-            }))
+            sends.append(
+                Send(
+                    "implement_task",
+                    {
+                        **state,
+                        "_specialist_task": task,
+                    },
+                )
+            )
 
         return sends if sends else "implement"
     except Exception:
@@ -80,7 +84,7 @@ async def implement_task_node(state: PipelineState) -> dict:
     identifying which PlanTask to implement. The specialist domain is determined
     by LLM routing within this node.
     """
-    from openseed_brain.nodes.implement import _run_specialist, _implement_fullstack
+    from openseed_brain.nodes.implement import _implement_fullstack, _run_specialist
     from openseed_brain.task_router import route_tasks
 
     task_obj = state.get("_specialist_task")
@@ -102,7 +106,6 @@ async def implement_task_node(state: PipelineState) -> dict:
 
     # Route this single task to its domain
     try:
-        from openseed_brain.specialists import VALID_DOMAINS
         routed = await route_tasks(plan, state["task"])
         # Find which domain this task was assigned to
         domain = "fullstack"
@@ -143,17 +146,16 @@ async def user_escalate_node(state: PipelineState) -> dict:
         qa_text = qa_result.synthesis[:300]
 
     status = (
-        f"\n{'='*60}\n"
+        f"\n{'=' * 60}\n"
         f"Pipeline has attempted {retry_count} fixes.\n"
         f"Current issues: {qa_text or error_summary}\n"
-        f"{'='*60}\n"
+        f"{'=' * 60}\n"
         f"오류가 좀 있는데 더 수정해볼까? (응답을 자유롭게 입력하세요)\n"
         f"> "
     )
 
     # Get user input
     try:
-        import sys
         print(status, end="", flush=True)
         user_response = input().strip()
     except (EOFError, KeyboardInterrupt):
@@ -177,6 +179,7 @@ async def user_escalate_node(state: PipelineState) -> dict:
     elif action == "deploy":
         # User says deploy as-is
         from openseed_core.types import QAResult, Verdict
+
         return {
             "qa_result": QAResult(
                 verdict=Verdict.PASS_WITH_WARNINGS,
@@ -210,13 +213,14 @@ async def _interpret_user_response(
     """
     try:
         from openseed_claude.agent import ClaudeAgent
+
         agent = ClaudeAgent()
         response = await agent.invoke(
             prompt=(
                 f"A coding pipeline asked the user if they want to continue fixing errors.\n\n"
                 f"Current errors: {error_summary[:300]}\n"
                 f"QA status: {qa_text[:300]}\n\n"
-                f"User's response: \"{user_response}\"\n\n"
+                f'User\'s response: "{user_response}"\n\n'
                 f"Interpret the user's intent. Answer EXACTLY one word:\n"
                 f"- 'continue' if they want to keep fixing (yes, ㅇㅇ, 해, 계속, fix it, etc.)\n"
                 f"- 'deploy' if they want to deploy/ship as-is (배포해, ship it, deploy, 그냥 써, etc.)\n"
@@ -287,8 +291,8 @@ def build_graph(use_subgraphs: bool = False, use_send: bool = False) -> StateGra
         "intake",
         route_after_intake,
         {
-            "plan": "plan",            # Normal: go to planning
-            "implement": "implement",   # Trivial: skip planning, implement directly
+            "plan": "plan",  # Normal: go to planning
+            "implement": "implement",  # Trivial: skip planning, implement directly
         },
     )
 
@@ -370,6 +374,7 @@ def compile_graph(
 
     if checkpoint_dir:
         import os
+
         os.makedirs(checkpoint_dir, exist_ok=True)
         # MemorySaver works with both sync and async — always safe.
         # For persistent checkpoints, the CLI runner sets up AsyncSqliteSaver
@@ -377,12 +382,15 @@ def compile_graph(
         if "checkpointer" not in kwargs:
             try:
                 from langgraph.checkpoint.memory import MemorySaver
+
                 kwargs["checkpointer"] = MemorySaver()
             except ImportError:
                 pass
 
     # Human-in-the-loop: pause before user_escalate so CLI/UI can get input
     if interrupt_on_escalation:
-        kwargs.setdefault("interrupt_before", []).append("user_escalate") if "interrupt_before" in kwargs else kwargs.update({"interrupt_before": ["user_escalate"]})
+        kwargs.setdefault("interrupt_before", []).append(
+            "user_escalate"
+        ) if "interrupt_before" in kwargs else kwargs.update({"interrupt_before": ["user_escalate"]})
 
     return graph.compile(**kwargs)

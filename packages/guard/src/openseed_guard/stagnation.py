@@ -9,7 +9,10 @@ Default threshold: 3 cycles of no progress before escalation.
 
 from __future__ import annotations
 
-from openseed_guard.progress import ProgressUpdate
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openseed_guard.progress import ProgressUpdate
 
 
 def is_stagnated(update: ProgressUpdate, threshold: int = 3) -> bool:

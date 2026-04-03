@@ -17,7 +17,6 @@ from typing import Any
 
 from openseed_core.subprocess import run_simple
 
-
 # ─── Constants ───────────────────────────────────────────────────────────────
 
 FAILURE_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required"}
@@ -25,8 +24,16 @@ FAILURE_STATES = {"failure", "error", "cancelled", "timed_out", "action_required
 FAILURE_BUCKETS = {"fail"}
 
 FAILURE_MARKERS = (
-    "error", "fail", "failed", "traceback", "exception",
-    "assert", "panic", "fatal", "timeout", "segmentation fault",
+    "error",
+    "fail",
+    "failed",
+    "traceback",
+    "exception",
+    "assert",
+    "panic",
+    "fatal",
+    "timeout",
+    "segmentation fault",
 )
 
 MAX_SNIPPET_LINES = 160
@@ -39,6 +46,7 @@ CONTEXT_LINES = 30
 @dataclass
 class CIFailure:
     """A single failing CI check with extracted log snippet."""
+
     check_name: str
     run_url: str = ""
     conclusion: str = ""
@@ -49,6 +57,7 @@ class CIFailure:
 @dataclass
 class CICheckResult:
     """Result of inspecting CI checks on a PR."""
+
     pr_number: int = 0
     total_checks: int = 0
     failures: list[CIFailure] = field(default_factory=list)
@@ -83,7 +92,8 @@ async def check_pr_ci(
     if pr_number is None:
         pr_view = await run_simple(
             ["gh", "pr", "view", "--json", "number"],
-            cwd=working_dir, timeout_seconds=10,
+            cwd=working_dir,
+            timeout_seconds=10,
         )
         if pr_view.exit_code != 0:
             return CICheckResult()
@@ -97,9 +107,9 @@ async def check_pr_ci(
 
     # Get all checks
     checks_result = await run_simple(
-        ["gh", "pr", "checks", str(pr_number),
-         "--json", "name,state,bucket,link,completedAt,workflow"],
-        cwd=working_dir, timeout_seconds=15,
+        ["gh", "pr", "checks", str(pr_number), "--json", "name,state,bucket,link,completedAt,workflow"],
+        cwd=working_dir,
+        timeout_seconds=15,
     )
 
     if checks_result.exit_code != 0:
@@ -134,7 +144,8 @@ async def check_pr_ci(
             run_id = _extract_run_id(link)
             if run_id:
                 failure.log_snippet = await _fetch_log_snippet(
-                    working_dir, run_id,
+                    working_dir,
+                    run_id,
                 )
                 failure.log_state = "ok" if failure.log_snippet else "log_unavailable"
         else:
@@ -159,11 +170,7 @@ def _is_failing(check: dict[str, Any]) -> bool:
     state = str(check.get("state", "")).lower()
     bucket = str(check.get("bucket", "")).lower()
 
-    return (
-        conclusion in FAILURE_CONCLUSIONS
-        or state in FAILURE_STATES
-        or bucket in FAILURE_BUCKETS
-    )
+    return conclusion in FAILURE_CONCLUSIONS or state in FAILURE_STATES or bucket in FAILURE_BUCKETS
 
 
 def _extract_run_id(url: str) -> str | None:
@@ -184,7 +191,8 @@ async def _fetch_log_snippet(
     """Fetch and extract failure snippet from a GitHub Actions run log."""
     result = await run_simple(
         ["gh", "run", "view", run_id, "--log"],
-        cwd=working_dir, timeout_seconds=30,
+        cwd=working_dir,
+        timeout_seconds=30,
     )
 
     if result.exit_code != 0:
@@ -228,7 +236,9 @@ def format_ci_failures_for_prompt(result: CICheckResult) -> str:
     if result.all_passed or not result.failures:
         return ""
 
-    parts = [f"GitHub CI failures on PR #{result.pr_number} ({len(result.failures)}/{result.total_checks} checks failed):"]
+    parts = [
+        f"GitHub CI failures on PR #{result.pr_number} ({len(result.failures)}/{result.total_checks} checks failed):"
+    ]
 
     for f in result.failures:
         parts.append(f"\n--- {f.check_name} ({f.conclusion}) ---")

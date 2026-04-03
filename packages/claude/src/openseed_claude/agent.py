@@ -7,9 +7,10 @@ Spawns Claude CLI directly as a subprocess.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openseed_core.auth.claude import require_claude_auth
 from openseed_core.config import ClaudeConfig
@@ -17,7 +18,6 @@ from openseed_core.events import EventBus, EventType
 from openseed_core.subprocess import StreamLine, run_streaming
 
 from openseed_claude.hooks import HookContext, HookEvent, HookRegistry
-from openseed_claude.mcp import MCPConfig
 from openseed_claude.messages import (
     CostEstimate,
     ToolUseBlock,
@@ -26,10 +26,14 @@ from openseed_claude.messages import (
 )
 from openseed_claude.parser import parse_output
 
+if TYPE_CHECKING:
+    from openseed_claude.mcp import MCPConfig
+
 
 @dataclass
 class ClaudeResponse:
     """Response from a Claude agent invocation."""
+
     text: str = ""
     thinking: str = ""
     tool_uses: list[ToolUseBlock] = field(default_factory=list)
@@ -147,6 +151,7 @@ class ClaudeAgent:
         # Apply role if specified
         if role:
             from openseed_claude.roles import get_role
+
             try:
                 r = get_role(role)
                 model = model or r.model
@@ -200,8 +205,10 @@ class ClaudeAgent:
 
             if self.event_bus:
                 await self.event_bus.emit_simple(
-                    EventType.AGENT_TEXT, node="claude",
-                    text=line.text[:500], model=resolved_model,
+                    EventType.AGENT_TEXT,
+                    node="claude",
+                    text=line.text[:500],
+                    model=resolved_model,
                 )
 
         # Track wall-clock duration
@@ -218,10 +225,9 @@ class ClaudeAgent:
             # Clean up the temporary MCP config file (if one was written)
             if _mcp_config_path is not None:
                 import os as _os
-                try:
+
+                with contextlib.suppress(OSError):
                     _os.unlink(_mcp_config_path)
-                except OSError:
-                    pass
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
@@ -316,7 +322,8 @@ class ClaudeAgent:
         # Emit richer event with token/cost data
         if self.event_bus:
             await self.event_bus.emit_simple(
-                EventType.NODE_COMPLETE, node="claude",
+                EventType.NODE_COMPLETE,
+                node="claude",
                 model=resolved_model,
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,

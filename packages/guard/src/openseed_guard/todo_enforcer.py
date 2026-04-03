@@ -17,6 +17,7 @@ from typing import Any
 @dataclass
 class TodoItem:
     """A tracked TODO item from the plan."""
+
     id: str
     description: str
     status: str = "pending"  # pending, in_progress, completed, failed
@@ -28,6 +29,7 @@ class TodoItem:
 @dataclass
 class TodoSnapshot:
     """Point-in-time snapshot of TODO state."""
+
     total: int = 0
     pending: int = 0
     in_progress: int = 0
@@ -131,7 +133,7 @@ Previous approaches have stagnated. You MUST try a COMPLETELY DIFFERENT strategy
 Do NOT repeat what you already tried.
 
 Failed tasks:
-{chr(10).join(f'- {t.id}: {t.description}' for t in failed)}
+{chr(10).join(f"- {t.id}: {t.description}" for t in failed)}
 
 Think of an alternative approach. Maybe:
 - Different library/framework

@@ -8,13 +8,12 @@ Brain → Claude/Codex → QA Gate → Sentinel → Body → Memory
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 
 import click
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
-from rich.text import Text
 
 console = Console()
 
@@ -32,23 +31,26 @@ def run_cmd(task: str, working_dir: str, config: str | None, plan_only: bool, re
 
 async def _run(task: str, working_dir: str, config_path: str | None, plan_only: bool, resume: str | None) -> None:
     # Suppress noisy checkpoint deserialization warnings
-    import warnings
     import logging
+    import warnings
+
     warnings.filterwarnings("ignore", message="Deserializing unregistered type")
     logging.getLogger("langgraph").setLevel(logging.ERROR)
-    from openseed_core.config import load_config
-    from openseed_core.events import EventBus, Event, EventType
     from openseed_brain import compile_graph, initial_state
+    from openseed_core.config import load_config
+    from openseed_core.events import Event, EventBus, EventType
 
     cfg = load_config(Path(config_path) if config_path else None)
     event_bus = EventBus()
 
     # Display header
-    console.print(Panel(
-        f"[bold blue]Open Seed v2[/bold blue]\n[dim]{task}[/dim]",
-        title="AGI Pipeline",
-        border_style="blue",
-    ))
+    console.print(
+        Panel(
+            f"[bold blue]Open Seed v2[/bold blue]\n[dim]{task}[/dim]",
+            title="AGI Pipeline",
+            border_style="blue",
+        )
+    )
 
     # Stream events to console
     async def on_event(event: Event) -> None:
@@ -92,15 +94,18 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
     try:
         import aiosqlite
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
         aiosqlite_conn = await aiosqlite.connect(db_path)
         checkpointer = AsyncSqliteSaver(aiosqlite_conn)
         await checkpointer.setup()
     except ImportError:
         from langgraph.checkpoint.memory import MemorySaver
+
         checkpointer = MemorySaver()
     except Exception as exc:
         console.print(f"  [yellow]Checkpoint DB unavailable ({exc}), using in-memory[/yellow]")
         from langgraph.checkpoint.memory import MemorySaver
+
         checkpointer = MemorySaver()
 
     graph = compile_graph(
@@ -112,7 +117,6 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
 
     try:
         # Use streaming to show real-time progress
-        from openseed_brain.streaming import PipelineStreamMode
 
         config = {"configurable": {"thread_id": f"run-{id(state)}"}}
 
@@ -141,7 +145,9 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
                 # Show QA verdict
                 qa = update.get("qa_result")
                 if qa:
-                    color = {"pass": "green", "pass_with_warnings": "green", "warn": "yellow", "block": "red"}.get(qa.verdict.value, "white")
+                    color = {"pass": "green", "pass_with_warnings": "green", "warn": "yellow", "block": "red"}.get(
+                        qa.verdict.value, "white"
+                    )
                     console.print(f"    [bold {color}]QA: {qa.verdict.value.upper()}[/] — {qa.synthesis[:100]}")
 
                 # Show deploy result
@@ -161,15 +167,19 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
 
         console.print()
         if not errors:
-            console.print(Panel(
-                "[bold green]Pipeline COMPLETE — zero errors[/bold green]",
-                border_style="green",
-            ))
+            console.print(
+                Panel(
+                    "[bold green]Pipeline COMPLETE — zero errors[/bold green]",
+                    border_style="green",
+                )
+            )
         else:
-            console.print(Panel(
-                f"[bold red]Pipeline finished with {len(errors)} error(s)[/bold red]",
-                border_style="red",
-            ))
+            console.print(
+                Panel(
+                    f"[bold red]Pipeline finished with {len(errors)} error(s)[/bold red]",
+                    border_style="red",
+                )
+            )
             for e in errors[:5]:
                 console.print(f"  [red]• {e.message}[/red]")
 
@@ -184,7 +194,5 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
         await event_bus.close()
         # Clean up async sqlite connection
         if checkpointer and hasattr(checkpointer, "conn"):
-            try:
+            with contextlib.suppress(Exception):
                 await checkpointer.conn.close()
-            except Exception:
-                pass

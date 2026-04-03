@@ -8,16 +8,16 @@ Used by both claude (Claude CLI) and codex (Codex CLI).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
-
-from openseed_core.errors import SubprocessError
+from typing import Any
 
 
 @dataclass
 class StreamLine:
     """A single line from subprocess stdout/stderr."""
+
     source: str  # "stdout" or "stderr"
     text: str
     parsed: dict[str, Any] | None = None  # If line is valid JSON
@@ -26,6 +26,7 @@ class StreamLine:
 @dataclass
 class SubprocessResult:
     """Result of a subprocess execution."""
+
     exit_code: int
     stdout: str = ""
     stderr: str = ""
@@ -54,6 +55,7 @@ async def run_streaming(
         SubprocessResult with exit code and captured output
     """
     import os
+
     full_env = {**os.environ, **(env or {})}
     # Remove CLAUDECODE to allow nested Claude CLI calls (e.g., when server runs inside Claude Code)
     full_env.pop("CLAUDECODE", None)
@@ -87,19 +89,15 @@ async def run_streaming(
 
             # Try to parse as JSON (NDJSON protocol)
             parsed = None
-            try:
+            with contextlib.suppress(json.JSONDecodeError, ValueError):
                 parsed = json.loads(text)
-            except (json.JSONDecodeError, ValueError):
-                pass
 
             sl = StreamLine(source=source, text=text, parsed=parsed)
             lines.append(sl)
 
             if on_line:
-                try:
+                with contextlib.suppress(Exception):
                     await on_line(sl)
-                except Exception:
-                    pass
 
     timed_out = False
     try:
@@ -113,26 +111,18 @@ async def run_streaming(
             timeout=timeout_seconds,
         )
         await process.wait()
-    except (asyncio.TimeoutError, asyncio.CancelledError):
+    except (TimeoutError, asyncio.CancelledError):
         timed_out = True
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             await process.wait()
-        except Exception:
-            pass
     except Exception:
         # Ensure process is always cleaned up (prevents zombie processes)
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             await process.wait()
-        except Exception:
-            pass
         raise
 
     return SubprocessResult(

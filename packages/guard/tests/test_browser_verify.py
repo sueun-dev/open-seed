@@ -7,7 +7,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from openseed_guard.browser_verify import BrowserEvidence, _ai_analyze_ui
 
 

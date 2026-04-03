@@ -7,10 +7,12 @@ No regex, no hardcoded rules — AI decides via structured data.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from openseed_brain.state import PipelineState
 from openseed_core.types import Verdict
+
+if TYPE_CHECKING:
+    from openseed_brain.state import PipelineState
 
 
 def route_after_intake(state: PipelineState) -> Literal["plan", "implement"]:

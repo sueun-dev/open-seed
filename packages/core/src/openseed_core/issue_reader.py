@@ -12,7 +12,6 @@ Pattern from: openhands/resolver/issue_handler.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from openseed_core.subprocess import run_simple
 
@@ -20,6 +19,7 @@ from openseed_core.subprocess import run_simple
 @dataclass
 class IssueContext:
     """Parsed issue ready for pipeline intake."""
+
     number: int
     title: str
     body: str
@@ -37,7 +37,7 @@ class IssueContext:
         if self.labels:
             parts.append(f"\nLabels: {', '.join(self.labels)}")
         if self.comments:
-            parts.append(f"\nRelevant comments:")
+            parts.append("\nRelevant comments:")
             for c in self.comments[:5]:
                 parts.append(f"- {c[:500]}")
         return "\n".join(parts)
@@ -70,9 +70,14 @@ async def read_github_issue(repo: str, issue_number: int) -> IssueContext:
     # Fetch issue details
     result = await run_simple(
         [
-            "gh", "issue", "view", str(issue_number),
-            "--repo", repo,
-            "--json", "title,body,labels,comments,author,url",
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            repo,
+            "--json",
+            "title,body,labels,comments,author,url",
         ],
         timeout_seconds=15,
     )
@@ -81,15 +86,11 @@ async def read_github_issue(repo: str, issue_number: int) -> IssueContext:
 
     try:
         data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"Invalid response from gh CLI: {result.stdout[:500]}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid response from gh CLI: {result.stdout[:500]}") from exc
 
     labels = [lb.get("name", "") for lb in data.get("labels", [])]
-    comments = [
-        c.get("body", "")
-        for c in data.get("comments", [])
-        if c.get("body")
-    ]
+    comments = [c.get("body", "") for c in data.get("comments", []) if c.get("body")]
 
     return IssueContext(
         number=issue_number,
@@ -122,9 +123,14 @@ async def read_gitlab_issue(repo: str, issue_number: int) -> IssueContext:
 
     result = await run_simple(
         [
-            "glab", "issue", "view", str(issue_number),
-            "--repo", repo,
-            "--output", "json",
+            "glab",
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            repo,
+            "--output",
+            "json",
         ],
         timeout_seconds=15,
     )
@@ -133,8 +139,8 @@ async def read_gitlab_issue(repo: str, issue_number: int) -> IssueContext:
 
     try:
         data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"Invalid response from glab CLI: {result.stdout[:500]}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid response from glab CLI: {result.stdout[:500]}") from exc
 
     return IssueContext(
         number=issue_number,

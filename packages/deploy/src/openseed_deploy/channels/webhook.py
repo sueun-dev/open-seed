@@ -31,12 +31,14 @@ class WebhookChannel(DeployChannel):
 
     async def deploy(self, working_dir: str, message: str = "") -> ChannelResult:
         """Send deployment notification via webhook."""
-        payload = json.dumps({
-            "event": "deploy",
-            "message": message or "Open Seed deployment",
-            "working_dir": working_dir,
-            "timestamp": datetime.now().isoformat(),
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "event": "deploy",
+                "message": message or "Open Seed deployment",
+                "working_dir": working_dir,
+                "timestamp": datetime.now().isoformat(),
+            }
+        ).encode("utf-8")
 
         headers = {"Content-Type": "application/json"}
         if self.token:

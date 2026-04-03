@@ -23,8 +23,11 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Ruff check (architecture + harness tests)
-        run: uv run ruff check tests/test_architecture.py packages/core/src/openseed_core/harness/ packages/core/tests/test_harness_checker.py
+      - name: Ruff check
+        run: uv run ruff check .
 
-      - name: Pytest (architecture + harness)
-        run: uv run pytest tests/test_architecture.py packages/core/tests/test_harness_checker.py -v
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Pytest
+        run: uv run pytest

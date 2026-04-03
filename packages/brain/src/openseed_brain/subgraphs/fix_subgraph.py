@@ -20,6 +20,7 @@ from langgraph.graph import END, START, StateGraph
 
 class FixSubState(TypedDict):
     """State schema for the Fix subgraph."""
+
     # Inputs (set by parent before entering subgraph)
     task: str
     working_dir: str
@@ -126,7 +127,7 @@ async def verify_node(state: FixSubState) -> dict:
     falls back to a lightweight file-existence check.
     """
     working_dir = state.get("working_dir", "")
-    task = state.get("task", "")
+    state.get("task", "")
 
     try:
         from openseed_guard.evidence import verify_implementation

@@ -23,11 +23,11 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class MCPTransport(str, Enum):
+class MCPTransport(StrEnum):
     STDIO = "stdio"
     SSE = "sse"
     HTTP = "http"

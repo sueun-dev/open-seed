@@ -45,6 +45,7 @@ def doctor_cmd() -> None:
 
     # Claude CLI
     from openseed_core.auth.claude import check_claude_auth
+
     claude = check_claude_auth()
     table.add_row(
         "Claude CLI",
@@ -54,6 +55,7 @@ def doctor_cmd() -> None:
 
     # Codex CLI
     from openseed_core.auth.openai import check_openai_auth
+
     openai = check_openai_auth()
     table.add_row(
         "Codex CLI",

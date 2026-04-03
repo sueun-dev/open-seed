@@ -21,12 +21,12 @@ def cli() -> None:
 
 
 # Import and register commands
-from openseed_cli.commands.run import run_cmd
 from openseed_cli.commands.auth import auth_cmd
 from openseed_cli.commands.doctor import doctor_cmd
-from openseed_cli.commands.serve import serve_cmd
 from openseed_cli.commands.memory import memory_cmd
 from openseed_cli.commands.resolve import resolve_cmd
+from openseed_cli.commands.run import run_cmd
+from openseed_cli.commands.serve import serve_cmd
 
 cli.add_command(run_cmd, "run")
 cli.add_command(auth_cmd, "auth")

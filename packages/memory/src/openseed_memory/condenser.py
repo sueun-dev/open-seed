@@ -12,7 +12,6 @@ Pattern from: openhands/memory/condenser/condenser.py
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 
 class Condenser(ABC):
@@ -37,7 +36,7 @@ class RecentCondenser(Condenser):
         if len(messages) <= self.keep_recent + 1:
             return messages
         # First message (task context) + last N
-        return [messages[0]] + messages[-self.keep_recent:]
+        return [messages[0]] + messages[-self.keep_recent :]
 
 
 class LLMSummaryCondenser(Condenser):
@@ -59,8 +58,8 @@ class LLMSummaryCondenser(Condenser):
             return messages
 
         first = messages[0]
-        middle = messages[1:-self.keep_recent]
-        recent = messages[-self.keep_recent:]
+        middle = messages[1 : -self.keep_recent]
+        recent = messages[-self.keep_recent :]
 
         # Summarize the middle section
         summary = await self._summarize(middle)
@@ -86,10 +85,7 @@ class LLMSummaryCondenser(Condenser):
             return response.text.strip()[:1000]
         except Exception:
             # Fallback: just count what happened
-            return (
-                f"{len(messages)} pipeline steps. "
-                f"Last: {messages[-1][:200] if messages else 'none'}"
-            )
+            return f"{len(messages)} pipeline steps. Last: {messages[-1][:200] if messages else 'none'}"
 
 
 class PipelineCondenser(Condenser):

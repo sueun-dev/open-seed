@@ -19,7 +19,7 @@ from openseed_claude.messages import (
     UsageStats,
     estimate_cost,
 )
-from openseed_claude.roles import Role, ROLES, get_role
+from openseed_claude.roles import ROLES, Role, get_role
 from openseed_claude.structured_output import OutputSchema, validate_output
 
 __all__ = [
