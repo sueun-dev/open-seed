@@ -14,8 +14,9 @@ Escalation chain: retry → retry (different approach) → Insight → User
 
 from __future__ import annotations
 
-from openseed_brain.state import PipelineState
 from openseed_core.types import Error, Verdict
+
+from openseed_brain.state import PipelineState
 
 
 async def sentinel_check_node(state: PipelineState) -> dict:
@@ -37,6 +38,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
     expected_files = [f.path for f in (plan.file_manifest if plan else [])]
     if not expected_files:
         import os
+
         try:
             for f in os.listdir(working_dir):
                 if f.startswith(".") or f == "node_modules" or f == "__pycache__":
@@ -49,6 +51,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
     if qa_result and qa_result.verdict == Verdict.PASS:
         try:
             from openseed_guard.execution_loop import ExecutionLoop
+
             loop = ExecutionLoop()
             verify = await loop._verify(
                 working_dir=working_dir,
@@ -72,6 +75,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
             # Critical: test/build commands actually fail → must fix
             if failing_cmds:
                 from openseed_core.types import QAResult
+
                 failed_qa = QAResult(
                     verdict=Verdict.WARN,
                     synthesis=f"Evidence: commands failed: {', '.join(failing_cmds[:3])}",
@@ -85,6 +89,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
 
             # Minor: just missing file paths (likely in subdirectory) → QA said PASS, trust it
             from openseed_core.types import QAResult
+
             passed_qa = QAResult(
                 verdict=Verdict.PASS_WITH_WARNINGS,
                 synthesis=f"QA passed. Minor evidence notes: {summary}",
@@ -100,6 +105,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
     # ── Stuck detection (OpenHands pattern) — check BEFORE evaluate_loop ──
     try:
         from openseed_guard.stuck_detector import detect_stuck
+
         stuck = await detect_stuck(
             step_results=state.get("step_results", []),
             messages=state.get("messages", []),
@@ -110,21 +116,22 @@ async def sentinel_check_node(state: PipelineState) -> dict:
             return {
                 "retry_count": retry_count + 1,
                 "messages": [
-                    f"Sentinel: STUCK ({stuck.pattern}) — {stuck.suggestion}. "
-                    f"Escalating after {retry_count} retries."
+                    f"Sentinel: STUCK ({stuck.pattern}) — {stuck.suggestion}. Escalating after {retry_count} retries."
                 ],
-                "errors": [Error(
-                    step="sentinel",
-                    message=f"Stuck pattern: {stuck.pattern}. {stuck.suggestion}",
-                )],
+                "errors": [
+                    Error(
+                        step="sentinel",
+                        message=f"Stuck pattern: {stuck.pattern}. {stuck.suggestion}",
+                    )
+                ],
             }
     except Exception:
         pass  # Stuck detection is best-effort; don't block pipeline
 
     # ── QA FAILED — evaluate_loop for retry/insight/escalate ──
     try:
-        from openseed_guard.loop import evaluate_loop, LoopState
         from openseed_guard.evidence import verify_implementation
+        from openseed_guard.loop import LoopState, evaluate_loop
 
         verification = await verify_implementation(working_dir=working_dir, expected_files=expected_files)
 
@@ -132,16 +139,22 @@ async def sentinel_check_node(state: PipelineState) -> dict:
             retry_count=retry_count,
             consecutive_failures=retry_count,
             failure_history=[
-                f"Attempt {i+1}: {(qa_result.findings[i].description if qa_result and i < len(qa_result.findings) else 'unknown')}"
+                f"Attempt {i + 1}: {(qa_result.findings[i].description if qa_result and i < len(qa_result.findings) else 'unknown')}"
                 for i in range(retry_count)
             ],
         )
+
+        # Include harness rules in evaluation context
+        harness_ctx = ""
+        micro_ctx = state.get("microagent_context", [])
+        if micro_ctx:
+            harness_ctx = "\n".join(micro_ctx)
 
         decision = await evaluate_loop(
             qa_result=qa_result,
             verification=verification,
             loop_state=loop_state,
-            task=task,
+            task=task + (f"\n\n[Harness rules]\n{harness_ctx}" if harness_ctx else ""),
         )
 
         if decision.action == "pass":
@@ -150,6 +163,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
             # Actually apply backoff — wait before returning so the next node doesn't fire instantly
             if decision.backoff_ms > 0:
                 import asyncio
+
                 await asyncio.sleep(decision.backoff_ms / 1000.0)
             label = "INSIGHT consulted" if decision.action == "insight" else "RETRY"
             return {
@@ -194,14 +208,12 @@ async def fix_node(state: PipelineState) -> dict:
 
     # Collect failure context from previous attempts — condensed to prevent context explosion
     all_messages = state.get("messages", [])
-    failure_history = [
-        m for m in all_messages
-        if "Fix:" in m or "RETRY" in m or "BLOCK" in m
-    ]
+    failure_history = [m for m in all_messages if "Fix:" in m or "RETRY" in m or "BLOCK" in m]
     # Condense if history is large (OpenHands pattern)
     if len(failure_history) > 15:
         try:
             from openseed_memory.condenser import condense_for_prompt
+
             condensed = await condense_for_prompt(failure_history, max_messages=10)
             failure_history = [condensed]
         except Exception:
@@ -224,7 +236,9 @@ async def fix_node(state: PipelineState) -> dict:
         await _git_stash_revert(working_dir)
 
         insight_advice = await _consult_insight_for_fix(
-            task, failure_history, qa_result,
+            task,
+            failure_history,
+            qa_result,
         )
 
         if insight_advice and insight_advice.should_abandon:
@@ -232,13 +246,14 @@ async def fix_node(state: PipelineState) -> dict:
             return {
                 "retry_count": retry_count + 1,
                 "messages": [
-                    f"Fix: Insight advises ABANDON after {retry_count} failures. "
-                    f"Diagnosis: {insight_advice.diagnosis}",
+                    f"Fix: Insight advises ABANDON after {retry_count} failures. Diagnosis: {insight_advice.diagnosis}",
                 ],
-                "errors": [Error(
-                    step="fix",
-                    message=f"Needs user help: {insight_advice.reason}",
-                )],
+                "errors": [
+                    Error(
+                        step="fix",
+                        message=f"Needs user help: {insight_advice.reason}",
+                    )
+                ],
             }
 
         # Re-stash so we have a clean revert point for Insight's approach
@@ -267,11 +282,18 @@ async def fix_node(state: PipelineState) -> dict:
         if parts:
             intake_context = "\n## Project Context\n" + "\n".join(parts) + "\n"
 
+    # Inject harness context (AGENTS.md boundaries) so fixes respect project rules
+    micro_ctx = state.get("microagent_context", [])
+    if micro_ctx:
+        intake_context += "\n## Project Harness (from AGENTS.md — fixes must follow these rules)\n"
+        intake_context += "\n".join(micro_ctx) + "\n"
+
     # Build skill-aware system prompt so fix preserves patterns from original implementation
     skill_system_prompt = _build_fix_skill_prompt(state)
 
     # ── Main fix with session continuity ──
     from openseed_claude.agent import ClaudeAgent
+
     agent = ClaudeAgent()
 
     # Deterministic session key based on task content
@@ -340,13 +362,14 @@ async def fix_node(state: PipelineState) -> dict:
             return {
                 "retry_count": retry_count + 1,
                 "messages": [
-                    f"Fix: NO files changed after 2 invocations. "
-                    f"Claude failed to edit anything. Attempt {retry_count}",
+                    f"Fix: NO files changed after 2 invocations. Claude failed to edit anything. Attempt {retry_count}",
                 ],
-                "errors": [Error(
-                    step="fix",
-                    message="Fix produced no file changes after explicit retry",
-                )],
+                "errors": [
+                    Error(
+                        step="fix",
+                        message="Fix produced no file changes after explicit retry",
+                    )
+                ],
             }
         all_changes = all_changes2
 
@@ -354,8 +377,7 @@ async def fix_node(state: PipelineState) -> dict:
     # Only sentinel_check_node increments retry_count on actual failures.
     return {
         "messages": [
-            f"Fix: {len(all_changes)} files changed "
-            f"({', '.join(all_changes[:5])}). Attempt {retry_count}",
+            f"Fix: {len(all_changes)} files changed ({', '.join(all_changes[:5])}). Attempt {retry_count}",
         ],
     }
 
@@ -375,27 +397,27 @@ def _build_findings_text(qa_result: object | None) -> str:
         key=lambda f: severity_order.get(f.severity.value, 5),
     )
     return "\n".join(
-        f"- [{f.severity.value}] {f.title}: {f.description} (file: {f.file})"
-        for f in sorted_findings[:10]
+        f"- [{f.severity.value}] {f.title}: {f.description} (file: {f.file})" for f in sorted_findings[:10]
     )
 
 
 async def _recall_past_fixes(task: str, qa_result: object | None) -> str:
     """Query memory for similar past failures. Returns context string or empty."""
     try:
-        from openseed_memory.store import MemoryStore
         from openseed_memory.failure import recall_similar_failures
+        from openseed_memory.store import MemoryStore
 
         store = MemoryStore()
         await store.initialize()
         findings = getattr(qa_result, "findings", None) or []
         patterns = await recall_similar_failures(
-            store, task, [f.description for f in findings],
+            store,
+            task,
+            [f.description for f in findings],
         )
         if patterns:
             return "\n\nPast similar failures:\n" + "\n".join(
-                f"- {p.error_type[:200]} -> {p.successful_fix}"
-                for p in patterns[:3]
+                f"- {p.error_type[:200]} -> {p.successful_fix}" for p in patterns[:3]
             )
     except Exception:
         pass
@@ -452,7 +474,8 @@ async def _consult_insight_for_fix(
         current_errors = []
         if qa_result and getattr(qa_result, "findings", None):
             current_errors = [
-                f.description for f in qa_result.findings[:10]  # type: ignore[union-attr]
+                f.description
+                for f in qa_result.findings[:10]  # type: ignore[union-attr]
             ]
 
         return await consult_insight(
@@ -466,16 +489,13 @@ async def _consult_insight_for_fix(
 
 def _snapshot_dir(d: str) -> dict[str, str]:
     """Hash all files in directory (excluding node_modules/.git)."""
-    import os
     import hashlib
+    import os
 
     hashes: dict[str, str] = {}
     try:
         for root, dirs, files in os.walk(d):
-            dirs[:] = [
-                x for x in dirs
-                if x not in ("node_modules", ".git", "__pycache__", ".venv")
-            ]
+            dirs[:] = [x for x in dirs if x not in ("node_modules", ".git", "__pycache__", ".venv")]
             for f in files:
                 path = os.path.join(root, f)
                 try:
@@ -514,12 +534,15 @@ def _build_fix_skill_prompt(state: PipelineState) -> str | None:
 
     try:
         from openseed_brain.skill_loader import get_skill_content
-        parts = ["You are fixing code that was written following these official skills. "
-                 "Preserve the patterns and conventions from these skills when making fixes.\n"]
+
+        parts = [
+            "You are fixing code that was written following these official skills. "
+            "Preserve the patterns and conventions from these skills when making fixes.\n"
+        ]
         for name in skill_names:
             content = get_skill_content(name)
             if content:
-                parts.append(f"\n{'='*40}\nSKILL: {name}\n{'='*40}\n{content}")
+                parts.append(f"\n{'=' * 40}\nSKILL: {name}\n{'=' * 40}\n{content}")
         return "\n".join(parts) if len(parts) > 1 else None
     except Exception:
         return None
