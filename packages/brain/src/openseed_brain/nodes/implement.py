@@ -40,15 +40,18 @@ non-interactive flags when available.
 - If a command hangs or times out, write the files manually instead of retrying the command."""
 
 _RULES_WEB = """\
-- If package.json is needed, create it with all deps
-- Run npm install after creating package.json if needed
+- If package.json is needed, create it with all deps — DO NOT run npm install yourself, \
+it will be run automatically after all files are written.
+- DO NOT run build commands (npm run build, npm run dev) — verification is handled \
+automatically in a later phase.
 - src/ subfolder is OK for source files, but package.json/index.html must be at the root
 - CORS: In development, allow ALL localhost origins (e.g. use an env variable like \
 FRONTEND_ORIGIN or default to a pattern that accepts any localhost port). NEVER hardcode \
 a specific port like 5173 — the dev server port can change.
 - REST updates: Always implement BOTH PUT (full replace, all fields required) AND \
 PATCH (partial update, only changed fields required) for every resource. A CRUD API \
-without PATCH is incomplete."""
+without PATCH is incomplete.
+- FOCUS ON WRITING FILES. Do not spend turns on install/build/test — just write complete code."""
 
 _RULES_FIX = """\
 - Make MINIMAL, targeted changes — do NOT rewrite files that are not broken
@@ -328,8 +331,8 @@ def _resolve_max_turns(intake: dict, has_plan: bool) -> int:
         # skip_planning path — simpler tasks
         return {"simple": 10, "moderate": 20, "complex": 30}.get(complexity, 20)
 
-    # With plan — specialist path
-    return {"simple": 12, "moderate": 20, "complex": 25}.get(complexity, 20)
+    # With plan — specialist path (file writing only, install/build handled separately)
+    return {"simple": 8, "moderate": 12, "complex": 18}.get(complexity, 12)
 
 
 # ─── Fullstack Fallback ─────────────────────────────────────────────────────
@@ -523,6 +526,128 @@ Read existing files, then write ALL missing files. No duplicates.""",
         summary=f"Claude: {arch_response.text[:200]} | Codex: {impl_response.text[:200]}",
         files_created=impl_response.files_created,
         raw_output=f"=== Claude ===\n{arch_response.text}\n\n=== Codex ===\n{impl_response.text}",
+    )
+
+
+# ─── Phase B: Install + Build + Fix loop ────────────────────────────────────
+
+
+async def _install_build_fix_loop(
+    state: PipelineState,
+    impl: Implementation,
+    max_fix_rounds: int = 3,
+) -> tuple[Implementation, list[str]]:
+    """
+    Run install + build commands deterministically, fix errors with AI.
+
+    Phase A (specialists) wrote all files. Now we:
+    1. Detect package manager and run install
+    2. Run build command
+    3. If build fails → AI fixes → rebuild (up to max_fix_rounds)
+    """
+    import os
+    import subprocess
+
+    working_dir = state["working_dir"]
+    messages: list[str] = []
+
+    # Detect what to install/build
+    has_package_json = os.path.isfile(os.path.join(working_dir, "package.json"))
+    has_pyproject = os.path.isfile(os.path.join(working_dir, "pyproject.toml"))
+    has_requirements = os.path.isfile(os.path.join(working_dir, "requirements.txt"))
+
+    if not (has_package_json or has_pyproject or has_requirements):
+        return impl, messages  # Nothing to install
+
+    # ── Step 1: Install dependencies ──
+    install_cmd = None
+    build_cmd = None
+
+    if has_package_json:
+        install_cmd = "npm install"
+        build_cmd = "npm run build"
+    elif has_pyproject:
+        install_cmd = "pip install -e ."
+        build_cmd = None  # Python projects don't always have a build step
+    elif has_requirements:
+        install_cmd = "pip install -r requirements.txt"
+        build_cmd = None
+
+    if install_cmd:
+        await _emit("implement.install_run", message=f"Running {install_cmd}...")
+        try:
+            result = subprocess.run(
+                install_cmd, shell=True, cwd=working_dir,
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                messages.append(f"Install: {install_cmd} succeeded")
+            else:
+                messages.append(f"Install: {install_cmd} failed: {result.stderr[:300]}")
+                # Try to fix install errors
+                await _fix_with_ai(working_dir, f"Install failed:\n{result.stderr[:500]}", state)
+                # Retry install
+                result = subprocess.run(
+                    install_cmd, shell=True, cwd=working_dir,
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0:
+                    messages.append("Install: fixed and succeeded on retry")
+                else:
+                    messages.append(f"Install: still failing after fix: {result.stderr[:200]}")
+        except subprocess.TimeoutExpired:
+            messages.append(f"Install: {install_cmd} timed out (120s)")
+        except Exception as exc:
+            messages.append(f"Install: error — {exc}")
+
+    # ── Step 2: Build + Fix loop ──
+    if build_cmd:
+        for round_num in range(1, max_fix_rounds + 1):
+            await _emit("implement.build_run", message=f"Building (round {round_num}/{max_fix_rounds})...")
+            try:
+                result = subprocess.run(
+                    build_cmd, shell=True, cwd=working_dir,
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0:
+                    messages.append(f"Build: succeeded on round {round_num}")
+                    break
+                else:
+                    error_output = (result.stderr + result.stdout)[:800]
+                    messages.append(f"Build: failed round {round_num}: {error_output[:200]}")
+                    await _emit("implement.build_fix", message=f"Build failed, fixing (round {round_num})...")
+                    await _fix_with_ai(working_dir, f"Build failed:\n{error_output}", state)
+            except subprocess.TimeoutExpired:
+                messages.append(f"Build: timed out round {round_num}")
+                break
+            except Exception as exc:
+                messages.append(f"Build: error round {round_num} — {exc}")
+                break
+        else:
+            messages.append(f"Build: still failing after {max_fix_rounds} fix rounds")
+
+    return impl, messages
+
+
+async def _fix_with_ai(working_dir: str, error_text: str, state: PipelineState) -> None:
+    """Ask AI to fix build/install errors."""
+    from openseed_claude.agent import ClaudeAgent
+
+    agent = ClaudeAgent()
+    await agent.invoke(
+        prompt=f"""Fix these errors in the project at {working_dir}.
+
+{error_text}
+
+Rules:
+- Read the failing files, fix the errors, write corrected files
+- Do NOT change features or logic — only fix the errors
+- If a dependency is missing from package.json, add it and note that npm install needs to run
+- If an import is wrong, fix it
+- Be precise and minimal""",
+        model="sonnet",
+        working_dir=working_dir,
+        max_turns=10,
     )
 
 
@@ -726,10 +851,15 @@ async def implement_node(state: PipelineState) -> dict:
         raw_output=combined_output,
     )
 
+    # ── Phase B: Install + Build + Fix loop ──
+    await _emit("implement.install", message="Installing dependencies and building...")
+    impl, install_msgs = await _install_build_fix_loop(state, impl)
+
     # Self-verify: lint/type check and auto-fix before QA Gate
     await _emit("implement.verify", message="Running lint and type checks...")
     label = f"specialists: {', '.join(domains_used)}"
     impl, extra = await _self_verify_and_fix(state, impl, label)
+    extra = install_msgs + extra
     await _emit("implement.done", message="Implementation complete")
 
     messages = [f"Implement [{label}]: {impl.summary[:300]}"] + extra
