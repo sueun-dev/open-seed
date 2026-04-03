@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import asyncio
 
-from openseed_brain.state import PipelineState, Implementation, PlanTask
 from openseed_brain.progress import emit_progress
+from openseed_brain.state import Implementation, PipelineState, PlanTask
 
 
 async def _emit(event_type: str, **data) -> None:
@@ -51,11 +51,26 @@ _RULES_FIX = """\
 - Do NOT add unrelated improvements, refactors, or features"""
 
 # Web-related tech stacks (triggers _RULES_WEB inclusion)
-_WEB_INDICATORS = frozenset({
-    "react", "vue", "next.js", "nuxt", "svelte", "sveltekit", "angular",
-    "express", "fastify", "fastapi", "flask", "django",
-    "vite", "webpack", "tailwind css", "prisma",
-})
+_WEB_INDICATORS = frozenset(
+    {
+        "react",
+        "vue",
+        "next.js",
+        "nuxt",
+        "svelte",
+        "sveltekit",
+        "angular",
+        "express",
+        "fastify",
+        "fastapi",
+        "flask",
+        "django",
+        "vite",
+        "webpack",
+        "tailwind css",
+        "prisma",
+    }
+)
 
 
 def _build_rules(intake: dict) -> str:
@@ -126,10 +141,11 @@ def _build_specialist_prompt(domain: str, tasks: list[PlanTask], intake: dict) -
     if skill_names:
         try:
             from openseed_brain.skill_loader import get_skill_content
+
             for name in skill_names:
                 content = get_skill_content(name)
                 if content:
-                    parts.append(f"\n\n{'='*60}\nOFFICIAL SKILL: {name}\n{'='*60}\n{content}")
+                    parts.append(f"\n\n{'=' * 60}\nOFFICIAL SKILL: {name}\n{'=' * 60}\n{content}")
         except Exception:
             pass
 
@@ -163,10 +179,7 @@ async def _run_specialist(
     # Build specialist prompt: base domain expertise + all assigned skill contents
     specialist_prompt = _build_specialist_prompt(domain, tasks, intake)
 
-
-    task_descriptions = "\n".join(
-        f"- {t.description} (files: {', '.join(t.files)})" for t in tasks
-    )
+    task_descriptions = "\n".join(f"- {t.description} (files: {', '.join(t.files)})" for t in tasks)
 
     plan_text = _build_plan_text(state)
 
@@ -178,7 +191,8 @@ async def _run_specialist(
     existing_instruction = (
         "\nThis is an EXISTING project. Read relevant existing files FIRST "
         "before writing, and match the existing code style.\n"
-        if existing else ""
+        if existing
+        else ""
     )
 
     # Context-aware rules
@@ -304,6 +318,7 @@ async def _implement_fullstack(state: PipelineState) -> Implementation:
     complexity, and project context.
     """
     from openseed_claude.agent import ClaudeAgent
+
     from openseed_brain.specialists import get_specialist_prompt
 
     agent = ClaudeAgent()
@@ -369,9 +384,7 @@ async def _integration_check(
 
     agent = ClaudeAgent()
 
-    summaries = "\n\n".join(
-        f"--- {r.summary[:200]} ---" for r in specialist_results
-    )
+    summaries = "\n\n".join(f"--- {r.summary[:200]} ---" for r in specialist_results)
 
     response = await agent.invoke(
         prompt=f"""Multiple domain specialists just implemented different parts of this project in parallel.
@@ -526,11 +539,10 @@ async def _self_verify_and_fix(
             return impl, extra_messages
 
         # Lint errors found — ask Claude to fix them immediately
-        extra_messages.append(
-            f"Implement [{label}]: {len(failures)} lint error(s) found, auto-fixing"
-        )
+        extra_messages.append(f"Implement [{label}]: {len(failures)} lint error(s) found, auto-fixing")
 
         from openseed_claude.agent import ClaudeAgent
+
         agent = ClaudeAgent()
         error_text = "\n".join(f"- {f}" for f in failures[:10])
 
@@ -563,12 +575,11 @@ Rules:
         if still_failing == 0:
             extra_messages.append(f"Implement [{label}]: all lint errors fixed")
         else:
-            extra_messages.append(
-                f"Implement [{label}]: {still_failing}/{len(lint_commands)} lint issues remain"
-            )
+            extra_messages.append(f"Implement [{label}]: {still_failing}/{len(lint_commands)} lint issues remain")
 
     except Exception as exc:
         import logging
+
         logging.getLogger(__name__).debug("Self-verify skipped: %s", exc)
 
     return impl, extra_messages
@@ -647,9 +658,7 @@ async def implement_node(state: PipelineState) -> dict:
         }
 
     # Execute specialists in parallel
-    domain_tasks = [
-        (domain, tasks) for domain, tasks in routed.items() if tasks
-    ]
+    domain_tasks = [(domain, tasks) for domain, tasks in routed.items() if tasks]
 
     domains_used = [d for d, _ in domain_tasks]
     task_counts = {d: len(t) for d, t in domain_tasks}
@@ -674,7 +683,7 @@ async def implement_node(state: PipelineState) -> dict:
     combined_summary = " | ".join(r.summary[:150] for r in specialist_results)
     combined_output = "\n\n".join(
         f"=== {domain} specialist ===\n{r.raw_output}"
-        for (domain, _), r in zip(domain_tasks, specialist_results)
+        for (domain, _), r in zip(domain_tasks, specialist_results, strict=False)
     )
 
     # Integration check — verify parallel outputs are compatible
@@ -696,9 +705,7 @@ async def implement_node(state: PipelineState) -> dict:
     impl, extra = await _self_verify_and_fix(state, impl, label)
     await _emit("implement.done", message="Implementation complete")
 
-    messages = [
-        f"Implement [{label}]: {impl.summary[:300]}"
-    ] + extra
+    messages = [f"Implement [{label}]: {impl.summary[:300]}"] + extra
 
     return {
         "implementation": impl,
