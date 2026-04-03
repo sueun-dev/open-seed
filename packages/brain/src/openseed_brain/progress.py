@@ -10,10 +10,8 @@ The callback is wired up by api_server before pipeline execution.
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 _callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 

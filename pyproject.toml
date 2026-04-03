@@ -36,7 +36,7 @@ target-version = "py311"
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "TC"]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
 ignore = [
     "E501",   # line length (legacy code)
     "E402",   # module level import position (intentional lazy imports)

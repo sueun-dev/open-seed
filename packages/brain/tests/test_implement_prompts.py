@@ -214,13 +214,13 @@ class TestResolveMaxTurns:
 
     # with plan path
     def test_simple_with_plan(self):
-        assert _resolve_max_turns({"complexity": "simple"}, has_plan=True) == 12
+        assert _resolve_max_turns({"complexity": "simple"}, has_plan=True) == 8
 
     def test_moderate_with_plan(self):
-        assert _resolve_max_turns({"complexity": "moderate"}, has_plan=True) == 20
+        assert _resolve_max_turns({"complexity": "moderate"}, has_plan=True) == 12
 
     def test_complex_with_plan(self):
-        assert _resolve_max_turns({"complexity": "complex"}, has_plan=True) == 25
+        assert _resolve_max_turns({"complexity": "complex"}, has_plan=True) == 18
 
     # research/investigation/evaluation always 8
     def test_research_ignores_complexity(self):

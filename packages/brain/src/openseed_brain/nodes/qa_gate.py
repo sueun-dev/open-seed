@@ -6,12 +6,10 @@ REAL implementation — calls openseed_qa_gate.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
 
 from openseed_core.types import QAResult, Verdict
 
-if TYPE_CHECKING:
-    from openseed_brain.state import PipelineState
+from openseed_brain.state import PipelineState
 
 
 async def qa_gate_node(state: PipelineState) -> dict:
