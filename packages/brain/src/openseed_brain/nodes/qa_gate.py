@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import os
 
-from openseed_brain.state import PipelineState
 from openseed_core.types import QAResult, Verdict
+
+from openseed_brain.state import PipelineState
 
 
 async def qa_gate_node(state: PipelineState) -> dict:
@@ -26,9 +27,9 @@ async def qa_gate_node(state: PipelineState) -> dict:
     context_parts = [
         f"ORIGINAL TASK: {task}",
         f"INTENT: {intent} | COMPLEXITY: {complexity}",
-        f"SCOPE: Review ONLY what the task asked for. Do not demand production-grade features "
-        f"(graceful shutdown, helmet, rate limiting, etc.) unless the task explicitly requires them. "
-        f"A simple task should produce simple code. BLOCK only for actual bugs, syntax errors, or security vulnerabilities.",
+        "SCOPE: Review ONLY what the task asked for. Do not demand production-grade features "
+        "(graceful shutdown, helmet, rate limiting, etc.) unless the task explicitly requires them. "
+        "A simple task should produce simple code. BLOCK only for actual bugs, syntax errors, or security vulnerabilities.",
     ]
 
     # Intent-specific review guidance
@@ -42,6 +43,12 @@ async def qa_gate_node(state: PipelineState) -> dict:
             "FOCUS: This is a simple task. Keep review proportional — "
             "do NOT demand extensive error handling, tests, or abstractions for trivial changes."
         )
+
+    # Inject harness context (AGENTS.md boundaries) for rule verification
+    micro_ctx = state.get("microagent_context", [])
+    if micro_ctx:
+        context_parts.append("\nPROJECT HARNESS (from AGENTS.md — verify code follows these rules):")
+        context_parts.extend(micro_ctx)
 
     context_parts.append("")
 
@@ -91,6 +98,7 @@ async def qa_gate_node(state: PipelineState) -> dict:
 
     try:
         from openseed_qa_gate.gate import run_qa_gate
+
         result = await run_qa_gate(context=context, working_dir=working_dir)
         return {
             "qa_result": result,
