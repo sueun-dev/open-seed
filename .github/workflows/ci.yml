@@ -21,7 +21,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: uv sync
+        run: |
+          uv sync
+          uv pip install -e packages/core -e packages/brain -e packages/claude -e packages/codex -e packages/qa_gate -e packages/guard -e packages/deploy -e packages/memory -e packages/cli
 
       - name: Ruff check
         run: uv run ruff check .
