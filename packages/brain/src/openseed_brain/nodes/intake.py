@@ -50,11 +50,25 @@ async def intake_node(state: PipelineState) -> dict:
     )
     if has_full_plan:
         logger.info("Intake: using pre-approved plan, sending to plan_node for structuring")
-        return {
+        # Still load microagents so harness rules propagate to implement/qa/sentinel
+        micro_ctx = []
+        try:
+            from openseed_core.microagent import format_microagent_context, load_microagents, select_relevant_microagents
+
+            agents = load_microagents(state["working_dir"])
+            relevant = await select_relevant_microagents(agents, state["task"])
+            if relevant:
+                micro_ctx = [format_microagent_context(relevant)]
+        except Exception:
+            pass
+        result: dict = {
             "skip_planning": False,
             "intake_analysis": existing,
             "messages": ["Intake: using user-approved plan"],
         }
+        if micro_ctx:
+            result["microagent_context"] = micro_ctx
+        return result
 
     task = state["task"]
     working_dir = state["working_dir"]
