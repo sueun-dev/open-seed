@@ -180,7 +180,8 @@ async def _run_specialist(
     from openseed_claude.agent import ClaudeAgent
 
     agent = ClaudeAgent()
-    intake = state.get("intake_analysis") or {}
+    intake_raw = state.get("intake_analysis") or {}
+    intake = intake_raw if isinstance(intake_raw, dict) else {}
 
     # Build specialist prompt: base domain expertise + all assigned skill contents
     specialist_prompt = _build_specialist_prompt(domain, tasks, intake)
@@ -348,7 +349,8 @@ async def _implement_fullstack(state: PipelineState) -> Implementation:
 
     agent = ClaudeAgent()
     plan_text = _build_plan_text(state)
-    intake = state.get("intake_analysis") or {}
+    intake_raw = state.get("intake_analysis") or {}
+    intake = intake_raw if isinstance(intake_raw, dict) else {}
 
     # Build intent-aware instruction
     action = _build_action_instruction(intake)

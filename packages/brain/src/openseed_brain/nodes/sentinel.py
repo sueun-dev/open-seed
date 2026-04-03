@@ -260,7 +260,8 @@ async def fix_node(state: PipelineState) -> dict:
         await _git_stash_push(working_dir)
 
     # ── Gather plan/intake context for fix ──
-    intake = state.get("intake_analysis") or {}
+    intake_raw = state.get("intake_analysis") or {}
+    intake = intake_raw if isinstance(intake_raw, dict) else {}
     plan = state.get("plan")
 
     plan_context = ""
@@ -515,7 +516,8 @@ def _build_fix_skill_prompt(state: PipelineState) -> str | None:
     Build system prompt from skills used during implementation.
     Ensures fix_node preserves patterns/conventions established by the original skills.
     """
-    intake = state.get("intake_analysis") or {}
+    intake_raw = state.get("intake_analysis") or {}
+    intake = intake_raw if isinstance(intake_raw, dict) else {}
     plan = state.get("plan")
     if not plan:
         return None

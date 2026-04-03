@@ -5,7 +5,7 @@ REAL implementation — calls openseed_deploy.
 
 from __future__ import annotations
 
-from openseed_brain.state import PipelineState, DeployResult
+from openseed_brain.state import DeployResult, PipelineState
 
 
 async def deploy_node(state: PipelineState) -> dict:
@@ -15,6 +15,7 @@ async def deploy_node(state: PipelineState) -> dict:
 
     try:
         from openseed_deploy.deployer import deploy
+
         result = await deploy(
             working_dir=working_dir,
             message=f"openseed: {task[:80]}",

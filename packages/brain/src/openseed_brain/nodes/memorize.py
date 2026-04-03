@@ -18,11 +18,12 @@ async def memorize_node(state: PipelineState) -> dict:
     errors = state.get("errors", [])
     plan = state.get("plan")
     qa_result = state.get("qa_result")
-    intake = state.get("intake_analysis") or {}
+    intake_raw = state.get("intake_analysis") or {}
+    intake = intake_raw if isinstance(intake_raw, dict) else {}
 
     try:
-        from openseed_memory.store import MemoryStore
         from openseed_memory.failure import record_failure
+        from openseed_memory.store import MemoryStore
 
         store = MemoryStore()
         await store.initialize()
@@ -64,8 +65,11 @@ async def memorize_node(state: PipelineState) -> dict:
             )
 
             total = (
-                len(wisdom.conventions) + len(wisdom.successes) +
-                len(wisdom.failures) + len(wisdom.gotchas) + len(wisdom.commands)
+                len(wisdom.conventions)
+                + len(wisdom.successes)
+                + len(wisdom.failures)
+                + len(wisdom.gotchas)
+                + len(wisdom.commands)
             )
             if total > 0:
                 await store_wisdom(store, task, wisdom, tech_stack=tech_stack)
