@@ -205,8 +205,11 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       } else {
         startRun([]);
       }
-    } catch {
-      startRun([]);
+    } catch (err) {
+      console.error("Intake failed:", err);
+      // Don't auto-run pipeline on intake failure — show error instead
+      setIntakeLoading(false);
+      return;
     } finally {
       setIntakeLoading(false);
     }

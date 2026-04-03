@@ -6,8 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:8000",
-      "/ws": { target: "ws://127.0.0.1:8000", ws: true },
+      "/api": {
+        target: "http://127.0.0.1:8200",
+        timeout: 300000,  // 5 minutes — intake can take a while
+      },
+      "/ws": { target: "ws://127.0.0.1:8200", ws: true },
     },
   },
   test: {
