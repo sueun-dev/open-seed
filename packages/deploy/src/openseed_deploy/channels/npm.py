@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+
+from openseed_core.subprocess import run_simple
+
 from openseed_deploy.channels.base import DeployChannel
 from openseed_deploy.types import ChannelResult
-from openseed_core.subprocess import run_simple
 
 
 class NpmChannel(DeployChannel):

@@ -22,10 +22,11 @@ from typing import Any
 @dataclass
 class StuckAnalysis:
     """Result of stuck detection."""
+
     is_stuck: bool = False
-    pattern: str = ""       # Which pattern matched
-    suggestion: str = ""    # LLM-generated suggestion for breaking out
-    confidence: str = "low" # "high", "medium", "low"
+    pattern: str = ""  # Which pattern matched
+    suggestion: str = ""  # LLM-generated suggestion for breaking out
+    confidence: str = "low"  # "high", "medium", "low"
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -61,9 +62,7 @@ async def detect_stuck(
         summaries = [getattr(s, "summary", str(s)) for s in last_4]
         if summaries and all(s == summaries[0] for s in summaries):
             # Exact match — definitely stuck
-            suggestion = await _get_llm_suggestion(
-                "repeating_output", summaries, messages[-3:]
-            )
+            suggestion = await _get_llm_suggestion("repeating_output", summaries, messages[-3:])
             return StuckAnalysis(
                 is_stuck=True,
                 pattern="repeating_output",
@@ -73,9 +72,7 @@ async def detect_stuck(
             )
         # Check semantic similarity via LLM
         if await _are_semantically_identical(summaries):
-            suggestion = await _get_llm_suggestion(
-                "repeating_output", summaries, messages[-3:]
-            )
+            suggestion = await _get_llm_suggestion("repeating_output", summaries, messages[-3:])
             return StuckAnalysis(
                 is_stuck=True,
                 pattern="repeating_output",
@@ -89,9 +86,7 @@ async def detect_stuck(
         last_3 = errors[-3:]
         error_msgs = [getattr(e, "message", str(e)) for e in last_3]
         if error_msgs and all(m == error_msgs[0] for m in error_msgs):
-            suggestion = await _get_llm_suggestion(
-                "repeating_errors", error_msgs, messages[-3:]
-            )
+            suggestion = await _get_llm_suggestion("repeating_errors", error_msgs, messages[-3:])
             return StuckAnalysis(
                 is_stuck=True,
                 pattern="repeating_errors",
@@ -100,9 +95,7 @@ async def detect_stuck(
                 details={"repeated_error": error_msgs[0][:200]},
             )
         if await _are_semantically_identical(error_msgs):
-            suggestion = await _get_llm_suggestion(
-                "repeating_errors", error_msgs, messages[-3:]
-            )
+            suggestion = await _get_llm_suggestion("repeating_errors", error_msgs, messages[-3:])
             return StuckAnalysis(
                 is_stuck=True,
                 pattern="repeating_errors",
@@ -131,9 +124,7 @@ async def detect_stuck(
         last_6 = step_results[-6:]
         summaries_6 = [getattr(s, "summary", str(s)) for s in last_6]
         if _has_alternating_pattern(summaries_6):
-            suggestion = await _get_llm_suggestion(
-                "alternating", summaries_6, messages[-3:]
-            )
+            suggestion = await _get_llm_suggestion("alternating", summaries_6, messages[-3:])
             return StuckAnalysis(
                 is_stuck=True,
                 pattern="alternating",

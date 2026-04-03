@@ -7,22 +7,16 @@ Covers:
   3. Roles    — pure unit tests for role registry and get_role
   4. ClaudeAgent — mocked subprocess tests for invoke()
 """
+
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from openseed_claude.messages import (
-    CostEstimate,
     StructuredResponse,
-    TextBlock,
-    ThinkingBlock,
-    ToolResultBlock,
-    ToolUseBlock,
     UsageStats,
     estimate_cost,
 )
@@ -32,8 +26,7 @@ from openseed_claude.parser import (
     parse_output,
     parse_text_output,
 )
-from openseed_claude.roles import ROLES, Role, get_role
-
+from openseed_claude.roles import ROLES, get_role
 
 # ─── Shared fixtures ──────────────────────────────────────────────────────────
 
@@ -90,6 +83,7 @@ SAMPLE_NDJSON_MULTI_ASSISTANT = (
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. Messages — pure unit tests
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 class TestUsageStats:
     def test_usage_stats_total_tokens(self):
@@ -190,6 +184,7 @@ class TestStructuredResponseDefaults:
 # ═════════════════════════════════════════════════════════════════════════════
 # 2. Parser — pure unit tests (most critical)
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 class TestParseJsonOutput:
     def test_parse_json_output_assistant_message(self):
@@ -393,7 +388,7 @@ class TestTryExtractUsageFromStderr:
         assert usage.output_tokens == 60
 
     def test_try_extract_usage_from_stderr_multiline(self):
-        stderr = "Some log line\n{\"input_tokens\":50,\"output_tokens\":25}\nAnother log"
+        stderr = 'Some log line\n{"input_tokens":50,"output_tokens":25}\nAnother log'
         usage = _try_extract_usage_from_stderr(stderr)
         assert usage is not None
         assert usage.input_tokens == 50
@@ -417,6 +412,7 @@ class TestTryExtractUsageFromStderr:
 # ═════════════════════════════════════════════════════════════════════════════
 # 3. Roles — pure unit tests
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 class TestRoles:
     def test_get_role_architect(self):
@@ -463,9 +459,7 @@ class TestRoles:
     def test_role_has_max_turns(self):
         # All roles are Role dataclasses; max_turns defaults to None
         for name, role in ROLES.items():
-            assert isinstance(role.max_turns, (int, type(None))), (
-                f"Role {name} has invalid max_turns type"
-            )
+            assert isinstance(role.max_turns, (int, type(None))), f"Role {name} has invalid max_turns type"
 
     def test_all_roles_have_system_prompt(self):
         for name, role in ROLES.items():
@@ -483,6 +477,7 @@ class TestRoles:
 # ═════════════════════════════════════════════════════════════════════════════
 # 4. ClaudeAgent — mocked subprocess tests
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class _FakeStreamLine:
@@ -509,10 +504,7 @@ def _make_fake_result(text: str = "Mocked response", session_id: str = "sess-moc
         f'{{"type":"result","session_id":"{session_id}","duration_ms":1200,"num_turns":1,'
         f'"usage":{{"input_tokens":100,"output_tokens":50}}}}'
     )
-    lines = [
-        _FakeStreamLine(source="stdout", text=line)
-        for line in ndjson.splitlines()
-    ]
+    lines = [_FakeStreamLine(source="stdout", text=line) for line in ndjson.splitlines()]
     return _FakeRunResult(stdout=ndjson, stderr="", lines=lines)
 
 
@@ -533,6 +525,7 @@ def fake_config():
 def agent(fake_config):
     """ClaudeAgent with mocked CLI resolution and subprocess."""
     from openseed_claude.agent import ClaudeAgent
+
     with patch("openseed_claude.agent.require_claude_auth", return_value="/usr/local/bin/claude"):
         a = ClaudeAgent(config=fake_config)
         a._cli_path = "/usr/local/bin/claude"
@@ -577,15 +570,13 @@ class TestClaudeAgent:
         # Usage from NDJSON: 100 input, 50 output tokens on sonnet pricing
         assert response.usage.input_tokens == 100
         assert response.usage.output_tokens == 50
-        assert response.cost.total_cost == pytest.approx(
-            (100 / 1_000_000) * 3.0 + (50 / 1_000_000) * 15.0
-        )
+        assert response.cost.total_cost == pytest.approx((100 / 1_000_000) * 3.0 + (50 / 1_000_000) * 15.0)
 
     async def test_invoke_continue_session(self, agent):
         # First call — establishes session
         fake1 = _make_fake_result("First turn", session_id="sess-cont")
         with patch("openseed_claude.agent.run_streaming", new_callable=AsyncMock, return_value=fake1):
-            r1 = await agent.invoke("First question")
+            await agent.invoke("First question")
         assert agent._last_session_id == "sess-cont"
 
         # Second call — continues session

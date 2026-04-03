@@ -11,14 +11,18 @@ Categories enable:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from pathlib import Path
+from enum import StrEnum
+from typing import TYPE_CHECKING
 
-from openseed_qa_gate.types import AgentDefinition
 from openseed_qa_gate.agent_loader import load_agents_from_dir
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class AgentCategory(str, Enum):
+    from openseed_qa_gate.types import AgentDefinition
+
+
+class AgentCategory(StrEnum):
     CORE_DEVELOPMENT = "01-core-development"
     LANGUAGE_SPECIALISTS = "02-language-specialists"
     INFRASTRUCTURE = "03-infrastructure"

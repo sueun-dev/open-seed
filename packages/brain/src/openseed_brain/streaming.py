@@ -31,11 +31,14 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, AsyncIterator, Union
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
-class PipelineStreamMode(str, Enum):
+class PipelineStreamMode(StrEnum):
     """Streaming modes supported by the Open Seed pipeline.
 
     Maps 1-to-1 to LangGraph's StreamMode literal strings so they can be
@@ -79,11 +82,12 @@ class StreamEvent:
 # Core streaming function
 # ---------------------------------------------------------------------------
 
+
 async def stream_pipeline(
     compiled_graph: Any,
     initial_state: dict[str, Any],
     thread_id: str = "default",
-    mode: Union[PipelineStreamMode, list[PipelineStreamMode]] = PipelineStreamMode.UPDATES,
+    mode: PipelineStreamMode | list[PipelineStreamMode] = PipelineStreamMode.UPDATES,
     event_bus: Any = None,
 ) -> AsyncIterator[StreamEvent]:
     """Stream pipeline execution events from a compiled LangGraph.
@@ -112,9 +116,7 @@ async def stream_pipeline(
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
 
     # Normalise to list
-    modes: list[PipelineStreamMode] = (
-        [mode] if isinstance(mode, PipelineStreamMode) else list(mode)
-    )
+    modes: list[PipelineStreamMode] = [mode] if isinstance(mode, PipelineStreamMode) else list(mode)
 
     # LangGraph expects the raw string values
     lg_modes: list[str] = [m.value for m in modes]
@@ -165,13 +167,14 @@ async def stream_pipeline(
 # High-level convenience runner
 # ---------------------------------------------------------------------------
 
+
 async def run_pipeline_streaming(
     task: str,
     working_dir: str,
     provider: str = "claude",
     checkpoint_dir: str | None = None,
     thread_id: str = "default",
-    mode: Union[PipelineStreamMode, list[PipelineStreamMode]] = PipelineStreamMode.UPDATES,
+    mode: PipelineStreamMode | list[PipelineStreamMode] = PipelineStreamMode.UPDATES,
     event_bus: Any = None,
 ) -> AsyncIterator[StreamEvent]:
     """Compile the graph and stream pipeline execution.
@@ -222,6 +225,7 @@ async def run_pipeline_streaming(
 # ---------------------------------------------------------------------------
 # Internal chunk parser
 # ---------------------------------------------------------------------------
+
 
 def _parse_chunk(mode_name: str, chunk: Any, ts: int) -> StreamEvent:
     """Convert a raw LangGraph stream chunk to a `StreamEvent`.

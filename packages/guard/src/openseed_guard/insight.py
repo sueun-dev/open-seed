@@ -19,6 +19,7 @@ from openseed_core.events import EventBus, EventType
 @dataclass
 class InsightAdvice:
     """Deep diagnosis and alternative strategy from Insight."""
+
     diagnosis: str = ""
     suggested_approach: str = ""
     should_abandon: bool = False
@@ -64,7 +65,7 @@ async def consult_insight(
 {task}
 
 ## Failure History ({len(failure_history)} attempts)
-{chr(10).join(f"Attempt {i+1}: {h}" for i, h in enumerate(failure_history[-5:]))}
+{chr(10).join(f"Attempt {i + 1}: {h}" for i, h in enumerate(failure_history[-5:]))}
 
 ## Current Errors
 {chr(10).join(f"- {e}" for e in current_errors[:10])}
@@ -86,11 +87,12 @@ Output JSON:
 
     # Parse response
     import json
+
     try:
         start = response.text.find("{")
         end = response.text.rfind("}")
         if start != -1 and end > start:
-            data = json.loads(response.text[start:end + 1])
+            data = json.loads(response.text[start : end + 1])
             return InsightAdvice(**data)
     except (json.JSONDecodeError, TypeError):
         pass

@@ -8,14 +8,17 @@ Uses the backend factory to select the best available store:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openseed_core.config import MemoryConfig
 
 logger = logging.getLogger(__name__)
 from openseed_core.events import EventBus, EventType
-from openseed_memory.backends.base import MemoryBackend
-from openseed_memory.types import MemoryEntry, MemoryEvent, SearchResult, MemoryType
+
+from openseed_memory.types import MemoryEntry, MemoryEvent, MemoryType, SearchResult
+
+if TYPE_CHECKING:
+    from openseed_memory.backends.base import MemoryBackend
 
 
 class MemoryStore:
@@ -32,6 +35,7 @@ class MemoryStore:
 
         try:
             from openseed_memory.backends.factory import create_backend
+
             self._backend = create_backend(self.config)
             self._backend_type = type(self._backend).__name__
         except Exception as exc:
@@ -39,9 +43,15 @@ class MemoryStore:
 
         self._initialized = True
 
-    async def add(self, content: str, user_id: str = "default", agent_id: str = "",
-                  memory_type: MemoryType = MemoryType.SEMANTIC, metadata: dict[str, Any] | None = None,
-                  infer: bool = True) -> str | None:
+    async def add(
+        self,
+        content: str,
+        user_id: str = "default",
+        agent_id: str = "",
+        memory_type: MemoryType = MemoryType.SEMANTIC,
+        metadata: dict[str, Any] | None = None,
+        infer: bool = True,
+    ) -> str | None:
         """
         Store content in memory.
 
@@ -69,8 +79,9 @@ class MemoryStore:
 
         return await self._add_raw(content, user_id, agent_id, memory_type, metadata)
 
-    async def _add_raw(self, content: str, user_id: str, agent_id: str,
-                       memory_type: MemoryType, metadata: dict[str, Any] | None) -> str | None:
+    async def _add_raw(
+        self, content: str, user_id: str, agent_id: str, memory_type: MemoryType, metadata: dict[str, Any] | None
+    ) -> str | None:
         """Store content directly without LLM processing."""
         assert self._backend is not None
         extra = dict(metadata or {})
@@ -85,15 +96,18 @@ class MemoryStore:
         )
 
         if self.event_bus:
-            await self.event_bus.emit_simple(EventType.MEMORY_STORE, node="memory",
-                                             content=content[:200], memory_type=memory_type.value)
+            await self.event_bus.emit_simple(
+                EventType.MEMORY_STORE, node="memory", content=content[:200], memory_type=memory_type.value
+            )
         return mem_id or None
 
-    async def _add_with_inference(self, content: str, user_id: str, agent_id: str,
-                                   metadata: dict[str, Any] | None) -> str | None:
+    async def _add_with_inference(
+        self, content: str, user_id: str, agent_id: str, metadata: dict[str, Any] | None
+    ) -> str | None:
         """Run LLM fact extraction and apply decisions. Returns primary id or None."""
         try:
             from openseed_memory.fact_extractor import FactExtractor
+
             extractor = FactExtractor()
             decisions = await extractor.extract(content=content, store=self, user_id=user_id)
         except Exception as exc:
@@ -116,7 +130,11 @@ class MemoryStore:
                 extra["reasoning"] = decision.reasoning
 
             if decision.action == MemoryEvent.ADD and decision.content:
-                mem_type = MemoryType(decision.memory_type) if decision.memory_type in MemoryType._value2member_map_ else MemoryType.SEMANTIC
+                mem_type = (
+                    MemoryType(decision.memory_type)
+                    if decision.memory_type in MemoryType._value2member_map_
+                    else MemoryType.SEMANTIC
+                )
                 mem_id = await self._add_raw(decision.content, user_id, agent_id, mem_type, extra)
                 if primary_id is None:
                     primary_id = mem_id
@@ -151,8 +169,9 @@ class MemoryStore:
         items = self._backend.search(query=query, user_id=user_id, limit=limit, filters=filters)
 
         if self.event_bus:
-            await self.event_bus.emit_simple(EventType.MEMORY_RECALL, node="memory",
-                                             query=query[:200], results_count=len(items))
+            await self.event_bus.emit_simple(
+                EventType.MEMORY_RECALL, node="memory", query=query[:200], results_count=len(items)
+            )
 
         search_results = [
             SearchResult(
@@ -170,6 +189,7 @@ class MemoryStore:
         if rerank and len(search_results) > 3:
             try:
                 from openseed_memory.reranker import Reranker
+
                 reranker = Reranker()
                 search_results = await reranker.rerank(query=query, results=search_results)
             except Exception as exc:

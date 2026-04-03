@@ -93,9 +93,7 @@ async def fork_from_checkpoint(
     }
     snapshot = await graph.aget_state(source_config)
     if snapshot is None:
-        raise ValueError(
-            f"No checkpoint {checkpoint_id!r} found in thread {thread_id!r}"
-        )
+        raise ValueError(f"No checkpoint {checkpoint_id!r} found in thread {thread_id!r}")
 
     new_config = {
         "configurable": {

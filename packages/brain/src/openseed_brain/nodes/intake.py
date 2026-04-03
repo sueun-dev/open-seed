@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from openseed_brain.progress import emit_progress
-from openseed_brain.state import PipelineState
+
+if TYPE_CHECKING:
+    from openseed_brain.state import PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +56,11 @@ async def intake_node(state: PipelineState) -> dict:
         # Still load microagents so harness rules propagate to implement/qa/sentinel
         micro_ctx = []
         try:
-            from openseed_core.microagent import format_microagent_context, load_microagents, select_relevant_microagents
+            from openseed_core.microagent import (
+                format_microagent_context,
+                load_microagents,
+                select_relevant_microagents,
+            )
 
             agents = load_microagents(state["working_dir"])
             relevant = await select_relevant_microagents(agents, state["task"])

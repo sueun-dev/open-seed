@@ -8,7 +8,6 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from openseed_core.issue_reader import IssueContext, read_github_issue
 
 
@@ -47,14 +46,16 @@ class TestIssueContext:
 class TestReadGithubIssue:
     @pytest.mark.asyncio
     async def test_successful_read(self) -> None:
-        gh_response = json.dumps({
-            "title": "Login page crashes",
-            "body": "Steps to reproduce: click login button",
-            "labels": [{"name": "bug"}, {"name": "critical"}],
-            "comments": [{"body": "Same issue here"}],
-            "author": {"login": "user123"},
-            "url": "https://github.com/owner/repo/issues/42",
-        })
+        gh_response = json.dumps(
+            {
+                "title": "Login page crashes",
+                "body": "Steps to reproduce: click login button",
+                "labels": [{"name": "bug"}, {"name": "critical"}],
+                "comments": [{"body": "Same issue here"}],
+                "author": {"login": "user123"},
+                "url": "https://github.com/owner/repo/issues/42",
+            }
+        )
 
         mock_version = AsyncMock()
         mock_version.return_value.exit_code = 0

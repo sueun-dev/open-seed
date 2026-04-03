@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from openseed_core.config import CronConfig
+
 from openseed_deploy.types import CronJob
 
 
@@ -37,8 +38,11 @@ class CronStore:
         data = []
         for j in jobs:
             d = {
-                "id": j.id, "name": j.name, "schedule": j.schedule,
-                "task": j.task, "enabled": j.enabled,
+                "id": j.id,
+                "name": j.name,
+                "schedule": j.schedule,
+                "task": j.task,
+                "enabled": j.enabled,
                 "last_status": j.last_status,
                 "created_at": j.created_at.isoformat() if j.created_at else None,
                 "last_run": j.last_run.isoformat() if j.last_run else None,

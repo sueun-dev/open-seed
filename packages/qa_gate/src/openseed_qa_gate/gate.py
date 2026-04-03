@@ -14,15 +14,19 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from openseed_core.config import QAGateConfig
 from openseed_core.events import EventBus, EventType
 from openseed_core.types import Finding, QAResult, Severity, Verdict
+
 from openseed_qa_gate.agent_loader import load_active_agents
 from openseed_qa_gate.agent_selector import select_agents
 from openseed_qa_gate.specialist import run_specialist
 from openseed_qa_gate.synthesizer import synthesize
-from openseed_qa_gate.types import AgentDefinition
+
+if TYPE_CHECKING:
+    from openseed_qa_gate.types import AgentDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +109,14 @@ async def run_qa_gate(
     for r in results:
         if isinstance(r, Exception):
             from openseed_qa_gate.types import SpecialistResult
-            specialist_results.append(SpecialistResult(
-                agent_name="unknown",
-                success=False,
-                error=str(r),
-            ))
+
+            specialist_results.append(
+                SpecialistResult(
+                    agent_name="unknown",
+                    success=False,
+                    error=str(r),
+                )
+            )
         else:
             specialist_results.append(r)
 
@@ -221,6 +228,7 @@ async def _run_staged(
     if event_bus:
         try:
             from openseed_core.events import EventType
+
             await event_bus.emit_simple(
                 EventType.QA_VERDICT,
                 node="qa_gate",
@@ -255,7 +263,7 @@ def _resolve_verdict(
     The severity-based check acts as a safety net, not the primary logic.
     """
     verdict_map = {"pass": Verdict.PASS, "warn": Verdict.WARN, "block": Verdict.BLOCK}
-    base = verdict_map.get(llm_verdict, None) if llm_verdict else None
+    base = verdict_map.get(llm_verdict) if llm_verdict else None
 
     # Safety floor: BLOCK on critical findings regardless of LLM opinion
     has_critical = any(f.severity == Severity.CRITICAL for f in findings)

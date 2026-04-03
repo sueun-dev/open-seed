@@ -15,6 +15,7 @@ from openseed_core.subprocess import run_simple
 @dataclass
 class Evidence:
     """Concrete evidence that something is done/working."""
+
     check: str
     passed: bool
     detail: str = ""
@@ -23,6 +24,7 @@ class Evidence:
 @dataclass
 class VerificationResult:
     """Result of verifying implementation against claims."""
+
     all_passed: bool
     evidence: list[Evidence] = field(default_factory=list)
     missing_files: list[str] = field(default_factory=list)
@@ -44,28 +46,34 @@ async def verify_files_exist(
     for f in expected_files:
         full_path = os.path.join(working_dir, f)
         if os.path.isfile(full_path):
-            evidence.append(Evidence(
-                check=f"file exists: {f}",
-                passed=True,
-                detail=f"Found at {full_path}",
-            ))
+            evidence.append(
+                Evidence(
+                    check=f"file exists: {f}",
+                    passed=True,
+                    detail=f"Found at {full_path}",
+                )
+            )
             continue
 
         # Fuzzy search: look for the filename in subdirectories
         basename = os.path.basename(f)
         found_at = _find_file_recursive(working_dir, basename)
         if found_at:
-            evidence.append(Evidence(
-                check=f"file exists: {f}",
-                passed=True,
-                detail=f"Found at {found_at} (expected {full_path})",
-            ))
+            evidence.append(
+                Evidence(
+                    check=f"file exists: {f}",
+                    passed=True,
+                    detail=f"Found at {found_at} (expected {full_path})",
+                )
+            )
         else:
-            evidence.append(Evidence(
-                check=f"file exists: {f}",
-                passed=False,
-                detail=f"MISSING: {full_path} (also searched subdirectories)",
-            ))
+            evidence.append(
+                Evidence(
+                    check=f"file exists: {f}",
+                    passed=False,
+                    detail=f"MISSING: {full_path} (also searched subdirectories)",
+                )
+            )
     return evidence
 
 
@@ -73,10 +81,7 @@ def _find_file_recursive(root: str, filename: str) -> str | None:
     """Search for a filename in directory tree, skipping node_modules/.git."""
     try:
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [
-                d for d in dirnames
-                if d not in ("node_modules", ".git", "__pycache__", ".venv", "dist")
-            ]
+            dirnames[:] = [d for d in dirnames if d not in ("node_modules", ".git", "__pycache__", ".venv", "dist")]
             if filename in filenames:
                 return os.path.join(dirpath, filename)
     except OSError:
@@ -130,15 +135,15 @@ async def auto_detect_test_commands(working_dir: str) -> list[str]:
     for pkg_dir, pkg_json in pkg_jsons:
         try:
             import json
+
             with open(pkg_json) as f:
                 data = json.loads(f.read())
             scripts = data.get("scripts", {})
             # Relative prefix for subdirectory commands
             prefix = f"cd {os.path.basename(pkg_dir)} && " if pkg_dir != working_dir else ""
 
-            if "dependencies" in data or "devDependencies" in data:
-                if not os.path.exists(os.path.join(pkg_dir, "node_modules")):
-                    commands.append(f"{prefix}npm install")
+            if ("dependencies" in data or "devDependencies" in data) and not os.path.exists(os.path.join(pkg_dir, "node_modules")):
+                commands.append(f"{prefix}npm install")
             if "test" in scripts and scripts["test"] != 'echo "Error: no test specified" && exit 1':
                 commands.append(f"{prefix}npm test")
             if "build" in scripts:
@@ -146,9 +151,10 @@ async def auto_detect_test_commands(working_dir: str) -> list[str]:
         except Exception:
             pass
 
-    if os.path.exists(os.path.join(working_dir, "pyproject.toml")) or os.path.exists(os.path.join(working_dir, "setup.py")):
-        if os.path.exists(os.path.join(working_dir, "tests")) or os.path.exists(os.path.join(working_dir, "test")):
-            commands.append("python -m pytest --tb=short -q")
+    if (os.path.exists(os.path.join(working_dir, "pyproject.toml")) or os.path.exists(
+        os.path.join(working_dir, "setup.py")
+    )) and (os.path.exists(os.path.join(working_dir, "tests")) or os.path.exists(os.path.join(working_dir, "test"))):
+        commands.append("python -m pytest --tb=short -q")
 
     if os.path.exists(os.path.join(working_dir, "Makefile")):
         commands.append("make test 2>/dev/null || true")
@@ -191,16 +197,19 @@ async def auto_detect_lint_commands(working_dir: str) -> list[str]:
             commands.append("ruff check --select E,F --no-fix --output-format concise . 2>&1 | head -20")
         else:
             # Fallback: python syntax check (always available)
-            commands.append("python3 -m py_compile $(find . -name '*.py' -not -path './node_modules/*' -not -path './.venv/*' | head -10) 2>&1")
+            commands.append(
+                "python3 -m py_compile $(find . -name '*.py' -not -path './node_modules/*' -not -path './.venv/*' | head -10) 2>&1"
+            )
 
     # ── ESLint (if configured) ──
     eslint_configs = [
-        ".eslintrc.json", ".eslintrc.js", ".eslintrc.yml",
-        ".eslintrc.cjs", ".eslintrc.mjs",
+        ".eslintrc.json",
+        ".eslintrc.js",
+        ".eslintrc.yml",
+        ".eslintrc.cjs",
+        ".eslintrc.mjs",
     ]
-    has_eslint_config = any(
-        os.path.exists(os.path.join(working_dir, c)) for c in eslint_configs
-    )
+    has_eslint_config = any(os.path.exists(os.path.join(working_dir, c)) for c in eslint_configs)
     # Also check package.json for eslintConfig
     if not has_eslint_config:
         pkg_json = os.path.join(working_dir, "package.json")
@@ -260,7 +269,7 @@ async def verify_implementation(
         test_commands = await auto_detect_test_commands(working_dir)
 
     # Run test commands
-    for cmd in (test_commands or []):
+    for cmd in test_commands or []:
         cmd_evidence = await verify_command(cmd, working_dir)
         evidence.append(cmd_evidence)
         if not cmd_evidence.passed:
@@ -270,19 +279,24 @@ async def verify_implementation(
     # Only runs if Playwright is installed and project has a dev server
     try:
         from openseed_guard.browser_verify import verify_ui
+
         browser_result = await verify_ui(working_dir)
         if browser_result.error and "not installed" not in browser_result.error:
-            evidence.append(Evidence(
-                check="browser: UI renders",
-                passed=browser_result.passed,
-                detail=browser_result.ai_verdict or browser_result.error,
-            ))
+            evidence.append(
+                Evidence(
+                    check="browser: UI renders",
+                    passed=browser_result.passed,
+                    detail=browser_result.ai_verdict or browser_result.error,
+                )
+            )
         elif not browser_result.error:
-            evidence.append(Evidence(
-                check="browser: UI renders",
-                passed=browser_result.passed,
-                detail=browser_result.ai_verdict[:200],
-            ))
+            evidence.append(
+                Evidence(
+                    check="browser: UI renders",
+                    passed=browser_result.passed,
+                    detail=browser_result.ai_verdict[:200],
+                )
+            )
     except Exception:
         pass  # Browser verification is best-effort
 

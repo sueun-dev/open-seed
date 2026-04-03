@@ -61,6 +61,7 @@ def auth_login() -> None:
 
     # Claude
     from openseed_core.auth.claude import get_claude_cli_path
+
     claude_path = get_claude_cli_path()
     if claude_path:
         console.print("[cyan]Claude OAuth login:[/cyan]")
@@ -70,6 +71,7 @@ def auth_login() -> None:
 
     # OpenAI
     from openseed_core.auth.openai import get_codex_cli_path
+
     codex_path = get_codex_cli_path()
     if codex_path:
         console.print("\n[cyan]OpenAI OAuth login:[/cyan]")

@@ -9,10 +9,12 @@ Pattern from: mem0 PROCEDURAL_MEMORY (configs/enums.py)
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from openseed_memory.store import MemoryStore
 from openseed_memory.types import MemoryType
+
+if TYPE_CHECKING:
+    from openseed_memory.store import MemoryStore
 
 
 async def store_procedure(
@@ -29,7 +31,7 @@ async def store_procedure(
     then server.js, then install deps, then test."
     """
     content = f"Procedure for: {task_pattern}\n"
-    content += f"Steps:\n"
+    content += "Steps:\n"
     for i, step in enumerate(steps, 1):
         content += f"  {i}. {step}\n"
     content += f"Outcome: {outcome}\n"

@@ -10,8 +10,7 @@ Reads SKILL.md files, parses frontmatter (name, description), and provides:
 from __future__ import annotations
 
 import logging
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -24,6 +23,7 @@ _SKILLS_DIR = _PROJECT_ROOT / "skills"
 @dataclass
 class OfficialSkill:
     """Metadata for a single skill."""
+
     name: str
     description: str
     source: str  # "anthropic" or "openai"
@@ -73,13 +73,15 @@ def _scan_skills_dir() -> list[OfficialSkill]:
                 try:
                     text = skill_md.read_text(encoding="utf-8", errors="ignore")
                     fm = _parse_frontmatter(text)
-                    skills.append(OfficialSkill(
-                        name=fm.get("name", entry.name),
-                        description=fm.get("description", ""),
-                        source="anthropic",
-                        category="official",
-                        path=str(skill_md),
-                    ))
+                    skills.append(
+                        OfficialSkill(
+                            name=fm.get("name", entry.name),
+                            description=fm.get("description", ""),
+                            source="anthropic",
+                            category="official",
+                            path=str(skill_md),
+                        )
+                    )
                 except Exception as exc:
                     logger.debug("Failed to load skill %s: %s", entry.name, exc)
 
@@ -92,13 +94,15 @@ def _scan_skills_dir() -> list[OfficialSkill]:
                 try:
                     text = skill_md.read_text(encoding="utf-8", errors="ignore")
                     fm = _parse_frontmatter(text)
-                    skills.append(OfficialSkill(
-                        name=fm.get("name", entry.name),
-                        description=fm.get("description", ""),
-                        source="openai",
-                        category="curated",
-                        path=str(skill_md),
-                    ))
+                    skills.append(
+                        OfficialSkill(
+                            name=fm.get("name", entry.name),
+                            description=fm.get("description", ""),
+                            source="openai",
+                            category="curated",
+                            path=str(skill_md),
+                        )
+                    )
                 except Exception as exc:
                     logger.debug("Failed to load skill %s: %s", entry.name, exc)
 
@@ -111,20 +115,24 @@ def _scan_skills_dir() -> list[OfficialSkill]:
                 try:
                     text = skill_md.read_text(encoding="utf-8", errors="ignore")
                     fm = _parse_frontmatter(text)
-                    skills.append(OfficialSkill(
-                        name=fm.get("name", entry.name),
-                        description=fm.get("description", ""),
-                        source="openai",
-                        category="system",
-                        path=str(skill_md),
-                    ))
+                    skills.append(
+                        OfficialSkill(
+                            name=fm.get("name", entry.name),
+                            description=fm.get("description", ""),
+                            source="openai",
+                            category="system",
+                            path=str(skill_md),
+                        )
+                    )
                 except Exception as exc:
                     logger.debug("Failed to load skill %s: %s", entry.name, exc)
 
-    logger.info("Loaded %d skills (%d anthropic, %d openai)",
-                len(skills),
-                sum(1 for s in skills if s.source == "anthropic"),
-                sum(1 for s in skills if s.source == "openai"))
+    logger.info(
+        "Loaded %d skills (%d anthropic, %d openai)",
+        len(skills),
+        sum(1 for s in skills if s.source == "anthropic"),
+        sum(1 for s in skills if s.source == "openai"),
+    )
     return skills
 
 
@@ -184,7 +192,7 @@ Available skills:
 
 Task: {task}
 {tech_hint}
-{codebase_context[:500] if codebase_context else ''}
+{codebase_context[:500] if codebase_context else ""}
 
 Knowledge gaps:
 {gaps_text}

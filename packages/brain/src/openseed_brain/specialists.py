@@ -13,7 +13,6 @@ The LLM decides which specialists are needed — no hardcoded routing.
 
 from __future__ import annotations
 
-
 # ─── Specialist System Prompts ───────────────────────────────────────────────
 
 FRONTEND_SPECIALIST = """\
@@ -557,10 +556,7 @@ def get_specialist_prompt(domain: str) -> str:
         KeyError: If the domain is not recognized.
     """
     if domain not in SPECIALIST_PROMPTS:
-        raise KeyError(
-            f"Unknown specialist domain: {domain!r}. "
-            f"Valid domains: {', '.join(sorted(VALID_DOMAINS))}"
-        )
+        raise KeyError(f"Unknown specialist domain: {domain!r}. Valid domains: {', '.join(sorted(VALID_DOMAINS))}")
     return SPECIALIST_PROMPTS[domain]
 
 

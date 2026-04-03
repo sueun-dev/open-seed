@@ -4,8 +4,7 @@ Tests for microagent system — OpenHands pattern integration.
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from openseed_core.microagent import (
     Microagent,
@@ -13,6 +12,9 @@ from openseed_core.microagent import (
     format_microagent_context,
     load_microagents,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestLoadMicroagents:
@@ -66,8 +68,7 @@ class TestParseMicroagentFile:
     def test_parse_with_frontmatter(self, tmp_path: Path) -> None:
         f = tmp_path / "test.md"
         f.write_text(
-            "---\nname: my-agent\ntype: knowledge\ntriggers: [python, backend]\n---\n\n"
-            "Use type hints everywhere."
+            "---\nname: my-agent\ntype: knowledge\ntriggers: [python, backend]\n---\n\nUse type hints everywhere."
         )
         agent = _parse_microagent_file(f)
         assert agent is not None

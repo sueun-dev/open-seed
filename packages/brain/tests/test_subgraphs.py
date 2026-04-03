@@ -12,11 +12,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-from openseed_brain.subgraphs.qa_subgraph import QASubState, build_qa_subgraph
 from openseed_brain.subgraphs.fix_subgraph import FixSubState, build_fix_subgraph
-
+from openseed_brain.subgraphs.qa_subgraph import QASubState, build_qa_subgraph
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,9 +45,7 @@ class TestQASubgraphNodes:
         """QASubState is a TypedDict with the expected keys."""
         required_keys = {"context", "working_dir", "findings", "verdict", "synthesis", "agents_run"}
         hints = QASubState.__annotations__
-        assert required_keys.issubset(hints.keys()), (
-            f"Missing QASubState keys: {required_keys - set(hints.keys())}"
-        )
+        assert required_keys.issubset(hints.keys()), f"Missing QASubState keys: {required_keys - set(hints.keys())}"
 
 
 class TestQASubgraphCompiles:
@@ -59,9 +54,7 @@ class TestQASubgraphCompiles:
         graph = build_qa_subgraph()
         compiled = graph.compile()
         # LangGraph compiled graphs expose ainvoke / invoke
-        assert hasattr(compiled, "ainvoke") or hasattr(compiled, "invoke"), (
-            "Compiled QA subgraph has no invoke method"
-        )
+        assert hasattr(compiled, "ainvoke") or hasattr(compiled, "invoke"), "Compiled QA subgraph has no invoke method"
 
     def test_qa_subgraph_compiled_is_not_none(self):
         """Compiled QA subgraph is not None."""
@@ -91,9 +84,7 @@ class TestFixSubgraphNodes:
         """FixSubState is a TypedDict with the expected keys."""
         required_keys = {"task", "working_dir", "errors", "fix_applied", "verified"}
         hints = FixSubState.__annotations__
-        assert required_keys.issubset(hints.keys()), (
-            f"Missing FixSubState keys: {required_keys - set(hints.keys())}"
-        )
+        assert required_keys.issubset(hints.keys()), f"Missing FixSubState keys: {required_keys - set(hints.keys())}"
 
 
 class TestFixSubgraphCompiles:
@@ -101,9 +92,7 @@ class TestFixSubgraphCompiles:
         """build_fix_subgraph().compile() returns a runnable compiled graph."""
         graph = build_fix_subgraph()
         compiled = graph.compile()
-        assert hasattr(compiled, "ainvoke") or hasattr(compiled, "invoke"), (
-            "Compiled Fix subgraph has no invoke method"
-        )
+        assert hasattr(compiled, "ainvoke") or hasattr(compiled, "invoke"), "Compiled Fix subgraph has no invoke method"
 
     def test_fix_subgraph_compiled_is_not_none(self):
         """Compiled Fix subgraph is not None."""
@@ -197,8 +186,15 @@ class TestBuildGraphWithoutSubgraphsDefault:
         """Default build has all required nodes."""
         graph = self._build()
         expected = {
-            "intake", "plan", "implement", "qa_gate",
-            "sentinel_check", "fix", "user_escalate", "deploy", "memorize",
+            "intake",
+            "plan",
+            "implement",
+            "qa_gate",
+            "sentinel_check",
+            "fix",
+            "user_escalate",
+            "deploy",
+            "memorize",
         }
         node_ids = set(graph.nodes.keys())
         assert expected.issubset(node_ids), f"Missing nodes: {expected - node_ids}"

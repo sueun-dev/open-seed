@@ -14,9 +14,12 @@ Escalation chain: retry → retry (different approach) → Insight → User
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from openseed_core.types import Error, Verdict
 
-from openseed_brain.state import PipelineState
+if TYPE_CHECKING:
+    from openseed_brain.state import PipelineState
 
 
 async def sentinel_check_node(state: PipelineState) -> dict:
@@ -69,7 +72,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
 
             # Evidence failed — distinguish critical vs minor failures
             summary = verify.get("summary", "")
-            evidence_list = verify.get("evidence", [])
+            verify.get("evidence", [])
             failing_cmds = verify.get("failing_commands", [])
 
             # Critical: test/build commands actually fail → must fix
@@ -321,7 +324,7 @@ async def fix_node(state: PipelineState) -> dict:
     fix_model = "sonnet" if retry_count < 2 else "opus"
 
     # Use session continuity: first attempt creates session, subsequent reuse it
-    response = await agent.invoke(
+    await agent.invoke(
         prompt=prompt,
         system_prompt=skill_system_prompt if skill_system_prompt else None,
         model=fix_model,
@@ -519,7 +522,7 @@ def _build_fix_skill_prompt(state: PipelineState) -> str | None:
     Ensures fix_node preserves patterns/conventions established by the original skills.
     """
     intake_raw = state.get("intake_analysis") or {}
-    intake = intake_raw if isinstance(intake_raw, dict) else {}
+    intake_raw if isinstance(intake_raw, dict) else {}
     plan = state.get("plan")
     if not plan:
         return None

@@ -4,10 +4,9 @@ Tests for PR deploy channel — OpenHands pattern.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
-
 from openseed_deploy.channels.pr import PRChannel, _build_pr_body
 
 

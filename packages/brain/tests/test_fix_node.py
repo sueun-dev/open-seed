@@ -12,14 +12,11 @@ Covers:
 
 from __future__ import annotations
 
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from openseed_brain.state import PipelineState, initial_state
 from openseed_core.types import (
-    Error,
     Finding,
     QAResult,
     Severity,
@@ -45,7 +42,8 @@ def _make_qa_fail(findings: list[Finding] | None = None) -> QAResult:
     """Build a failing QAResult with optional findings."""
     return QAResult(
         verdict=Verdict.BLOCK,
-        findings=findings or [
+        findings=findings
+        or [
             Finding(
                 agent="syntax",
                 severity=Severity.HIGH,
@@ -125,7 +123,7 @@ class TestFixNodeSessionContinuity:
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
-            result = await fix_node(state)
+            await fix_node(state)
 
         invoke_call = mock_agent.invoke.call_args_list[0]
         assert invoke_call.kwargs.get("session_id") is not None
@@ -156,7 +154,7 @@ class TestFixNodeSessionContinuity:
             patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
         ):
-            result = await fix_node(state)
+            await fix_node(state)
 
         invoke_call = mock_agent.invoke.call_args_list[0]
         assert invoke_call.kwargs.get("session_id") is None
@@ -301,7 +299,11 @@ class TestInsightConsultation:
 
         with (
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
-            patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", new_callable=AsyncMock, return_value=mock_insight),
+            patch(
+                "openseed_brain.nodes.sentinel._consult_insight_for_fix",
+                new_callable=AsyncMock,
+                return_value=mock_insight,
+            ),
             patch("openseed_brain.nodes.sentinel._git_stash_revert", new_callable=AsyncMock, return_value=True),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -376,7 +378,7 @@ class TestInsightConsultation:
             patch("openseed_brain.nodes.sentinel._git_stash_revert", new_callable=AsyncMock, return_value=True),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
-            result = await fix_node(state)
+            await fix_node(state)
 
         insight_mock.assert_awaited_once()
 
@@ -573,7 +575,11 @@ class TestGitStash:
         with (
             patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
-            patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", new_callable=AsyncMock, return_value=mock_insight),
+            patch(
+                "openseed_brain.nodes.sentinel._consult_insight_for_fix",
+                new_callable=AsyncMock,
+                return_value=mock_insight,
+            ),
             patch("openseed_brain.nodes.sentinel._git_stash_revert", stash_revert),
             patch("openseed_brain.nodes.sentinel._git_stash_push", stash_push),
         ):
@@ -589,10 +595,12 @@ class TestBuildFindingsText:
     def test_formats_findings(self):
         from openseed_brain.nodes.sentinel import _build_findings_text
 
-        qa = _make_qa_fail([
-            Finding(agent="lint", severity=Severity.HIGH, title="Error", description="bad code", file="x.py"),
-            Finding(agent="test", severity=Severity.MEDIUM, title="Warn", description="slow", file="y.py"),
-        ])
+        qa = _make_qa_fail(
+            [
+                Finding(agent="lint", severity=Severity.HIGH, title="Error", description="bad code", file="x.py"),
+                Finding(agent="test", severity=Severity.MEDIUM, title="Warn", description="slow", file="y.py"),
+            ]
+        )
         text = _build_findings_text(qa)
         assert "[high]" in text or "[HIGH]" in text
         assert "[medium]" in text or "[MEDIUM]" in text

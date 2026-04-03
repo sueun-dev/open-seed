@@ -32,10 +32,10 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Pure-Python matching (works with every backend)
 # ---------------------------------------------------------------------------
+
 
 def _match_value(actual: Any, condition: Any) -> bool:
     """Check whether *actual* satisfies *condition*.
@@ -144,6 +144,7 @@ def matches_filter(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------
 # SQL WHERE builder for SQLite (json_extract on metadata column)
 # ---------------------------------------------------------------------------
+
 
 def _sql_value_clause(
     field: str,

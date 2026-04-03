@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from openseed_core.config import GitDeployConfig
 from openseed_core.subprocess import run_simple
+
 from openseed_deploy.channels.base import DeployChannel
 from openseed_deploy.types import ChannelResult
 
@@ -33,6 +34,7 @@ class GitChannel(DeployChannel):
 
         # Ensure git repo exists
         import os
+
         if not os.path.isdir(os.path.join(working_dir, ".git")):
             init = await run_simple(["git", "init"], cwd=working_dir)
             if init.exit_code != 0:
@@ -73,4 +75,4 @@ class GitChannel(DeployChannel):
                 return ChannelResult(channel="git", success=False, message=f"git push failed: {push.stderr}")
             return ChannelResult(channel="git", success=True, message=f"Committed and pushed to {self.config.branch}")
 
-        return ChannelResult(channel="git", success=True, message=f"Committed (push disabled)")
+        return ChannelResult(channel="git", success=True, message="Committed (push disabled)")

@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 from openseed_core.events import EventBus, EventType
+
 from openseed_qa_gate.types import AgentDefinition, SpecialistResult
 
 
@@ -85,7 +86,6 @@ async def _run_via_claude(
 
     claude = ClaudeAgent()
     # Read-only agents get only read tools
-    tools = ["Read", "Grep", "Glob"] if agent.sandbox_mode == "read-only" else None
 
     output_contract = """
 
@@ -100,8 +100,8 @@ If no issues found, output: []
     response = await claude.invoke(
         prompt=f"{context}\n\n---\n\nApply the following review focus:\n{agent.instructions}\n{output_contract}",
         system_prompt=agent.instructions,
-        model="sonnet",   # Sonnet for thorough review (reads files, runs checks)
-        max_turns=5,      # Enough turns to: read files → analyze → output findings
+        model="sonnet",  # Sonnet for thorough review (reads files, runs checks)
+        max_turns=5,  # Enough turns to: read files → analyze → output findings
         working_dir=working_dir,
     )
 
@@ -123,6 +123,7 @@ async def _run_via_codex(
     except ImportError as exc:
         # Codex package not installed — fall back to Claude
         import logging
+
         logging.getLogger(__name__).debug("CodexAgent unavailable (%s); falling back to Claude", exc)
         return await _run_via_claude(agent, context, working_dir)
 
@@ -141,6 +142,7 @@ async def _run_via_codex(
         )
     except Exception as exc:
         import logging
+
         logging.getLogger(__name__).debug("CodexAgent invocation failed (%s); falling back to Claude", exc)
         return await _run_via_claude(agent, context, working_dir)
 
@@ -158,7 +160,7 @@ def _extract_findings(text: str, agent_name: str) -> list[dict[str, Any]]:
     end = text.rfind("]")
     if start != -1 and end > start:
         try:
-            return json.loads(text[start:end + 1])
+            return json.loads(text[start : end + 1])
         except json.JSONDecodeError:
             pass
 

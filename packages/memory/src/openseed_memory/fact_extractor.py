@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 @dataclass
 class MemoryDecision:
     """A single memory decision from the LLM fact extractor."""
+
     action: MemoryEvent
     content: str
     memory_id: str | None = None  # Set for UPDATE / DELETE
@@ -75,6 +76,7 @@ class FactExtractor:
             return self._cli_path
         try:
             from openseed_core.auth.claude import get_claude_cli_path
+
             return get_claude_cli_path()
         except Exception:
             return None
@@ -82,7 +84,7 @@ class FactExtractor:
     async def extract(
         self,
         content: str,
-        store: "MemoryStore",
+        store: MemoryStore,
         user_id: str = "default",
     ) -> list[MemoryDecision]:
         """
@@ -102,9 +104,7 @@ class FactExtractor:
 
         # Search existing memories relevant to this content for context
         existing_memories = await store.search(query=content[:500], user_id=user_id, limit=10)
-        existing_text = "\n".join(
-            f"[{r.entry.id}] {r.entry.content}" for r in existing_memories
-        ) or "(none)"
+        existing_text = "\n".join(f"[{r.entry.id}] {r.entry.content}" for r in existing_memories) or "(none)"
 
         prompt = _EXTRACT_PROMPT.format(
             existing=existing_text,
@@ -115,13 +115,16 @@ class FactExtractor:
             cli,
             "--print",
             "--dangerously-skip-permissions",
-            "--model", self._model,
-            "--max-turns", "1",
+            "--model",
+            self._model,
+            "--max-turns",
+            "1",
             prompt,
         ]
 
         try:
             from openseed_core.subprocess import run_streaming
+
             result = await run_streaming(cmd, timeout_seconds=60)
             raw_output = result.stdout.strip()
         except Exception as exc:

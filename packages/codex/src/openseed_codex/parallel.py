@@ -10,19 +10,24 @@ Pattern from: codex-rs multi_agents/spawn.rs + parallel.rs
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import subprocess
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from openseed_core.config import CodexConfig
-from openseed_core.events import EventBus
 from openseed_codex.agent import CodexAgent, CodexResponse
+
+if TYPE_CHECKING:
+    from openseed_core.config import CodexConfig
+    from openseed_core.events import EventBus
 
 
 @dataclass
 class ParallelTask:
     """A single task for parallel execution."""
+
     prompt: str
     role: str = "implementer"
     files: list[str] = field(default_factory=list)
@@ -31,6 +36,7 @@ class ParallelTask:
 @dataclass
 class ParallelResult:
     """Aggregated result from parallel Codex agents."""
+
     responses: list[CodexResponse] = field(default_factory=list)
     total_files_created: list[str] = field(default_factory=list)
     total_files_modified: list[str] = field(default_factory=list)
@@ -47,14 +53,22 @@ def _create_worktree(working_dir: str, task_id: str) -> str | None:
             subprocess.run(["git", "add", "-A"], cwd=working_dir, capture_output=True)
             subprocess.run(
                 ["git", "commit", "--allow-empty", "-m", "init"],
-                cwd=working_dir, capture_output=True,
-                env={**os.environ, "GIT_AUTHOR_NAME": "openseed", "GIT_AUTHOR_EMAIL": "a@b",
-                     "GIT_COMMITTER_NAME": "openseed", "GIT_COMMITTER_EMAIL": "a@b"},
+                cwd=working_dir,
+                capture_output=True,
+                env={
+                    **os.environ,
+                    "GIT_AUTHOR_NAME": "openseed",
+                    "GIT_AUTHOR_EMAIL": "a@b",
+                    "GIT_COMMITTER_NAME": "openseed",
+                    "GIT_COMMITTER_EMAIL": "a@b",
+                },
             )
 
         result = subprocess.run(
             ["git", "worktree", "add", worktree_path, "HEAD"],
-            cwd=working_dir, capture_output=True, text=True,
+            cwd=working_dir,
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             return worktree_path
@@ -65,11 +79,8 @@ def _create_worktree(working_dir: str, task_id: str) -> str | None:
 
 def _remove_worktree(working_dir: str, worktree_path: str) -> None:
     """Remove a git worktree."""
-    try:
-        subprocess.run(["git", "worktree", "remove", worktree_path, "--force"],
-                        cwd=working_dir, capture_output=True)
-    except Exception:
-        pass
+    with contextlib.suppress(Exception):
+        subprocess.run(["git", "worktree", "remove", worktree_path, "--force"], cwd=working_dir, capture_output=True)
 
 
 def _merge_worktree(working_dir: str, worktree_path: str) -> bool:
@@ -78,7 +89,9 @@ def _merge_worktree(working_dir: str, worktree_path: str) -> bool:
         # Get the worktree branch name
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=worktree_path, capture_output=True, text=True,
+            cwd=worktree_path,
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0:
             return False
@@ -92,6 +105,7 @@ def _merge_worktree(working_dir: str, worktree_path: str) -> bool:
                 dst = os.path.join(working_dir, rel)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 import shutil
+
                 shutil.copy2(src, dst)
         return True
     except Exception:

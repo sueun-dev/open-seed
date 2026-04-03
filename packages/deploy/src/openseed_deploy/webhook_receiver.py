@@ -10,9 +10,12 @@ Usage: Register routes on the FastAPI app:
 
 from __future__ import annotations
 
-from typing import Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 
 def register_webhook_routes(

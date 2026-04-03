@@ -10,14 +10,15 @@ Fire-and-forget events for CLI HUD and web UI.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Callable, Awaitable
+from enum import StrEnum
+from typing import Any
 from uuid import uuid4
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     # Pipeline lifecycle
     PIPELINE_START = "pipeline.start"
     PIPELINE_COMPLETE = "pipeline.complete"
@@ -79,6 +80,7 @@ class Event:
     and an optional cause_id linking to the event that triggered it.
     This enables post-hoc causal chain analysis for debugging.
     """
+
     type: EventType
     node: str = ""
     data: dict[str, Any] = field(default_factory=dict)

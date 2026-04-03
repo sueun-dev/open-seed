@@ -36,7 +36,17 @@ target-version = "py311"
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "TCH"]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "TC"]
+ignore = [
+    "E501",   # line length (legacy code)
+    "E402",   # module level import position (intentional lazy imports)
+    "N806",   # uppercase variable in function (legacy naming)
+    "N802",   # function name should be lowercase (legacy)
+    "N814",   # camelCase import alias (legacy)
+    "SIM105", # contextlib.suppress suggestion (style preference)
+    "SIM108", # ternary suggestion (readability preference)
+    "SIM117", # combine with statements (readability preference)
+]
 
 [tool.mypy]
 python_version = "3.11"

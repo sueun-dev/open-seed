@@ -7,19 +7,25 @@ Pattern from: OpenClaw infra/ (multi-channel delivery)
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from openseed_core.config import BodyConfig
-from openseed_core.events import EventBus
 from openseed_core.types import DeployResult
-from openseed_deploy.channels.base import DeployChannel
+
 from openseed_deploy.channels.git import GitChannel
 from openseed_deploy.channels.webhook import WebhookChannel
 from openseed_deploy.types import ChannelResult
 
+if TYPE_CHECKING:
+    from openseed_core.events import EventBus
+
+    from openseed_deploy.channels.base import DeployChannel
+
 
 def create_channels(config: BodyConfig) -> list[DeployChannel]:
     """Create deploy channel instances from config."""
-    from openseed_deploy.channels.npm import NpmChannel
     from openseed_deploy.channels.docker import DockerChannel
+    from openseed_deploy.channels.npm import NpmChannel
 
     channels: list[DeployChannel] = []
     for name in config.channels:

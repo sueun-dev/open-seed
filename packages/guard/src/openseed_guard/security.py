@@ -11,10 +11,10 @@ Pattern from: openhands/security/analyzer.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class SecurityRisk(str, Enum):
+class SecurityRisk(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -23,6 +23,7 @@ class SecurityRisk(str, Enum):
 @dataclass
 class SecurityCheck:
     """Result of a security pre-validation."""
+
     risk: SecurityRisk = SecurityRisk.LOW
     reason: str = ""
     requires_approval: bool = False
@@ -105,10 +106,12 @@ def _parse_security_response(text: str) -> SecurityCheck:
     end = text.rfind("}")
     if start != -1 and end > start:
         try:
-            data = json.loads(text[start:end + 1])
+            data = json.loads(text[start : end + 1])
             risk_str = data.get("risk", "low").lower()
-            risk = SecurityRisk.HIGH if risk_str == "high" else (
-                SecurityRisk.MEDIUM if risk_str == "medium" else SecurityRisk.LOW
+            risk = (
+                SecurityRisk.HIGH
+                if risk_str == "high"
+                else (SecurityRisk.MEDIUM if risk_str == "medium" else SecurityRisk.LOW)
             )
             return SecurityCheck(
                 risk=risk,

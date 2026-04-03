@@ -4,10 +4,7 @@ Tests for event causality tracking — OpenHands pattern integration.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-
 from openseed_core.events import Event, EventBus, EventType
 
 

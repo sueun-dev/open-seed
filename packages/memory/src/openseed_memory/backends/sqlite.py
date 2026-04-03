@@ -62,8 +62,14 @@ class SQLiteMemoryBackend(MemoryBackend):
         """)
         self._conn.commit()
 
-    def add(self, content: str, user_id: str = "default", agent_id: str = "",
-            memory_type: str = "semantic", metadata: dict[str, Any] | None = None) -> str:
+    def add(
+        self,
+        content: str,
+        user_id: str = "default",
+        agent_id: str = "",
+        memory_type: str = "semantic",
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
         if not self._conn:
             self.initialize()
         assert self._conn
@@ -111,13 +117,15 @@ class SQLiteMemoryBackend(MemoryBackend):
             named_params = {"_query": query, "_user_id": user_id, "_limit": limit, **filter_params}
             rows = self._conn.execute(sql, named_params).fetchall()
             for row in rows:
-                results.append({
-                    "id": row[0],
-                    "memory": row[1],
-                    "memory_type": row[2],
-                    "metadata": json.loads(row[3] or "{}"),
-                    "score": abs(row[4]) if row[4] else 0.0,
-                })
+                results.append(
+                    {
+                        "id": row[0],
+                        "memory": row[1],
+                        "memory_type": row[2],
+                        "metadata": json.loads(row[3] or "{}"),
+                        "score": abs(row[4]) if row[4] else 0.0,
+                    }
+                )
         except sqlite3.OperationalError:
             # FTS query syntax error — fallback to LIKE, then apply Python-side filter
             rows = self._conn.execute(
@@ -128,10 +136,15 @@ class SQLiteMemoryBackend(MemoryBackend):
                 meta = json.loads(row[3] or "{}")
                 if filters and not matches_filter(meta, filters):
                     continue
-                results.append({
-                    "id": row[0], "memory": row[1], "memory_type": row[2],
-                    "metadata": meta, "score": 0.5,
-                })
+                results.append(
+                    {
+                        "id": row[0],
+                        "memory": row[1],
+                        "memory_type": row[2],
+                        "metadata": meta,
+                        "score": 0.5,
+                    }
+                )
         return results
 
     def get_all(
@@ -153,10 +166,7 @@ class SQLiteMemoryBackend(MemoryBackend):
         )
         named_params = {"_user_id": user_id, "_limit": limit, **filter_params}
         rows = self._conn.execute(sql, named_params).fetchall()
-        return [
-            {"id": r[0], "memory": r[1], "memory_type": r[2], "metadata": json.loads(r[3] or "{}")}
-            for r in rows
-        ]
+        return [{"id": r[0], "memory": r[1], "memory_type": r[2], "metadata": json.loads(r[3] or "{}")} for r in rows]
 
     def update(self, memory_id: str, content: str, metadata: dict[str, Any] | None = None) -> bool:
         """Update an existing memory entry and record UPDATE event in history."""
@@ -165,9 +175,7 @@ class SQLiteMemoryBackend(MemoryBackend):
         assert self._conn
 
         # Fetch current content for history
-        row = self._conn.execute(
-            "SELECT content FROM memories WHERE id = ?", (memory_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT content FROM memories WHERE id = ?", (memory_id,)).fetchone()
         if not row:
             return False
 

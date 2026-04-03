@@ -9,14 +9,13 @@ Compares snapshots over time to detect stagnation vs real progress.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from typing import Any
 
 
 @dataclass
 class ProgressSnapshot:
     """A point-in-time snapshot of pipeline progress."""
+
     incomplete_count: int = 0
     completed_count: int = 0
     files_created: list[str] = field(default_factory=list)
@@ -30,6 +29,7 @@ class ProgressSnapshot:
 @dataclass
 class ProgressUpdate:
     """Result of comparing two progress snapshots."""
+
     has_progressed: bool
     progress_source: str = "none"  # "todo", "files", "tests", "none"
     stagnation_count: int = 0
@@ -63,10 +63,10 @@ class ProgressTracker:
         source = "none"
 
         # More tasks completed?
-        if current.completed_count > self._previous.completed_count:
-            source = "todo"
-        # Fewer incomplete tasks?
-        elif current.incomplete_count < self._previous.incomplete_count:
+        if (
+            current.completed_count > self._previous.completed_count
+            or current.incomplete_count < self._previous.incomplete_count
+        ):
             source = "todo"
         # New files created?
         elif len(current.files_created) > len(self._previous.files_created):

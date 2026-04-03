@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Callable, Awaitable
+from typing import TYPE_CHECKING
 
-from openseed_deploy.cron import CronStore
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from openseed_deploy.cron import CronStore
 
 
 def _is_due(schedule: str, last_run: datetime | None) -> bool:

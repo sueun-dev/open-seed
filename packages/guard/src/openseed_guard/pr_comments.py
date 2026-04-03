@@ -16,7 +16,6 @@ from typing import Any
 
 from openseed_core.subprocess import run_simple
 
-
 # ─── GraphQL Query ───────────────────────────────────────────────────────────
 
 _GRAPHQL_QUERY = """\
@@ -83,11 +82,12 @@ query(
 @dataclass
 class PRComment:
     """A single PR comment (conversation, review, or inline thread)."""
+
     id: str = ""
     author: str = ""
     body: str = ""
     comment_type: str = ""  # "conversation", "review", "inline"
-    file_path: str = ""     # Only for inline comments
+    file_path: str = ""  # Only for inline comments
     line: int | None = None  # Only for inline comments
     is_resolved: bool = False
     created_at: str = ""
@@ -96,6 +96,7 @@ class PRComment:
 @dataclass
 class PRCommentResult:
     """All comments on a PR, structured for processing."""
+
     pr_number: int = 0
     pr_url: str = ""
     pr_title: str = ""
@@ -141,8 +142,13 @@ async def fetch_pr_comments(
 
     while True:
         data = await _graphql_query(
-            working_dir, owner, repo, number,
-            comments_cursor, reviews_cursor, threads_cursor,
+            working_dir,
+            owner,
+            repo,
+            number,
+            comments_cursor,
+            reviews_cursor,
+            threads_cursor,
         )
         if not data:
             break
@@ -157,26 +163,30 @@ async def fetch_pr_comments(
         # Conversation comments
         c = pr.get("comments", {})
         for node in c.get("nodes", []):
-            all_comments.append(PRComment(
-                id=node.get("id", ""),
-                author=node.get("author", {}).get("login", ""),
-                body=node.get("body", ""),
-                comment_type="conversation",
-                created_at=node.get("createdAt", ""),
-            ))
+            all_comments.append(
+                PRComment(
+                    id=node.get("id", ""),
+                    author=node.get("author", {}).get("login", ""),
+                    body=node.get("body", ""),
+                    comment_type="conversation",
+                    created_at=node.get("createdAt", ""),
+                )
+            )
 
         # Review submissions
         r = pr.get("reviews", {})
         for node in r.get("nodes", []):
             body = node.get("body", "").strip()
             if body:  # Skip empty reviews (approve-only)
-                all_comments.append(PRComment(
-                    id=node.get("id", ""),
-                    author=node.get("author", {}).get("login", ""),
-                    body=body,
-                    comment_type="review",
-                    created_at=node.get("submittedAt", ""),
-                ))
+                all_comments.append(
+                    PRComment(
+                        id=node.get("id", ""),
+                        author=node.get("author", {}).get("login", ""),
+                        body=body,
+                        comment_type="review",
+                        created_at=node.get("submittedAt", ""),
+                    )
+                )
 
         # Inline review threads
         t = pr.get("reviewThreads", {})
@@ -185,38 +195,28 @@ async def fetch_pr_comments(
             path = node.get("path", "")
             line = node.get("line")
             for comment in node.get("comments", {}).get("nodes", []):
-                all_comments.append(PRComment(
-                    id=comment.get("id", ""),
-                    author=comment.get("author", {}).get("login", ""),
-                    body=comment.get("body", ""),
-                    comment_type="inline",
-                    file_path=path,
-                    line=line,
-                    is_resolved=is_resolved,
-                    created_at=comment.get("createdAt", ""),
-                ))
+                all_comments.append(
+                    PRComment(
+                        id=comment.get("id", ""),
+                        author=comment.get("author", {}).get("login", ""),
+                        body=comment.get("body", ""),
+                        comment_type="inline",
+                        file_path=path,
+                        line=line,
+                        is_resolved=is_resolved,
+                        created_at=comment.get("createdAt", ""),
+                    )
+                )
 
         # Pagination
-        comments_cursor = (
-            c.get("pageInfo", {}).get("endCursor")
-            if c.get("pageInfo", {}).get("hasNextPage") else None
-        )
-        reviews_cursor = (
-            r.get("pageInfo", {}).get("endCursor")
-            if r.get("pageInfo", {}).get("hasNextPage") else None
-        )
-        threads_cursor = (
-            t.get("pageInfo", {}).get("endCursor")
-            if t.get("pageInfo", {}).get("hasNextPage") else None
-        )
+        comments_cursor = c.get("pageInfo", {}).get("endCursor") if c.get("pageInfo", {}).get("hasNextPage") else None
+        reviews_cursor = r.get("pageInfo", {}).get("endCursor") if r.get("pageInfo", {}).get("hasNextPage") else None
+        threads_cursor = t.get("pageInfo", {}).get("endCursor") if t.get("pageInfo", {}).get("hasNextPage") else None
 
         if not (comments_cursor or reviews_cursor or threads_cursor):
             break
 
-    actionable = sum(
-        1 for c in all_comments
-        if not c.is_resolved and c.body.strip()
-    )
+    actionable = sum(1 for c in all_comments if not c.is_resolved and c.body.strip())
 
     return PRCommentResult(
         pr_number=number,
@@ -262,7 +262,8 @@ async def _resolve_pr(
         # Get repo info from gh
         result = await run_simple(
             ["gh", "repo", "view", "--json", "owner,name"],
-            cwd=working_dir, timeout_seconds=10,
+            cwd=working_dir,
+            timeout_seconds=10,
         )
         if result.exit_code != 0:
             return "", "", 0
@@ -275,7 +276,8 @@ async def _resolve_pr(
     # Auto-detect from current branch
     result = await run_simple(
         ["gh", "pr", "view", "--json", "number,headRepositoryOwner,headRepository"],
-        cwd=working_dir, timeout_seconds=10,
+        cwd=working_dir,
+        timeout_seconds=10,
     )
     if result.exit_code != 0:
         return "", "", 0
@@ -301,11 +303,17 @@ async def _graphql_query(
 ) -> dict[str, Any]:
     """Execute GraphQL query via gh CLI."""
     cmd = [
-        "gh", "api", "graphql",
-        "-F", "query=@-",
-        "-F", f"owner={owner}",
-        "-F", f"repo={repo}",
-        "-F", f"number={number}",
+        "gh",
+        "api",
+        "graphql",
+        "-F",
+        "query=@-",
+        "-F",
+        f"owner={owner}",
+        "-F",
+        f"repo={repo}",
+        "-F",
+        f"number={number}",
     ]
     if comments_cursor:
         cmd += ["-F", f"commentsCursor={comments_cursor}"]
@@ -315,8 +323,9 @@ async def _graphql_query(
         cmd += ["-F", f"threadsCursor={threads_cursor}"]
 
     # Pass query via stdin using a temporary approach
-    import tempfile
     import os
+    import tempfile
+
     fd, tmp = tempfile.mkstemp(suffix=".graphql")
     try:
         with os.fdopen(fd, "w") as f:

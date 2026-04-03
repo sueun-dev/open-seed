@@ -17,17 +17,19 @@ on exit, the parent graph merges findings/verdict/synthesis back.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from openseed_core.types import Finding, QAResult, Verdict
+if TYPE_CHECKING:
+    from openseed_core.types import Finding
 
 
 class QASubState(TypedDict):
     """State schema for the QA Gate subgraph."""
+
     # Inputs (set by parent before entering subgraph)
-    context: str          # Code/diff/files to review
+    context: str  # Code/diff/files to review
     working_dir: str
 
     # Accumulated by parallel specialist runs (reducer: list append)
@@ -35,7 +37,7 @@ class QASubState(TypedDict):
 
     # Set by synthesize node
     synthesis: str
-    verdict: str          # "pass" | "warn" | "block"
+    verdict: str  # "pass" | "warn" | "block"
 
     # Tracking
     agents_run: list[str]
@@ -90,7 +92,6 @@ async def run_specialists_node(state: QASubState) -> dict:
 
     from openseed_core.config import QAGateConfig
     from openseed_qa_gate.specialist import run_specialist
-    from openseed_qa_gate.types import SpecialistResult
 
     agents = state.get("_selected_agents", [])
     context = state.get("context", "")
@@ -132,10 +133,11 @@ async def synthesize_node(state: QASubState) -> dict:
 
     # Build minimal SpecialistResult wrappers so synthesize() works without
     # re-running the specialists (it only needs the findings list).
-    specialist_results = [
-        SpecialistResult(agent_name=name, success=True, findings=findings)
-        for name in (agents_run or ["qa_subgraph"])
-    ] if findings else []
+    specialist_results = (
+        [SpecialistResult(agent_name=name, success=True, findings=findings) for name in (agents_run or ["qa_subgraph"])]
+        if findings
+        else []
+    )
 
     try:
         synthesized_findings, synthesis_text = await synthesize(specialist_results, None)

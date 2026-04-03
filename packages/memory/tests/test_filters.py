@@ -5,14 +5,13 @@ Tests for advanced memory filters — AND/OR/NOT with comparison operators.
 from __future__ import annotations
 
 import asyncio
-import pytest
 
 from openseed_memory.filters import build_sql_where, matches_filter
-
 
 # ===========================================================================
 # matches_filter — pure Python
 # ===========================================================================
+
 
 class TestMatchesFilterEquality:
     def test_matches_filter_equality_match(self):
@@ -124,21 +123,33 @@ class TestMatchesFilterNin:
 class TestMatchesFilterAnd:
     def test_matches_filter_and_all_match(self):
         meta = {"memory_type": "procedural", "resolved": True}
-        assert matches_filter(meta, {
-            "$and": [
-                {"memory_type": "procedural"},
-                {"resolved": True},
-            ]
-        }) is True
+        assert (
+            matches_filter(
+                meta,
+                {
+                    "$and": [
+                        {"memory_type": "procedural"},
+                        {"resolved": True},
+                    ]
+                },
+            )
+            is True
+        )
 
     def test_matches_filter_and_one_fails(self):
         meta = {"memory_type": "procedural", "resolved": False}
-        assert matches_filter(meta, {
-            "$and": [
-                {"memory_type": "procedural"},
-                {"resolved": True},
-            ]
-        }) is False
+        assert (
+            matches_filter(
+                meta,
+                {
+                    "$and": [
+                        {"memory_type": "procedural"},
+                        {"resolved": True},
+                    ]
+                },
+            )
+            is False
+        )
 
     def test_matches_filter_and_empty_list(self):
         meta = {"x": 1}
@@ -149,30 +160,48 @@ class TestMatchesFilterAnd:
 class TestMatchesFilterOr:
     def test_matches_filter_or_first_matches(self):
         meta = {"memory_type": "semantic"}
-        assert matches_filter(meta, {
-            "$or": [
-                {"memory_type": "semantic"},
-                {"memory_type": "procedural"},
-            ]
-        }) is True
+        assert (
+            matches_filter(
+                meta,
+                {
+                    "$or": [
+                        {"memory_type": "semantic"},
+                        {"memory_type": "procedural"},
+                    ]
+                },
+            )
+            is True
+        )
 
     def test_matches_filter_or_second_matches(self):
         meta = {"memory_type": "procedural"}
-        assert matches_filter(meta, {
-            "$or": [
-                {"memory_type": "semantic"},
-                {"memory_type": "procedural"},
-            ]
-        }) is True
+        assert (
+            matches_filter(
+                meta,
+                {
+                    "$or": [
+                        {"memory_type": "semantic"},
+                        {"memory_type": "procedural"},
+                    ]
+                },
+            )
+            is True
+        )
 
     def test_matches_filter_or_none_match(self):
         meta = {"memory_type": "episodic"}
-        assert matches_filter(meta, {
-            "$or": [
-                {"memory_type": "semantic"},
-                {"memory_type": "procedural"},
-            ]
-        }) is False
+        assert (
+            matches_filter(
+                meta,
+                {
+                    "$or": [
+                        {"memory_type": "semantic"},
+                        {"memory_type": "procedural"},
+                    ]
+                },
+            )
+            is False
+        )
 
 
 class TestMatchesFilterNot:
@@ -188,31 +217,43 @@ class TestMatchesFilterNot:
 class TestMatchesFilterNested:
     def test_matches_filter_nested_or_inside_and(self):
         meta = {"memory_type": "procedural", "resolved": True}
-        assert matches_filter(meta, {
-            "$and": [
+        assert (
+            matches_filter(
+                meta,
                 {
-                    "$or": [
-                        {"memory_type": "semantic"},
-                        {"memory_type": "procedural"},
+                    "$and": [
+                        {
+                            "$or": [
+                                {"memory_type": "semantic"},
+                                {"memory_type": "procedural"},
+                            ]
+                        },
+                        {"resolved": True},
                     ]
                 },
-                {"resolved": True},
-            ]
-        }) is True
+            )
+            is True
+        )
 
     def test_matches_filter_nested_or_inside_and_fails(self):
         meta = {"memory_type": "episodic", "resolved": True}
-        assert matches_filter(meta, {
-            "$and": [
+        assert (
+            matches_filter(
+                meta,
                 {
-                    "$or": [
-                        {"memory_type": "semantic"},
-                        {"memory_type": "procedural"},
+                    "$and": [
+                        {
+                            "$or": [
+                                {"memory_type": "semantic"},
+                                {"memory_type": "procedural"},
+                            ]
+                        },
+                        {"resolved": True},
                     ]
                 },
-                {"resolved": True},
-            ]
-        }) is False
+            )
+            is False
+        )
 
     def test_matches_filter_deep_nesting(self):
         meta = {"a": 1, "b": "x", "c": True}
@@ -252,6 +293,7 @@ class TestMatchesFilterEmpty:
 # build_sql_where
 # ===========================================================================
 
+
 class TestBuildSqlWhere:
     def test_empty_filters(self):
         sql, params = build_sql_where({})
@@ -276,22 +318,26 @@ class TestBuildSqlWhere:
         assert "procedural" in params.values()
 
     def test_and_operator(self):
-        sql, params = build_sql_where({
-            "$and": [
-                {"memory_type": "procedural"},
-                {"resolved": True},
-            ]
-        })
+        sql, params = build_sql_where(
+            {
+                "$and": [
+                    {"memory_type": "procedural"},
+                    {"resolved": True},
+                ]
+            }
+        )
         assert "AND" in sql
         assert "procedural" in params.values()
 
     def test_or_operator(self):
-        sql, params = build_sql_where({
-            "$or": [
-                {"memory_type": "semantic"},
-                {"memory_type": "procedural"},
-            ]
-        })
+        sql, params = build_sql_where(
+            {
+                "$or": [
+                    {"memory_type": "semantic"},
+                    {"memory_type": "procedural"},
+                ]
+            }
+        )
         assert "OR" in sql
 
     def test_not_operator(self):
@@ -303,51 +349,60 @@ class TestBuildSqlWhere:
 # SQLite backend with filters
 # ===========================================================================
 
+
 class TestSQLiteSearchWithFilters:
     def _make_backend(self):
         from openseed_memory.backends.sqlite import SQLiteMemoryBackend
+
         backend = SQLiteMemoryBackend(db_path=":memory:")
         backend.initialize()
         return backend
 
     def test_sqlite_search_with_filters_match(self):
         backend = self._make_backend()
-        backend.add("Python facts", user_id="u1", memory_type="semantic",
-                    metadata={"memory_type": "semantic", "lang": "python"})
-        backend.add("Workflow steps", user_id="u1", memory_type="procedural",
-                    metadata={"memory_type": "procedural", "lang": "go"})
+        backend.add(
+            "Python facts", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic", "lang": "python"}
+        )
+        backend.add(
+            "Workflow steps",
+            user_id="u1",
+            memory_type="procedural",
+            metadata={"memory_type": "procedural", "lang": "go"},
+        )
 
-        results = backend.search("facts", user_id="u1", limit=10,
-                                 filters={"memory_type": "semantic"})
+        results = backend.search("facts", user_id="u1", limit=10, filters={"memory_type": "semantic"})
         assert all(r["metadata"].get("memory_type") == "semantic" for r in results)
 
     def test_sqlite_search_with_filters_no_match(self):
         backend = self._make_backend()
-        backend.add("Python facts", user_id="u1", memory_type="semantic",
-                    metadata={"memory_type": "semantic"})
+        backend.add("Python facts", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
 
-        results = backend.search("facts", user_id="u1", limit=10,
-                                 filters={"memory_type": "procedural"})
+        results = backend.search("facts", user_id="u1", limit=10, filters={"memory_type": "procedural"})
         assert results == []
 
     def test_sqlite_search_with_filters_operator(self):
         backend = self._make_backend()
-        backend.add("High score item", user_id="u1", memory_type="semantic",
-                    metadata={"memory_type": "semantic", "importance": 9})
-        backend.add("Low score item", user_id="u1", memory_type="semantic",
-                    metadata={"memory_type": "semantic", "importance": 2})
+        backend.add(
+            "High score item",
+            user_id="u1",
+            memory_type="semantic",
+            metadata={"memory_type": "semantic", "importance": 9},
+        )
+        backend.add(
+            "Low score item",
+            user_id="u1",
+            memory_type="semantic",
+            metadata={"memory_type": "semantic", "importance": 2},
+        )
 
-        results = backend.search("item", user_id="u1", limit=10,
-                                 filters={"importance": {"$gt": 5}})
+        results = backend.search("item", user_id="u1", limit=10, filters={"importance": {"$gt": 5}})
         assert len(results) == 1
         assert results[0]["metadata"]["importance"] == 9
 
     def test_sqlite_search_without_filters(self):
         backend = self._make_backend()
-        backend.add("Alpha", user_id="u1", memory_type="semantic",
-                    metadata={"memory_type": "semantic"})
-        backend.add("Beta", user_id="u1", memory_type="procedural",
-                    metadata={"memory_type": "procedural"})
+        backend.add("Alpha", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
+        backend.add("Beta", user_id="u1", memory_type="procedural", metadata={"memory_type": "procedural"})
 
         results = backend.search("alpha", user_id="u1", limit=10)
         assert len(results) >= 1
@@ -356,18 +411,16 @@ class TestSQLiteSearchWithFilters:
 class TestSQLiteGetAllWithFilters:
     def _make_backend(self):
         from openseed_memory.backends.sqlite import SQLiteMemoryBackend
+
         backend = SQLiteMemoryBackend(db_path=":memory:")
         backend.initialize()
         return backend
 
     def test_sqlite_get_all_with_filters_single_field(self):
         backend = self._make_backend()
-        backend.add("Fact A", user_id="u1", memory_type="semantic",
-                    metadata={"memory_type": "semantic"})
-        backend.add("Procedure B", user_id="u1", memory_type="procedural",
-                    metadata={"memory_type": "procedural"})
-        backend.add("Episode C", user_id="u1", memory_type="episodic",
-                    metadata={"memory_type": "episodic"})
+        backend.add("Fact A", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
+        backend.add("Procedure B", user_id="u1", memory_type="procedural", metadata={"memory_type": "procedural"})
+        backend.add("Episode C", user_id="u1", memory_type="episodic", metadata={"memory_type": "episodic"})
 
         results = backend.get_all(user_id="u1", filters={"memory_type": "procedural"})
         assert len(results) == 1
@@ -375,31 +428,38 @@ class TestSQLiteGetAllWithFilters:
 
     def test_sqlite_get_all_with_filters_and(self):
         backend = self._make_backend()
-        backend.add("Done procedure", user_id="u1", memory_type="procedural",
-                    metadata={"memory_type": "procedural", "done": True})
-        backend.add("Undone procedure", user_id="u1", memory_type="procedural",
-                    metadata={"memory_type": "procedural", "done": False})
+        backend.add(
+            "Done procedure",
+            user_id="u1",
+            memory_type="procedural",
+            metadata={"memory_type": "procedural", "done": True},
+        )
+        backend.add(
+            "Undone procedure",
+            user_id="u1",
+            memory_type="procedural",
+            metadata={"memory_type": "procedural", "done": False},
+        )
 
-        results = backend.get_all(user_id="u1", filters={
-            "$and": [
-                {"memory_type": "procedural"},
-                {"done": True},
-            ]
-        })
+        results = backend.get_all(
+            user_id="u1",
+            filters={
+                "$and": [
+                    {"memory_type": "procedural"},
+                    {"done": True},
+                ]
+            },
+        )
         assert len(results) == 1
         assert results[0]["metadata"]["done"] is True
 
     def test_sqlite_get_all_with_filters_in(self):
         backend = self._make_backend()
-        backend.add("Sem", user_id="u1", memory_type="semantic",
-                    metadata={"memory_type": "semantic"})
-        backend.add("Proc", user_id="u1", memory_type="procedural",
-                    metadata={"memory_type": "procedural"})
-        backend.add("Epis", user_id="u1", memory_type="episodic",
-                    metadata={"memory_type": "episodic"})
+        backend.add("Sem", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
+        backend.add("Proc", user_id="u1", memory_type="procedural", metadata={"memory_type": "procedural"})
+        backend.add("Epis", user_id="u1", memory_type="episodic", metadata={"memory_type": "episodic"})
 
-        results = backend.get_all(user_id="u1",
-                                  filters={"memory_type": {"$in": ["semantic", "procedural"]}})
+        results = backend.get_all(user_id="u1", filters={"memory_type": {"$in": ["semantic", "procedural"]}})
         types = {r["memory_type"] for r in results}
         assert "episodic" not in types
         assert types == {"semantic", "procedural"}
@@ -414,10 +474,8 @@ class TestSQLiteGetAllWithFilters:
 
     def test_sqlite_get_all_filters_different_users(self):
         backend = self._make_backend()
-        backend.add("U1 item", user_id="u1", memory_type="semantic",
-                    metadata={"memory_type": "semantic"})
-        backend.add("U2 item", user_id="u2", memory_type="semantic",
-                    metadata={"memory_type": "semantic"})
+        backend.add("U1 item", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
+        backend.add("U2 item", user_id="u2", memory_type="semantic", metadata={"memory_type": "semantic"})
 
         results = backend.get_all(user_id="u1", filters={"memory_type": "semantic"})
         assert len(results) == 1
@@ -428,11 +486,13 @@ class TestSQLiteGetAllWithFilters:
 # MemoryStore with filters (integration)
 # ===========================================================================
 
+
 class TestStoreSearchWithFilters:
     def _make_store(self):
-        import tempfile, os
-        from openseed_memory.store import MemoryStore
+        import tempfile
+
         from openseed_core.config import MemoryConfig  # type: ignore[import]
+        from openseed_memory.store import MemoryStore
 
         tmp = tempfile.mktemp(suffix=".db")
         cfg = MemoryConfig(backend="sqlite", sqlite_path=tmp)
@@ -444,24 +504,27 @@ class TestStoreSearchWithFilters:
         store = self._make_store()
         loop = asyncio.get_event_loop()
 
-        loop.run_until_complete(store.add(
-            "Python best practices",
-            user_id="u1",
-            memory_type=__import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType.SEMANTIC,
-            metadata={"memory_type": "semantic", "lang": "python"},
-            infer=False,
-        ))
-        loop.run_until_complete(store.add(
-            "Deploy workflow",
-            user_id="u1",
-            memory_type=__import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType.PROCEDURAL,
-            metadata={"memory_type": "procedural", "lang": "bash"},
-            infer=False,
-        ))
+        loop.run_until_complete(
+            store.add(
+                "Python best practices",
+                user_id="u1",
+                memory_type=__import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType.SEMANTIC,
+                metadata={"memory_type": "semantic", "lang": "python"},
+                infer=False,
+            )
+        )
+        loop.run_until_complete(
+            store.add(
+                "Deploy workflow",
+                user_id="u1",
+                memory_type=__import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType.PROCEDURAL,
+                metadata={"memory_type": "procedural", "lang": "bash"},
+                infer=False,
+            )
+        )
 
         results = loop.run_until_complete(
-            store.search("workflow", user_id="u1", limit=10,
-                         filters={"memory_type": "procedural"}, rerank=False)
+            store.search("workflow", user_id="u1", limit=10, filters={"memory_type": "procedural"}, rerank=False)
         )
         assert all(r.entry.metadata.get("memory_type") == "procedural" for r in results)
 
@@ -470,24 +533,25 @@ class TestStoreSearchWithFilters:
         loop = asyncio.get_event_loop()
         MemoryType = __import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType
 
-        loop.run_until_complete(store.add(
-            "Alpha content",
-            user_id="u1",
-            memory_type=MemoryType.SEMANTIC,
-            metadata={},
-            infer=False,
-        ))
-        results = loop.run_until_complete(
-            store.search("alpha", user_id="u1", limit=10, rerank=False)
+        loop.run_until_complete(
+            store.add(
+                "Alpha content",
+                user_id="u1",
+                memory_type=MemoryType.SEMANTIC,
+                metadata={},
+                infer=False,
+            )
         )
+        results = loop.run_until_complete(store.search("alpha", user_id="u1", limit=10, rerank=False))
         assert len(results) >= 1
 
 
 class TestStoreGetAllWithFilters:
     def _make_store(self):
         import tempfile
-        from openseed_memory.store import MemoryStore
+
         from openseed_core.config import MemoryConfig  # type: ignore[import]
+        from openseed_memory.store import MemoryStore
 
         tmp = tempfile.mktemp(suffix=".db")
         cfg = MemoryConfig(backend="sqlite", sqlite_path=tmp)
@@ -500,24 +564,26 @@ class TestStoreGetAllWithFilters:
         loop = asyncio.get_event_loop()
         MemoryType = __import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType
 
-        loop.run_until_complete(store.add(
-            "Semantic fact",
-            user_id="u1",
-            memory_type=MemoryType.SEMANTIC,
-            metadata={"memory_type": "semantic"},
-            infer=False,
-        ))
-        loop.run_until_complete(store.add(
-            "Procedural step",
-            user_id="u1",
-            memory_type=MemoryType.PROCEDURAL,
-            metadata={"memory_type": "procedural"},
-            infer=False,
-        ))
-
-        entries = loop.run_until_complete(
-            store.get_all(user_id="u1", filters={"memory_type": "semantic"})
+        loop.run_until_complete(
+            store.add(
+                "Semantic fact",
+                user_id="u1",
+                memory_type=MemoryType.SEMANTIC,
+                metadata={"memory_type": "semantic"},
+                infer=False,
+            )
         )
+        loop.run_until_complete(
+            store.add(
+                "Procedural step",
+                user_id="u1",
+                memory_type=MemoryType.PROCEDURAL,
+                metadata={"memory_type": "procedural"},
+                infer=False,
+            )
+        )
+
+        entries = loop.run_until_complete(store.get_all(user_id="u1", filters={"memory_type": "semantic"}))
         assert len(entries) == 1
         assert entries[0].metadata.get("memory_type") == "semantic"
 
@@ -527,12 +593,15 @@ class TestStoreGetAllWithFilters:
         MemoryType = __import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType
 
         for content in ("A", "B", "C"):
-            loop.run_until_complete(store.add(
-                content, user_id="u1",
-                memory_type=MemoryType.SEMANTIC,
-                metadata={},
-                infer=False,
-            ))
+            loop.run_until_complete(
+                store.add(
+                    content,
+                    user_id="u1",
+                    memory_type=MemoryType.SEMANTIC,
+                    metadata={},
+                    infer=False,
+                )
+            )
 
         entries = loop.run_until_complete(store.get_all(user_id="u1"))
         assert len(entries) == 3
@@ -542,25 +611,45 @@ class TestStoreGetAllWithFilters:
         loop = asyncio.get_event_loop()
         MemoryType = __import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType
 
-        loop.run_until_complete(store.add(
-            "Semantic", user_id="u1", memory_type=MemoryType.SEMANTIC,
-            metadata={"memory_type": "semantic"}, infer=False,
-        ))
-        loop.run_until_complete(store.add(
-            "Episodic", user_id="u1", memory_type=MemoryType.EPISODIC,
-            metadata={"memory_type": "episodic"}, infer=False,
-        ))
-        loop.run_until_complete(store.add(
-            "Procedural", user_id="u1", memory_type=MemoryType.PROCEDURAL,
-            metadata={"memory_type": "procedural"}, infer=False,
-        ))
+        loop.run_until_complete(
+            store.add(
+                "Semantic",
+                user_id="u1",
+                memory_type=MemoryType.SEMANTIC,
+                metadata={"memory_type": "semantic"},
+                infer=False,
+            )
+        )
+        loop.run_until_complete(
+            store.add(
+                "Episodic",
+                user_id="u1",
+                memory_type=MemoryType.EPISODIC,
+                metadata={"memory_type": "episodic"},
+                infer=False,
+            )
+        )
+        loop.run_until_complete(
+            store.add(
+                "Procedural",
+                user_id="u1",
+                memory_type=MemoryType.PROCEDURAL,
+                metadata={"memory_type": "procedural"},
+                infer=False,
+            )
+        )
 
-        entries = loop.run_until_complete(store.get_all(user_id="u1", filters={
-            "$or": [
-                {"memory_type": "semantic"},
-                {"memory_type": "episodic"},
-            ]
-        }))
+        entries = loop.run_until_complete(
+            store.get_all(
+                user_id="u1",
+                filters={
+                    "$or": [
+                        {"memory_type": "semantic"},
+                        {"memory_type": "episodic"},
+                    ]
+                },
+            )
+        )
         types = {e.metadata.get("memory_type") for e in entries}
         assert "procedural" not in types
         assert types == {"semantic", "episodic"}

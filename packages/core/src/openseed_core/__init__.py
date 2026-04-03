@@ -2,8 +2,8 @@
 
 from openseed_core.config import OpenSeedConfig, load_config
 from openseed_core.events import Event, EventBus, EventType
-from openseed_core.metrics import Metrics, LLMCallMetric
-from openseed_core.microagent import Microagent, load_microagents, format_microagent_context
+from openseed_core.metrics import LLMCallMetric, Metrics
+from openseed_core.microagent import Microagent, format_microagent_context, load_microagents
 from openseed_core.types import (
     AgentProvider,
     DeployResult,

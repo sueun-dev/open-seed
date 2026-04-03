@@ -89,9 +89,8 @@ def _validate_against_schema(data: Any, schema: dict[str, Any]) -> bool:
                 return False
         properties = schema.get("properties", {})
         for key, prop_schema in properties.items():
-            if key in data:
-                if not _validate_against_schema(data[key], prop_schema):
-                    return False
+            if key in data and not _validate_against_schema(data[key], prop_schema):
+                return False
         return True
 
     if schema_type == "array":

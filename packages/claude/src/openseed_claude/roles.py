@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 @dataclass
 class Role:
     """A specialized role for the Claude agent."""
+
     name: str
     description: str
     system_prompt: str

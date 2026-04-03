@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 
-from openseed_qa_gate.types import AgentDefinition
+if TYPE_CHECKING:
+    from openseed_qa_gate.types import AgentDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +94,8 @@ async def _select_with_llm(
     Returns a filtered subset of available_agents.
     Raises on failure so the caller can fall back.
     """
-    from openseed_core.subprocess import run_streaming
     from openseed_core.auth.claude import require_claude_auth
+    from openseed_core.subprocess import run_streaming
 
     cli = require_claude_auth()
 
@@ -102,10 +104,7 @@ async def _select_with_llm(
     for agent in available_agents:
         sandbox_note = "(read-only)" if agent.sandbox_mode == "read-only" else "(write)"
         description = agent.description or agent.instructions[:120].replace("\n", " ")
-        agent_lines.append(
-            f'- name="{agent.name}" model={agent.model} {sandbox_note}\n'
-            f'  focus: {description}'
-        )
+        agent_lines.append(f'- name="{agent.name}" model={agent.model} {sandbox_note}\n  focus: {description}')
     agent_catalog = "\n".join(agent_lines)
 
     prompt = f"""You are an agent organizer. A task has been implemented and needs QA review.
@@ -134,8 +133,10 @@ Output ONLY a JSON array of agent names (strings), no markdown, no explanation:
         cli,
         "--print",
         "--dangerously-skip-permissions",
-        "--model", "claude-sonnet-4-6",
-        "--max-turns", "1",
+        "--model",
+        "claude-sonnet-4-6",
+        "--max-turns",
+        "1",
         prompt,
     ]
 
@@ -144,10 +145,7 @@ Output ONLY a JSON array of agent names (strings), no markdown, no explanation:
     if proc_result.timed_out:
         raise RuntimeError("Claude agent selection timed out after 60s")
     if proc_result.exit_code != 0 and not proc_result.stdout.strip():
-        raise RuntimeError(
-            f"Claude agent selection failed (exit {proc_result.exit_code}): "
-            f"{proc_result.stderr[:300]}"
-        )
+        raise RuntimeError(f"Claude agent selection failed (exit {proc_result.exit_code}): {proc_result.stderr[:300]}")
 
     raw_text = proc_result.stdout.strip()
 
@@ -155,11 +153,9 @@ Output ONLY a JSON array of agent names (strings), no markdown, no explanation:
     start = raw_text.find("[")
     end = raw_text.rfind("]")
     if start == -1 or end <= start:
-        raise RuntimeError(
-            f"No JSON array found in Claude agent-selector response: {raw_text[:300]}"
-        )
+        raise RuntimeError(f"No JSON array found in Claude agent-selector response: {raw_text[:300]}")
 
-    selected_names: list[str] = json.loads(raw_text[start:end + 1])
+    selected_names: list[str] = json.loads(raw_text[start : end + 1])
 
     if not isinstance(selected_names, list):
         raise RuntimeError(f"Expected JSON array, got: {type(selected_names)}")
@@ -176,9 +172,7 @@ Output ONLY a JSON array of agent names (strings), no markdown, no explanation:
             seen.add(name)
 
     if not selected:
-        raise RuntimeError(
-            f"LLM returned no valid agent names from: {selected_names[:10]}"
-        )
+        raise RuntimeError(f"LLM returned no valid agent names from: {selected_names[:10]}")
 
     # Enforce max_agents cap
     return selected[:max_agents]

@@ -95,10 +95,7 @@ def _build_rules(intake: dict) -> str:
         parts.append(_RULES_FIX)
 
     # Add web rules only when the project involves web technologies
-    if tech_stack_raw:
-        detected = {t.strip().lower() for t in tech_stack_raw.split(",")}
-    else:
-        detected = set()
+    detected = {t.strip().lower() for t in tech_stack_raw.split(",")} if tech_stack_raw else set()
     if detected & _WEB_INDICATORS or not detected:
         # Include web rules when web tech detected OR when tech is unknown (safe default)
         parts.append(_RULES_WEB)

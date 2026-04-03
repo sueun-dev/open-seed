@@ -34,7 +34,7 @@ def compute_backoff_ms(
         5 failures → 160,000ms (160s) — capped
     """
     exponent = min(consecutive_failures, cap_exponent)
-    delay = base_ms * (2 ** exponent)
+    delay = base_ms * (2**exponent)
     return min(delay, max_ms)
 
 

@@ -49,19 +49,21 @@ async def _resolve(
     create_pr: bool,
     base_branch: str,
 ) -> None:
-    import warnings
     import logging
+    import warnings
+
     warnings.filterwarnings("ignore", message="Deserializing unregistered type")
     logging.getLogger("langgraph").setLevel(logging.ERROR)
 
-    from openseed_core.events import EventBus, Event, EventType
+    from openseed_core.events import Event, EventBus
 
-    console.print(Panel(
-        f"[bold blue]Open Seed v2 — Issue Resolver[/bold blue]\n"
-        f"[dim]{platform}:{repo}#{issue_number}[/dim]",
-        title="Issue Resolver",
-        border_style="blue",
-    ))
+    console.print(
+        Panel(
+            f"[bold blue]Open Seed v2 — Issue Resolver[/bold blue]\n[dim]{platform}:{repo}#{issue_number}[/dim]",
+            title="Issue Resolver",
+            border_style="blue",
+        )
+    )
 
     # ── Step 1: Read the issue ──────────────────────────────────────────────
     console.print("\n[bold]Reading issue...[/bold]")
@@ -69,9 +71,11 @@ async def _resolve(
     try:
         if platform == "github":
             from openseed_core.issue_reader import read_github_issue
+
             issue_ctx = await read_github_issue(repo, issue_number)
         else:
             from openseed_core.issue_reader import read_gitlab_issue
+
             issue_ctx = await read_gitlab_issue(repo, issue_number)
     except RuntimeError as e:
         console.print(f"[red]Failed to read issue: {e}[/red]")
@@ -85,7 +89,6 @@ async def _resolve(
     # ── Step 2: Run pipeline with issue as task ─────────────────────────────
     task = issue_ctx.to_task()
 
-    from openseed_core.config import load_config
     from openseed_brain import compile_graph, initial_state
 
     wd = Path(working_dir).resolve()
@@ -97,6 +100,7 @@ async def _resolve(
 
     # Set up checkpointer
     from langgraph.checkpoint.memory import MemorySaver
+
     graph = compile_graph(
         checkpoint_dir=str(wd),
         checkpointer=MemorySaver(),
@@ -131,6 +135,7 @@ async def _resolve(
             console.print("\n[bold]Creating PR...[/bold]")
             try:
                 from openseed_deploy.channels.pr import PRChannel
+
                 pr_channel = PRChannel(base_branch=base_branch)
 
                 if not await pr_channel.check():
@@ -153,10 +158,12 @@ async def _resolve(
         else:
             console.print("\n[green]✓ Fix applied locally (--no-create-pr)[/green]")
 
-        console.print(Panel(
-            "[bold green]Issue resolution complete[/bold green]",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                "[bold green]Issue resolution complete[/bold green]",
+                border_style="green",
+            )
+        )
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")

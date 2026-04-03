@@ -1,0 +1,66 @@
+- generic [ref=e3]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: Projects
+      - button "«" [ref=e8] [cursor=pointer]
+    - generic [ref=e9]:
+      - button "+ Add Folder" [ref=e10] [cursor=pointer]:
+        - generic [ref=e11]: +
+        - text: Add Folder
+      - button "+ New Thread" [ref=e12] [cursor=pointer]:
+        - generic [ref=e13]: +
+        - text: New Thread
+    - generic [ref=e15]:
+      - button "📁 test-harness-ui" [ref=e16] [cursor=pointer]:
+        - generic [ref=e17]: 📁
+        - generic [ref=e18]: test-harness-ui
+      - button "+ New thread" [ref=e20] [cursor=pointer]
+    - generic [ref=e21]:
+      - generic [ref=e22]: Open Seed v2.0
+      - generic [ref=e23]: 1 projects
+  - generic [ref=e24]:
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]: Open Seed
+        - generic [ref=e28]: v2
+      - generic [ref=e29]:
+        - button "🤖 AGI Mode" [ref=e30] [cursor=pointer]
+        - button "👥 Pair Mode" [ref=e31] [cursor=pointer]
+        - button "📊 Diagram" [ref=e32] [cursor=pointer]
+      - generic [ref=e33]:
+        - button "⚙" [ref=e34] [cursor=pointer]
+        - button "📁 test-harness-ui" [ref=e35] [cursor=pointer]:
+          - generic [ref=e36]: 📁
+          - generic [ref=e37]: test-harness-ui
+    - generic [ref=e38]:
+      - generic [ref=e40]:
+        - generic [ref=e41]:
+          - generic [ref=e42]: 🤖
+          - heading "AGI Mode" [level=2] [ref=e43]
+          - paragraph [ref=e44]: "Describe what to build. The pipeline runs autonomously: intake, plan, implement, QA, fix, deploy, memorize."
+        - generic [ref=e45]:
+          - button "🟣 Claude" [ref=e46] [cursor=pointer]
+          - button "🟢 Codex" [ref=e47] [cursor=pointer]
+          - button "⚡ Both" [ref=e48] [cursor=pointer]
+        - generic [ref=e49]: "Harness: 70/100"
+        - generic [ref=e50]:
+          - button "🔨 Build a REST API with auth and CRUD" [ref=e51] [cursor=pointer]:
+            - generic [ref=e52]: 🔨
+            - text: Build a REST API with auth and CRUD
+          - button "🌐 Create a React dashboard with charts" [ref=e53] [cursor=pointer]:
+            - generic [ref=e54]: 🌐
+            - text: Create a React dashboard with charts
+          - button "🐛 Fix the login bug in auth.ts" [ref=e55] [cursor=pointer]:
+            - generic [ref=e56]: 🐛
+            - text: Fix the login bug in auth.ts
+        - generic [ref=e57]:
+          - generic [ref=e58]:
+            - textbox "Describe what to build..." [ref=e59]
+            - button "Run →" [disabled] [ref=e60]
+          - generic [ref=e61]:
+            - generic [ref=e62]: 📁
+            - textbox [ref=e63]: /tmp/test-harness-ui
+      - generic [ref=e65] [cursor=pointer]:
+        - generic [ref=e66]: ▲
+        - generic [ref=e67]: Terminal
+        - generic [ref=e68]: test-harness-ui

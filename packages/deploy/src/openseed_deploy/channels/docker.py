@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+
+from openseed_core.subprocess import run_simple
+
 from openseed_deploy.channels.base import DeployChannel
 from openseed_deploy.types import ChannelResult
-from openseed_core.subprocess import run_simple
 
 
 class DockerChannel(DeployChannel):
@@ -34,7 +36,9 @@ class DockerChannel(DeployChannel):
         if self._push:
             push = await run_simple(["docker", "push", tag], cwd=working_dir, timeout_seconds=120)
             if push.exit_code != 0:
-                return ChannelResult(channel="docker", success=False, message=f"Docker push failed: {push.stderr[:200]}")
+                return ChannelResult(
+                    channel="docker", success=False, message=f"Docker push failed: {push.stderr[:200]}"
+                )
             return ChannelResult(channel="docker", success=True, message=f"Built and pushed {tag}")
 
         return ChannelResult(channel="docker", success=True, message=f"Built {tag}")
