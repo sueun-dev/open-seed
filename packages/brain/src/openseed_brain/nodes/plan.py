@@ -11,8 +11,8 @@ from __future__ import annotations
 import json
 import logging
 
-from openseed_brain.state import PipelineState, Plan, PlanTask, FileEntry
 from openseed_brain.progress import emit_progress
+from openseed_brain.state import FileEntry, PipelineState, Plan, PlanTask
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,8 @@ async def plan_node(state: PipelineState) -> dict:
     task = state["task"]
     working_dir = state["working_dir"]
     intake = "\n".join(state.get("messages", []))
-    intake_analysis = state.get("intake_analysis", {})
+    intake_analysis_raw = state.get("intake_analysis", {})
+    intake_analysis = intake_analysis_raw if isinstance(intake_analysis_raw, dict) else {}
 
     # ── Fast path: intake already has a user-approved plan ──
     intake_plan = intake_analysis.get("plan", "")
@@ -38,15 +39,19 @@ async def plan_node(state: PipelineState) -> dict:
     intake_done_when_raw = intake_analysis.get("done_when", [])
     intake_done_when = intake_done_when_raw if isinstance(intake_done_when_raw, list) else []
 
-    logger.info("Plan fast-path check: plan=%s, scope=%s (type=%s), done_when=%s (type=%s)",
-                bool(intake_plan), bool(intake_scope), type(intake_scope_raw).__name__,
-                bool(intake_done_when), type(intake_done_when_raw).__name__)
+    logger.info(
+        "Plan fast-path check: plan=%s, scope=%s (type=%s), done_when=%s (type=%s)",
+        bool(intake_plan),
+        bool(intake_scope),
+        type(intake_scope_raw).__name__,
+        bool(intake_done_when),
+        type(intake_done_when_raw).__name__,
+    )
 
     if intake_plan and (intake_scope or intake_done_when):
         await _emit("plan.convert", message="Structuring user-approved plan into tasks...")
         plan = await _convert_intake_plan_via_llm(task, intake_analysis)
-        logger.info("Using intake's user-approved plan (%d tasks, %d files)",
-                     len(plan.tasks), len(plan.file_manifest))
+        logger.info("Using intake's user-approved plan (%d tasks, %d files)", len(plan.tasks), len(plan.file_manifest))
         return {
             "plan": plan,
             "messages": [f"Plan: {plan.summary} ({len(plan.tasks)} tasks, {len(plan.file_manifest)} files)"],
@@ -57,6 +62,7 @@ async def plan_node(state: PipelineState) -> dict:
     analysis_context = _build_analysis_context(intake_analysis)
 
     from openseed_claude.agent import ClaudeAgent
+
     agent = ClaudeAgent()
 
     response = await agent.invoke(
@@ -136,6 +142,7 @@ async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict) -> Plan
     if selected_skills:
         try:
             from openseed_brain.skill_loader import list_all_skills
+
             all_skills = list_all_skills()
             skill_info = []
             for s in all_skills:
@@ -153,14 +160,14 @@ async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict) -> Plan
 Task: {task}
 Approach: {approach}
 Tech stack: {tech_stack}
-Selected skills: {', '.join(selected_skills) if selected_skills else 'none'}{skill_catalog}
+Selected skills: {", ".join(selected_skills) if selected_skills else "none"}{skill_catalog}
 
 Plan steps:
 {plan_text}
 
 Files in scope:
-- MODIFY: {', '.join(modify_files) if modify_files else 'none'}
-- CREATE: {', '.join(create_files) if create_files else 'none'}
+- MODIFY: {", ".join(modify_files) if modify_files else "none"}
+- CREATE: {", ".join(create_files) if create_files else "none"}
 
 Respond with ONLY valid JSON:
 {{
@@ -184,7 +191,7 @@ Skill assignment rules:
 - Assign skills that will help the specialist execute THIS specific task
 - A task can have 0 skills if none of the selected skills are relevant
 - Multiple tasks CAN share the same skill
-- Only use skill names from the selected skills list: {', '.join(selected_skills) if selected_skills else 'none'}
+- Only use skill names from the selected skills list: {", ".join(selected_skills) if selected_skills else "none"}
 
 File assignment rules:
 - Each file from scope MUST appear in exactly ONE task
@@ -196,14 +203,21 @@ Output ONLY the JSON object.""",
         max_turns=1,
     )
 
-    plan = _parse_llm_converted_plan(task, approach, response.text, all_scope_files, modify_files, create_files, do_not_touch, done_when)
+    plan = _parse_llm_converted_plan(
+        task, approach, response.text, all_scope_files, modify_files, create_files, do_not_touch, done_when
+    )
     return plan
 
 
 def _parse_llm_converted_plan(
-    task: str, approach: str, text: str,
-    all_scope_files: list[str], modify_files: list[str], create_files: list[str],
-    do_not_touch: list[str], done_when: list[str],
+    task: str,
+    approach: str,
+    text: str,
+    all_scope_files: list[str],
+    modify_files: list[str],
+    create_files: list[str],
+    do_not_touch: list[str],
+    done_when: list[str],
 ) -> Plan:
     """Parse LLM's JSON response into a Plan object, with fallback."""
     plan = Plan(summary=approach or f"Plan for: {task[:100]}")
@@ -225,7 +239,7 @@ def _parse_llm_converted_plan(
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end > start:
-            data = json.loads(text[start:end + 1])
+            data = json.loads(text[start : end + 1])
 
             for i, t in enumerate(data.get("tasks", [])):
                 if not isinstance(t, dict):
@@ -233,29 +247,31 @@ def _parse_llm_converted_plan(
                 role = t.get("role", "fullstack")
                 if role not in ("frontend", "backend", "database", "infra", "fullstack"):
                     role = "fullstack"
-                plan.tasks.append(PlanTask(
-                    id=t.get("id", f"T{i + 1}"),
-                    description=t.get("description", str(t)),
-                    role=role,
-                    files=t.get("files", []),
-                    skills=t.get("skills", []),
-                ))
+                plan.tasks.append(
+                    PlanTask(
+                        id=t.get("id", f"T{i + 1}"),
+                        description=t.get("description", str(t)),
+                        role=role,
+                        files=t.get("files", []),
+                        skills=t.get("skills", []),
+                    )
+                )
 
             for f in data.get("file_manifest", []):
                 if not isinstance(f, dict):
                     continue
-                plan.file_manifest.append(
-                    FileEntry(path=f.get("path", ""), purpose=f.get("purpose", ""))
-                )
+                plan.file_manifest.append(FileEntry(path=f.get("path", ""), purpose=f.get("purpose", "")))
     except (json.JSONDecodeError, TypeError, AttributeError) as exc:
         logger.warning("Failed to parse LLM-converted plan: %s — using fallback", exc)
         # Fallback: create a single fullstack task with all files
-        plan.tasks.append(PlanTask(
-            id="T1",
-            description=f"Implement: {task[:200]}",
-            role="fullstack",
-            files=all_scope_files,
-        ))
+        plan.tasks.append(
+            PlanTask(
+                id="T1",
+                description=f"Implement: {task[:200]}",
+                role="fullstack",
+                files=all_scope_files,
+            )
+        )
         for f in create_files:
             path = f.split("(")[0].strip() if "(" in f else f
             plan.file_manifest.append(FileEntry(path=path, purpose="Create new"))
@@ -334,24 +350,24 @@ def _parse_claude_plan(task: str, text: str) -> Plan:
         if start == -1 or end <= start:
             logger.warning("No JSON object found in Claude plan response")
         elif start != -1 and end > start:
-            data = json.loads(text[start:end + 1])
+            data = json.loads(text[start : end + 1])
             plan.summary = data.get("summary", plan.summary)
             for i, t in enumerate(data.get("tasks", [])):
                 if not isinstance(t, dict):
                     continue
-                plan.tasks.append(PlanTask(
-                    id=t.get("id", f"T{i}"),
-                    description=t.get("description", str(t)),
-                    role=t.get("role", "executor"),
-                    files=t.get("files", []),
-                    skills=t.get("skills", []),
-                ))
+                plan.tasks.append(
+                    PlanTask(
+                        id=t.get("id", f"T{i}"),
+                        description=t.get("description", str(t)),
+                        role=t.get("role", "executor"),
+                        files=t.get("files", []),
+                        skills=t.get("skills", []),
+                    )
+                )
             for f in data.get("file_manifest", []):
                 if not isinstance(f, dict):
                     continue
-                plan.file_manifest.append(
-                    FileEntry(path=f.get("path", ""), purpose=f.get("purpose", ""))
-                )
+                plan.file_manifest.append(FileEntry(path=f.get("path", ""), purpose=f.get("purpose", "")))
     except (json.JSONDecodeError, TypeError, AttributeError) as exc:
         logger.warning("Failed to parse plan JSON: %s", exc)
 
