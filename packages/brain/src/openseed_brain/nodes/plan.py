@@ -70,7 +70,9 @@ async def plan_node(state: PipelineState) -> dict:
     harness_section = ""
     micro_ctx = state.get("microagent_context", [])
     if micro_ctx:
-        harness_section = "\n\nProject Harness (from AGENTS.md — plan must respect these rules):\n" + "\n".join(micro_ctx)
+        harness_section = "\n\nProject Harness (from AGENTS.md — plan must respect these rules):\n" + "\n".join(
+            micro_ctx
+        )
 
     from openseed_claude.agent import ClaudeAgent
 

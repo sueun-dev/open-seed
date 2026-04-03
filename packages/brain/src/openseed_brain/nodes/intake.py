@@ -93,7 +93,9 @@ async def intake_node(state: PipelineState) -> dict:
         harness_score = check_harness_quality(working_dir)
         harness_needs_setup = not harness_score.passing
         if harness_needs_setup:
-            await _emit("intake.harness", message=f"Harness: {harness_score.total}/100 — will include setup in questions")
+            await _emit(
+                "intake.harness", message=f"Harness: {harness_score.total}/100 — will include setup in questions"
+            )
         else:
             await _emit("intake.harness", message=f"Harness OK ({harness_score.total}/100)")
     except Exception:
@@ -113,9 +115,7 @@ async def intake_node(state: PipelineState) -> dict:
             all_answers = state.get("clarification_answers", [])
             all_questions = state.get("clarification_questions", [])
             # Combine all Q&A as project description for AI
-            qa_context = "\n".join(
-                f"Q: {q}\nA: {a}" for q, a in zip(all_questions, all_answers, strict=False) if a
-            )
+            qa_context = "\n".join(f"Q: {q}\nA: {a}" for q, a in zip(all_questions, all_answers, strict=False) if a)
             await _auto_harness_setup(working_dir, state.get("provider", "claude"), qa_context)
             # Re-collect context now that AGENTS.md exists
             context = await _collect_context(task, working_dir)
@@ -129,11 +129,13 @@ async def intake_node(state: PipelineState) -> dict:
 
     # ── Step 2.5: Add harness gap if harness is insufficient ──
     if harness_needs_setup:
-        gaps.append({
-            "topic": "Project description for harness setup",
-            "why": "No AGENTS.md found — need to understand the project to generate coding guidelines, "
-                   "boundaries, and verification commands for AI agents",
-        })
+        gaps.append(
+            {
+                "topic": "Project description for harness setup",
+                "why": "No AGENTS.md found — need to understand the project to generate coding guidelines, "
+                "boundaries, and verification commands for AI agents",
+            }
+        )
         logger.info("Added harness setup gap (total: %d gaps)", len(gaps))
 
     # ── Step 2.5: Select Skills — pick relevant official skills for this task ──
@@ -1152,10 +1154,7 @@ async def _harness_gate(
                     f"Or describe your project in your own words for more accurate results."
                 )
             else:
-                context_msg = (
-                    "No README.md found. Please describe your project so we can "
-                    "generate an accurate harness."
-                )
+                context_msg = "No README.md found. Please describe your project so we can generate an accurate harness."
 
             await _emit(
                 "intake.harness.ask",
@@ -1176,8 +1175,7 @@ async def _harness_gate(
                         "question": (
                             f"Your project needs a harness setup ({score.total}/100, minimum: 60).\n\n"
                             f"{context_msg}\n\n"
-                            f"Missing:\n"
-                            + "\n".join(f"- {m}" for m in score.missing)
+                            f"Missing:\n" + "\n".join(f"- {m}" for m in score.missing)
                         ),
                         "options": [
                             "Auto-generate from README" if has_readme else "",
@@ -1226,7 +1224,8 @@ async def _harness_gate(
                 {
                     "question": (
                         f"Auto-setup completed but harness is still at {new_score.total}/100.\n\n"
-                        f"Missing:\n" + "\n".join(f"- {m}" for m in new_score.missing)
+                        f"Missing:\n"
+                        + "\n".join(f"- {m}" for m in new_score.missing)
                         + "\n\nPlease set these up manually."
                     ),
                     "options": [],
@@ -1280,7 +1279,12 @@ async def _auto_harness_setup(
         # Step 2: AI enhancement — fill TODOs with project-specific content
         ai_guide = get_ai_guide()
         enhanced_files = await _enhance_scaffold_with_ai(
-            scaffold_files, scan, ai_guide, working_dir, provider, project_description,
+            scaffold_files,
+            scan,
+            ai_guide,
+            working_dir,
+            provider,
+            project_description,
         )
 
         # Step 3: Write files to disk

@@ -98,9 +98,7 @@ def _collect_all_violations() -> list[str]:
 def test_dependency_direction() -> None:
     """No package imports from a package it is not allowed to depend on."""
     violations = _collect_all_violations()
-    assert violations == [], (
-        "Architecture constraint violations found:\n" + "\n".join(f"  - {v}" for v in violations)
-    )
+    assert violations == [], "Architecture constraint violations found:\n" + "\n".join(f"  - {v}" for v in violations)
 
 
 def test_core_has_no_internal_deps() -> None:
@@ -117,9 +115,7 @@ def test_core_has_no_internal_deps() -> None:
                 continue
             violations.append(f"{rel_path} imports openseed_{imported_pkg}")
 
-    assert violations == [], (
-        "Core must have zero openseed internal deps:\n" + "\n".join(f"  - {v}" for v in violations)
-    )
+    assert violations == [], "Core must have zero openseed internal deps:\n" + "\n".join(f"  - {v}" for v in violations)
 
 
 def test_no_cross_peer_imports() -> None:
@@ -141,6 +137,4 @@ def test_no_cross_peer_imports() -> None:
                     if imported_pkg == peer:
                         violations.append(f"{rel_path} imports openseed_{peer}")
 
-    assert violations == [], (
-        "Cross-peer imports forbidden:\n" + "\n".join(f"  - {v}" for v in violations)
-    )
+    assert violations == [], "Cross-peer imports forbidden:\n" + "\n".join(f"  - {v}" for v in violations)
