@@ -51,47 +51,60 @@ async def intake_node(state: PipelineState) -> dict:
     working_dir = state["working_dir"]
     has_answers = bool(state.get("clarification_answers"))
 
-    # ── Step 0: Harness Quality Gate ──
-    # Harness must pass before AGI/Pair can proceed.
-    await _emit("intake.harness", message="Checking harness quality...")
-
-    # Check if user already confirmed harness setup (from previous clarification)
-    harness_confirmed = False
-    project_description = ""
-    prev_analysis = state.get("intake_analysis", {})
-    if prev_analysis.get("harness_needs_setup"):
-        # User responded to harness question — they confirmed
-        harness_confirmed = True
-        answers = state.get("clarification_answers", [])
-        if answers:
-            # Last answer might be project description
-            project_description = answers[-1] if answers[-1] else ""
-
-    harness_result = await _harness_gate(
-        working_dir, state.get("provider", "claude"),
-        harness_confirmed=harness_confirmed,
-        project_description=project_description,
-    )
-    if harness_result is not None:
-        return harness_result  # Needs user input or blocked
-
     # ── Step 1: Context Collection (always runs) ──
     await _emit("intake.context", message="Scanning codebase, recalling memories...")
     context = await _collect_context(task, working_dir)
+
+    # ── Harness quality check (deterministic, no blocking) ──
+    harness_needs_setup = False
+    try:
+        from openseed_core.harness.checker import check_harness_quality
+
+        harness_score = check_harness_quality(working_dir)
+        harness_needs_setup = not harness_score.passing
+        if harness_needs_setup:
+            await _emit("intake.harness", message=f"Harness: {harness_score.total}/100 — will include setup in questions")
+        else:
+            await _emit("intake.harness", message=f"Harness OK ({harness_score.total}/100)")
+    except Exception:
+        pass
 
     from openseed_claude.agent import ClaudeAgent
 
     agent = ClaudeAgent()
 
     if has_answers:
-        # Phase 2: Generate execution plan from user's answers
+        # Phase 2: Generate harness (if needed) + execution plan from user's answers
         await _emit("intake.plan", message="Generating execution plan from your answers...")
+
+        # Build harness from ALL answers before generating plan
+        if harness_needs_setup:
+            await _emit("intake.harness.setup", message="Setting up harness from your answers...")
+            all_answers = state.get("clarification_answers", [])
+            all_questions = state.get("clarification_questions", [])
+            # Combine all Q&A as project description for AI
+            qa_context = "\n".join(
+                f"Q: {q}\nA: {a}" for q, a in zip(all_questions, all_answers, strict=False) if a
+            )
+            await _auto_harness_setup(working_dir, state.get("provider", "claude"), qa_context)
+            # Re-collect context now that AGENTS.md exists
+            context = await _collect_context(task, working_dir)
+
         return await _phase2_plan(agent, state, context)
 
     # ── Step 2: Gap Analysis — AI identifies what it doesn't know ──
     await _emit("intake.gaps", message="Analyzing task for knowledge gaps...")
     gaps = await _identify_gaps(agent, task, context)
     logger.info("Identified %d knowledge gaps", len(gaps))
+
+    # ── Step 2.5: Add harness gap if harness is insufficient ──
+    if harness_needs_setup:
+        gaps.append({
+            "topic": "Project description for harness setup",
+            "why": "No AGENTS.md found — need to understand the project to generate coding guidelines, "
+                   "boundaries, and verification commands for AI agents",
+        })
+        logger.info("Added harness setup gap (total: %d gaps)", len(gaps))
 
     # ── Step 2.5: Select Skills — pick relevant official skills for this task ──
     await _emit("intake.skills", message="Selecting relevant skills...")
