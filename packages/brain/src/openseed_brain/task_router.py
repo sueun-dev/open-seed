@@ -8,12 +8,10 @@ and decides which specialist should handle it.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from openseed_brain.specialists import VALID_DOMAINS
-
-if TYPE_CHECKING:
-    from openseed_brain.state import Plan, PlanTask
+from openseed_brain.state import Plan, PlanTask
 
 ROUTING_SYSTEM_PROMPT = """\
 You are a task routing expert. Given a list of implementation tasks from a \

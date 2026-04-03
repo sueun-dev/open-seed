@@ -14,12 +14,9 @@ Escalation chain: retry → retry (different approach) → Insight → User
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from openseed_core.types import Error, Verdict
 
-if TYPE_CHECKING:
-    from openseed_brain.state import PipelineState
+from openseed_brain.state import PipelineState
 
 
 async def sentinel_check_node(state: PipelineState) -> dict:

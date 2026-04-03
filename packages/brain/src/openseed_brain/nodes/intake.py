@@ -17,12 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
 
 from openseed_brain.progress import emit_progress
-
-if TYPE_CHECKING:
-    from openseed_brain.state import PipelineState
+from openseed_brain.state import PipelineState
 
 logger = logging.getLogger(__name__)
 

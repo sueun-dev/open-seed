@@ -17,12 +17,10 @@ on exit, the parent graph merges findings/verdict/synthesis back.
 from __future__ import annotations
 
 import operator
-from typing import TYPE_CHECKING, Annotated, Any, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-
-if TYPE_CHECKING:
-    from openseed_core.types import Finding
+from openseed_core.types import Finding
 
 
 class QASubState(TypedDict):

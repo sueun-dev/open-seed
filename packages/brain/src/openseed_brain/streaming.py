@@ -30,12 +30,10 @@ Usage:
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+from typing import Any
 
 
 class PipelineStreamMode(StrEnum):

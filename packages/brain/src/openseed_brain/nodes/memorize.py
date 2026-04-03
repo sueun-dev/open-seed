@@ -8,10 +8,7 @@ Two storage paths:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from openseed_brain.state import PipelineState
+from openseed_brain.state import PipelineState
 
 
 async def memorize_node(state: PipelineState) -> dict:
