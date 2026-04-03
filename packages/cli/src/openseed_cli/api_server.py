@@ -1085,17 +1085,30 @@ async def _execute_pipeline(
 
     cfg = load_config(Path(config_path) if config_path else None)
 
-    state = initial_state(task=task, working_dir=str(Path(working_dir).resolve()), provider=provider)
+    resolved_dir = str(Path(working_dir).resolve())
+
+    # ── Ensure harness exists before pipeline starts ──
+    try:
+        from openseed_core.harness.checker import check_harness_quality
+
+        score = check_harness_quality(resolved_dir)
+        if not score.passing:
+            from openseed_brain.nodes.intake import _auto_harness_setup
+
+            # Use task + answers as project description
+            desc_parts = [task]
+            if clarification_answers:
+                desc_parts.extend(clarification_answers)
+            await _auto_harness_setup(resolved_dir, provider, "\n".join(desc_parts))
+    except Exception:
+        pass  # Best effort — don't block pipeline
+
+    state = initial_state(task=task, working_dir=resolved_dir, provider=provider)
     state["max_retries"] = cfg.sentinel.max_retries
     if clarification_answers:
         state["clarification_answers"] = clarification_answers
     if intake_analysis and isinstance(intake_analysis, dict):
-        # Verify intake_analysis matches current task (prevent stale cache)
-        if intake_analysis.get("plan") and task not in str(intake_analysis.get("approach", "")):
-            # Stale plan from different task — ignore
-            pass
-        else:
-            state["intake_analysis"] = intake_analysis
+        state["intake_analysis"] = intake_analysis
     graph = compile_graph(
         checkpoint_dir=str(Path(str(cfg.brain.checkpoint_dir)).expanduser()),
         interrupt_on_escalation=False,  # Web UI handles escalation via events, not interrupts
