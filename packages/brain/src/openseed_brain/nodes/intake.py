@@ -1344,14 +1344,19 @@ async def _enhance_scaffold_with_ai(
             from openseed_codex.agent import CodexAgent
 
             agent = CodexAgent()
-            response = await agent.invoke(prompt=prompt, max_turns=1)
+            response = await agent.invoke(prompt=prompt, max_turns=3)
         else:
             from openseed_claude.agent import ClaudeAgent
 
             agent = ClaudeAgent()
-            response = await agent.invoke(prompt=prompt, model="sonnet", max_turns=1)
+            response = await agent.invoke(prompt=prompt, model="sonnet", max_turns=3)
 
         enhanced_content = response.text.strip()
+
+        # Validate: don't use error messages as content
+        if not enhanced_content or "error" in enhanced_content.lower()[:50] or len(enhanced_content) < 50:
+            logger.debug("AI enhancement produced invalid content, keeping scaffold")
+            return scaffold_files
 
         # Extract markdown content if wrapped in code fence
         if "```markdown" in enhanced_content:
@@ -1361,6 +1366,11 @@ async def _enhance_scaffold_with_ai(
         elif enhanced_content.startswith("```"):
             lines = enhanced_content.split("\n")
             enhanced_content = "\n".join(lines[1:-1]).strip()
+
+        # Final validation: must look like AGENTS.md (has # heading)
+        if not enhanced_content.startswith("#"):
+            logger.debug("AI enhancement doesn't look like markdown, keeping scaffold")
+            return scaffold_files
 
         # Replace root AGENTS.md with enhanced version
         for f in scaffold_files:
@@ -1431,12 +1441,12 @@ async def _enhance_sub_agents_with_ai(
                 from openseed_codex.agent import CodexAgent
 
                 agent = CodexAgent()
-                response = await agent.invoke(prompt=prompt, max_turns=1)
+                response = await agent.invoke(prompt=prompt, max_turns=3)
             else:
                 from openseed_claude.agent import ClaudeAgent
 
                 agent = ClaudeAgent()
-                response = await agent.invoke(prompt=prompt, model="haiku", max_turns=1)
+                response = await agent.invoke(prompt=prompt, model="haiku", max_turns=3)
 
             content = response.text.strip()
             if "```markdown" in content:
