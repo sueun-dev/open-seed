@@ -553,7 +553,7 @@ Rules:
 
 Be concise. No extra prose outside the structure.""",
         model="opus",
-        max_turns=1,
+        max_turns=3,
     )
 
     analysis_text = response.text
