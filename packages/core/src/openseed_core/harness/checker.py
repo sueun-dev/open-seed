@@ -118,8 +118,14 @@ def check_harness_quality(working_dir: str) -> HarnessScore:
 
     # ── Constrain ───────────────────────────────────────────────
 
-    # Pre-commit hooks
-    if (root / ".pre-commit-config.yaml").is_file() or (root / ".pre-commit-config.yml").is_file():
+    has_git = (root / ".git").exists()
+    git_remote = _detect_git_remote(root) if has_git else None
+
+    # Pre-commit hooks (only if git repo)
+    if not has_git:
+        details["pre_commit"] = 10  # Not applicable — full points
+        score += 10
+    elif (root / ".pre-commit-config.yaml").is_file() or (root / ".pre-commit-config.yml").is_file():
         details["pre_commit"] = 10
         score += 10
     else:
@@ -185,27 +191,35 @@ def check_harness_quality(working_dir: str) -> HarnessScore:
 
     # ── Verify ──────────────────────────────────────────────────
 
-    # CI pipeline
-    ci_dirs = [
-        root / ".github" / "workflows",
-        root / ".gitlab-ci.yml",
-        root / "Jenkinsfile",
-        root / ".circleci",
-    ]
-    has_ci = False
-    for ci_path in ci_dirs:
-        if ci_path.exists():
-            if ci_path.is_dir():
-                # Check if directory has actual workflow files
-                has_ci = any(ci_path.iterdir()) if ci_path.is_dir() else True
-            else:
-                has_ci = True
-            break
-    if has_ci:
-        details["ci_pipeline"] = 10
+    # CI pipeline (only if git repo with remote)
+    if not has_git or not git_remote:
+        details["ci_pipeline"] = 10  # Not applicable — full points
         score += 10
     else:
-        missing.append("CI: add CI pipeline (.github/workflows/ or equivalent)")
+        ci_dirs = [
+            root / ".github" / "workflows",
+            root / ".gitlab-ci.yml",
+            root / "Jenkinsfile",
+            root / ".circleci",
+        ]
+        has_ci = False
+        for ci_path in ci_dirs:
+            if ci_path.exists():
+                if ci_path.is_dir():
+                    has_ci = any(ci_path.iterdir()) if ci_path.is_dir() else True
+                else:
+                    has_ci = True
+                break
+        if has_ci:
+            details["ci_pipeline"] = 10
+            score += 10
+        else:
+            if git_remote == "github":
+                missing.append("CI: add .github/workflows/ci.yml")
+            elif git_remote == "gitlab":
+                missing.append("CI: add .gitlab-ci.yml")
+            else:
+                missing.append("CI: add CI pipeline for your platform")
 
     # Test files exist
     test_patterns = [
@@ -310,3 +324,27 @@ def _check_sub_agents(root: Path) -> int:
     elif ratio > 0:
         return 3
     return 0
+
+
+def _detect_git_remote(root: Path) -> str | None:
+    """Detect git remote platform. Returns 'github', 'gitlab', or None."""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        url = result.stdout.strip()
+        if not url:
+            return None
+        if "github.com" in url:
+            return "github"
+        if "gitlab" in url:
+            return "gitlab"
+        return "other"
+    except Exception:
+        return None
