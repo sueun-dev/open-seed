@@ -52,14 +52,25 @@ async def plan_node(state: PipelineState) -> dict:
         await _emit("plan.convert", message="Structuring user-approved plan into tasks...")
         plan = await _convert_intake_plan_via_llm(task, intake_analysis)
         logger.info("Using intake's user-approved plan (%d tasks, %d files)", len(plan.tasks), len(plan.file_manifest))
-        return {
+        result: dict = {
             "plan": plan,
             "messages": [f"Plan: {plan.summary} ({len(plan.tasks)} tasks, {len(plan.file_manifest)} files)"],
         }
+        # Propagate microagent_context so downstream nodes see harness
+        micro_ctx = state.get("microagent_context", [])
+        if micro_ctx:
+            result["microagent_context"] = micro_ctx
+        return result
 
     # ── Normal path: generate plan via Claude ──
     await _emit("plan.generate", message="Generating implementation plan via Claude Opus...")
     analysis_context = _build_analysis_context(intake_analysis)
+
+    # Include harness rules so plan respects project boundaries
+    harness_section = ""
+    micro_ctx = state.get("microagent_context", [])
+    if micro_ctx:
+        harness_section = "\n\nProject Harness (from AGENTS.md — plan must respect these rules):\n" + "\n".join(micro_ctx)
 
     from openseed_claude.agent import ClaudeAgent
 
@@ -71,7 +82,7 @@ async def plan_node(state: PipelineState) -> dict:
 Task: {task}
 Working directory: {working_dir}
 Analysis: {intake[:500]}
-{analysis_context}
+{analysis_context}{harness_section}
 
 You MUST respond with ONLY valid JSON (no markdown, no explanation before/after):
 {{

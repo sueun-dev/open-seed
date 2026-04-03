@@ -584,7 +584,25 @@ async def run_intake(req: IntakeRequest) -> dict:
     from openseed_brain.nodes.intake import intake_node
     from openseed_brain.state import initial_state
 
-    state = initial_state(task=req.task, working_dir=req.working_dir, provider=req.provider)
+    resolved_dir = str(Path(req.working_dir).resolve())
+
+    # Ensure harness exists before intake analysis
+    try:
+        from openseed_core.harness.checker import check_harness_quality
+
+        score = check_harness_quality(resolved_dir)
+        if not score.passing:
+            from openseed_brain.nodes.intake import _auto_harness_setup
+
+            desc = req.task
+            if req.clarification_answers:
+                desc += "\n" + "\n".join(req.clarification_answers)
+            await _auto_harness_setup(resolved_dir, req.provider, desc)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Intake harness setup failed: %s", exc)
+
+    state = initial_state(task=req.task, working_dir=resolved_dir, provider=req.provider)
 
     # Pass answers and questions for Phase 2 (plan generation)
     if req.clarification_answers:
@@ -1100,8 +1118,9 @@ async def _execute_pipeline(
             if clarification_answers:
                 desc_parts.extend(clarification_answers)
             await _auto_harness_setup(resolved_dir, provider, "\n".join(desc_parts))
-    except Exception:
-        pass  # Best effort — don't block pipeline
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Pipeline harness setup failed: %s", exc)
 
     state = initial_state(task=task, working_dir=resolved_dir, provider=provider)
     state["max_retries"] = cfg.sentinel.max_retries

@@ -444,12 +444,22 @@ Grep the frontend for fetch/axios calls and verify each URL path exists as a bac
 Fix any integration issues you find. If everything looks correct, confirm it.""",
         model="sonnet",
         working_dir=state["working_dir"],
-        max_turns=5,
+        max_turns=15,
     )
 
+    # If max_turns reached, continue with fresh agent
+    combined = response.text
+    if "max turns" in response.text.lower():
+        agent2 = ClaudeAgent()
+        r2 = await agent2.invoke(
+            prompt=f"Continue checking integration in {state['working_dir']}. Fix remaining issues.",
+            model="sonnet", working_dir=state["working_dir"], max_turns=10,
+        )
+        combined += "\n" + r2.text
+
     return Implementation(
-        summary=f"[integration-check] {response.text[:400]}",
-        raw_output=response.text,
+        summary=f"[integration-check] {combined[:400]}",
+        raw_output=combined,
     )
 
 
@@ -698,8 +708,11 @@ async def _self_verify_and_fix(
         agent = ClaudeAgent()
         error_text = "\n".join(f"- {f}" for f in failures[:10])
 
-        await agent.invoke(
-            prompt=f"""Lint/type checks found errors in the code you just wrote.
+        # Fix loop — keep fixing until all lint passes or max 3 rounds
+        for fix_round in range(1, 4):
+            agent = ClaudeAgent()
+            await agent.invoke(
+                prompt=f"""Lint/type checks found errors (round {fix_round}).
 Fix ALL of these errors NOW.
 
 Working directory: {working_dir}
@@ -712,22 +725,26 @@ Rules:
 - Do NOT change any logic or features — only fix the lint/type errors
 - If an import is missing, add it. If a type is wrong, fix it.
 - Do NOT add new features or refactor""",
-            model="sonnet",
-            working_dir=working_dir,
-            max_turns=8,
-        )
+                model="sonnet",
+                working_dir=working_dir,
+                max_turns=12,
+            )
 
-        # Re-check after fix
-        still_failing = 0
-        for cmd in lint_commands:
-            evidence = await verify_command(cmd, working_dir)
-            if not evidence.passed:
-                still_failing += 1
+            # Re-check
+            failures = []
+            for cmd in lint_commands:
+                evidence = await verify_command(cmd, working_dir)
+                if not evidence.passed:
+                    failures.append(f"{cmd}: {evidence.detail}")
 
-        if still_failing == 0:
-            extra_messages.append(f"Implement [{label}]: all lint errors fixed")
+            if not failures:
+                extra_messages.append(f"Implement [{label}]: all lint errors fixed (round {fix_round})")
+                break
+
+            error_text = "\n".join(f"- {f}" for f in failures[:10])
+            extra_messages.append(f"Implement [{label}]: {len(failures)} lint issues remain after round {fix_round}")
         else:
-            extra_messages.append(f"Implement [{label}]: {still_failing}/{len(lint_commands)} lint issues remain")
+            extra_messages.append(f"Implement [{label}]: lint issues remain after 3 fix rounds")
 
     except Exception as exc:
         import logging
