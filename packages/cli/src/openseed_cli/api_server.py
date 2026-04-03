@@ -629,31 +629,47 @@ async def run_intake(req: IntakeRequest) -> dict:
 class HarnessRequest(BaseModel):
     working_dir: str
     provider: str = "claude"
+    project_description: str = ""
 
 
 @app.post("/api/harness/check")
 async def harness_check(req: HarnessRequest) -> dict:
-    """Check harness quality score for a project directory."""
+    """Check harness quality score + return README preview for user confirmation."""
+    import os
+
     from openseed_core.harness.checker import check_harness_quality
 
     score = check_harness_quality(req.working_dir)
+
+    # Include README preview if available (for user to confirm)
+    readme_preview = ""
+    readme_path = os.path.join(req.working_dir, "README.md")
+    if os.path.isfile(readme_path):
+        try:
+            with open(readme_path) as f:
+                readme_preview = f.read(500).strip()
+        except Exception:
+            pass
+
     return {
         "total": score.total,
         "max_score": score.max_score,
         "passing": score.passing,
         "details": score.details,
         "missing": score.missing,
+        "has_readme": bool(readme_preview),
+        "readme_preview": readme_preview,
     }
 
 
 @app.post("/api/harness/setup")
 async def harness_setup(req: HarnessRequest) -> dict:
-    """Explicitly run harness setup for a project directory."""
+    """Run harness setup with user's project description."""
     from openseed_brain.nodes.intake import _auto_harness_setup
     from openseed_core.harness.checker import check_harness_quality
 
     before = check_harness_quality(req.working_dir)
-    await _auto_harness_setup(req.working_dir, req.provider)
+    await _auto_harness_setup(req.working_dir, req.provider, req.project_description)
     after = check_harness_quality(req.working_dir)
 
     return {
