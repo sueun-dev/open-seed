@@ -38,7 +38,8 @@ async def intake_node(state: PipelineState) -> dict:
     Multi-step intake: context → gaps → research → questions (or plan if answers exist).
     """
     # ── Fast path: plan already approved by user (from frontend Phase 2) ──
-    existing = state.get("intake_analysis")
+    existing_raw = state.get("intake_analysis")
+    existing = existing_raw if isinstance(existing_raw, dict) else None
     if existing and existing.get("plan"):
         logger.info("Intake: using pre-approved plan, sending to plan_node for structuring")
         return {

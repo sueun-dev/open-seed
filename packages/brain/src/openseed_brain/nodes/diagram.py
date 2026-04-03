@@ -11,11 +11,11 @@ Rewritten for Python + our OAuth-based Claude agent.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import zlib
-import base64
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -27,29 +27,78 @@ MAX_FILES = 100
 FILE_SEPARATOR = "=========="
 
 SOURCE_EXTENSIONS = {
-    ".py", ".js", ".ts", ".jsx", ".tsx", ".vue", ".svelte",
-    ".go", ".rs", ".java", ".rb", ".php", ".swift", ".kt",
-    ".css", ".scss", ".html", ".sql", ".graphql", ".prisma",
-    ".yaml", ".yml", ".toml", ".json",
+    ".py",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".vue",
+    ".svelte",
+    ".go",
+    ".rs",
+    ".java",
+    ".rb",
+    ".php",
+    ".swift",
+    ".kt",
+    ".css",
+    ".scss",
+    ".html",
+    ".sql",
+    ".graphql",
+    ".prisma",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".json",
 }
 
 SKIP_DIRS = {
-    ".git", "node_modules", "__pycache__", ".venv", "dist", "build",
-    ".next", ".nuxt", "coverage", ".tox", ".mypy_cache", ".pytest_cache",
-    "vendor", "target", ".svelte-kit", "research", "tests", "test",
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    "coverage",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    "vendor",
+    "target",
+    ".svelte-kit",
+    "research",
+    "tests",
+    "test",
 }
 
 SKIP_FILES = {
-    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "uv.lock",
-    "poetry.lock", "Cargo.lock", "composer.lock",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "uv.lock",
+    "poetry.lock",
+    "Cargo.lock",
+    "composer.lock",
 }
 
 # Config files get priority (always read first)
 CONFIG_FILES = {
-    "package.json", "pyproject.toml", "Cargo.toml", "go.mod",
-    "docker-compose.yml", "docker-compose.yaml", "Dockerfile",
-    "tsconfig.json", "vite.config.ts", "next.config.js", "next.config.ts",
-    ".env.example", "schema.prisma",
+    "package.json",
+    "pyproject.toml",
+    "Cargo.toml",
+    "go.mod",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "Dockerfile",
+    "tsconfig.json",
+    "vite.config.ts",
+    "next.config.js",
+    "next.config.ts",
+    ".env.example",
+    "schema.prisma",
 }
 
 
@@ -87,8 +136,17 @@ def scan_project_files(working_dir: str) -> list[dict]:
             priority = depth * 10.0
             if fname in CONFIG_FILES:
                 priority = -100.0  # Config files first
-            elif fname in ("main.py", "app.py", "index.ts", "index.js", "server.py",
-                           "App.tsx", "App.jsx", "main.ts", "main.tsx"):
+            elif fname in (
+                "main.py",
+                "app.py",
+                "index.ts",
+                "index.js",
+                "server.py",
+                "App.tsx",
+                "App.jsx",
+                "main.ts",
+                "main.tsx",
+            ):
                 priority = -50.0  # Entry points second
 
             candidates.append((priority, rel_path, abs_path))
@@ -113,8 +171,12 @@ def scan_project_files(working_dir: str) -> list[dict]:
         except OSError:
             continue
 
-    logger.info("Diagram scan: %d files selected (%.1fK chars) from %d candidates",
-                len(selected), budget_used / 1000, len(candidates))
+    logger.info(
+        "Diagram scan: %d files selected (%.1fK chars) from %d candidates",
+        len(selected),
+        budget_used / 1000,
+        len(candidates),
+    )
     return selected
 
 
@@ -124,9 +186,21 @@ def _smart_truncate(content: str, max_chars: int) -> str:
         return content
     lines = content.splitlines()
     head = lines[:25]
-    sig_patterns = ("def ", "async def ", "class ", "export ", "function ",
-                    "interface ", "type ", "const ", "router.", "@app.",
-                    "CREATE TABLE", "model ", "schema ")
+    sig_patterns = (
+        "def ",
+        "async def ",
+        "class ",
+        "export ",
+        "function ",
+        "interface ",
+        "type ",
+        "const ",
+        "router.",
+        "@app.",
+        "CREATE TABLE",
+        "model ",
+        "schema ",
+    )
     sigs = [ln for ln in lines[25:] if any(ln.lstrip().startswith(p) for p in sig_patterns)]
     result = "\n".join(head)
     if sigs:
@@ -209,17 +283,14 @@ async def generate_diagram(working_dir: str, generator: str = "claude", verifier
     async def _emit(msg: str, **kw):
         await emit_progress("diagram.progress", node="diagram", message=msg, **kw)
 
-    await _emit(f"Scanning project files...")
+    await _emit("Scanning project files...")
     files = scan_project_files(working_dir)
     if not files:
         return {"mermaid": "", "share_url": "", "files_scanned": 0, "error": "No source files found"}
 
     await _emit(f"Found {len(files)} source files ({sum(len(f['content']) for f in files) // 1000}K chars)")
 
-    file_block = "\n".join(
-        f"{f['path']}\n{f['content']}\n{FILE_SEPARATOR}"
-        for f in files
-    )
+    file_block = "\n".join(f"{f['path']}\n{f['content']}\n{FILE_SEPARATOR}" for f in files)
 
     # ── Step 1: Generate diagram ──
     gen_label = "Claude Opus" if generator == "claude" else "GPT (Codex)"
@@ -227,6 +298,7 @@ async def generate_diagram(working_dir: str, generator: str = "claude", verifier
 
     if generator == "claude":
         from openseed_claude.agent import ClaudeAgent
+
         agent = ClaudeAgent()
         response = await agent.invoke(
             prompt=f"Analyze this codebase and create an architecture diagram.\n\n{file_block}",
@@ -236,6 +308,7 @@ async def generate_diagram(working_dir: str, generator: str = "claude", verifier
         )
     else:
         from openseed_codex.agent import CodexAgent
+
         codex_gen = CodexAgent()
         response = await codex_gen.invoke(
             prompt=f"{SYSTEM_PROMPT}\n\nAnalyze this codebase and create an architecture diagram.\n\n{file_block}",
@@ -300,10 +373,12 @@ async def _run_verify(provider: str, file_block: str, mermaid_code: str) -> tupl
     try:
         if provider == "claude":
             from openseed_claude.agent import ClaudeAgent
+
             agent = ClaudeAgent()
             response = await agent.invoke(prompt=prompt, model="opus", max_turns=1)
         else:
             from openseed_codex.agent import CodexAgent
+
             agent = CodexAgent()
             response = await agent.invoke(prompt=prompt)
         verdict = _parse_verdict(response.text)
@@ -336,10 +411,12 @@ Output ONLY the corrected ```mermaid code block. Be thorough but do NOT over-eng
     try:
         if provider == "claude":
             from openseed_claude.agent import ClaudeAgent
+
             agent = ClaudeAgent()
             response = await agent.invoke(prompt=fix_prompt, system_prompt=SYSTEM_PROMPT, model="opus", max_turns=1)
         else:
             from openseed_codex.agent import CodexAgent
+
             agent = CodexAgent()
             response = await agent.invoke(prompt=f"{SYSTEM_PROMPT}\n\n{fix_prompt}")
         fixed = _extract_mermaid(response.text)
@@ -366,6 +443,7 @@ def _parse_verdict(text: str) -> str:
 def _extract_mermaid(text: str) -> str:
     """Extract mermaid code block from LLM response."""
     import re
+
     match = re.search(r"```mermaid\s*\n([\s\S]*?)```", text)
     if match:
         return match.group(1).strip()
@@ -398,7 +476,7 @@ def fix_mermaid_cycles(mermaid_code: str) -> str:
             continue
 
         if stripped.startswith("subgraph"):
-            rest = stripped[len("subgraph"):].strip()
+            rest = stripped[len("subgraph") :].strip()
             name = rest.split("[")[0].strip()
             # Check if this name matches any ancestor
             for anc in ancestors:

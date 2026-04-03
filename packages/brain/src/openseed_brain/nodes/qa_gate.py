@@ -17,7 +17,8 @@ async def qa_gate_node(state: PipelineState) -> dict:
     working_dir = state["working_dir"]
     implementation = state.get("implementation")
     plan = state.get("plan")
-    intake = state.get("intake_analysis") or {}
+    intake_raw = state.get("intake_analysis") or {}
+    intake = intake_raw if isinstance(intake_raw, dict) else {}
 
     task = state["task"]
     intent = intake.get("intent", "implementation")
