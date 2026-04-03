@@ -11,8 +11,10 @@ class TestCheckHarnessQuality:
     def test_empty_directory_scores_low(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             score = check_harness_quality(tmp)
-            # sub_agents(10 non-monorepo) only
-            assert score.total == 10
+            # No git → pre_commit(10) + ci_pipeline(10) as N/A full points
+            # sub_agents(10 non-monorepo)
+            # Total: 30 — still not passing (needs 60)
+            assert score.total == 30
             assert not score.passing
 
     def test_agents_md_only(self) -> None:
@@ -45,9 +47,11 @@ monorepo: false
             (Path(tmp) / "AGENTS.md").write_text(content)
             (Path(tmp) / "CLAUDE.md").symlink_to("AGENTS.md")
             score = check_harness_quality(tmp)
-            # mission(15) + commands(10) + boundaries(10) + context_map(5) + claude(5) + sub(10) = 55
-            assert score.total == 55
-            assert not score.passing  # Need 60
+            # Inform: mission(15) + commands(10) + boundaries(10) + context_map(5) + claude(5) + sub(10) = 55
+            # No git → pre_commit(10) + ci_pipeline(10) = 20 as N/A
+            # Total: 75 — passes because no-git projects get N/A points for git-dependent items
+            assert score.total == 75
+            assert score.passing
 
     def test_full_level1_passes(self) -> None:
         """Full Level 1 harness should score >= 60."""
