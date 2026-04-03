@@ -104,9 +104,14 @@ def scan_project(working_dir: str) -> ScanResult:
 
             # Frameworks
             for name_check, label in [
-                ("next", "Next.js"), ("react", "React"), ("vue", "Vue"),
-                ("express", "Express"), ("fastify", "Fastify"), ("hono", "Hono"),
-                ("astro", "Astro"), ("svelte", "Svelte"),
+                ("next", "Next.js"),
+                ("react", "React"),
+                ("vue", "Vue"),
+                ("express", "Express"),
+                ("fastify", "Fastify"),
+                ("hono", "Hono"),
+                ("astro", "Astro"),
+                ("svelte", "Svelte"),
             ]:
                 if name_check in deps:
                     result.frameworks.append(label)
@@ -144,8 +149,11 @@ def scan_project(working_dir: str) -> ScanResult:
             pm = result.package_manager or "npm"
             run_prefix = "npm run" if pm == "npm" else pm
             for script_name, cmd_key in [
-                ("build", "build"), ("dev", "dev"), ("test", "test"),
-                ("lint", "lint"), ("typecheck", "typecheck"),
+                ("build", "build"),
+                ("dev", "dev"),
+                ("test", "test"),
+                ("lint", "lint"),
+                ("typecheck", "typecheck"),
             ]:
                 if script_name in scripts:
                     result.commands[cmd_key] = f"{run_prefix} {script_name}"
@@ -216,20 +224,29 @@ def _detect_packages(root: Path) -> list[PackageInfo]:
         for entry in sorted(container_path.iterdir()):
             if entry.is_dir() and not entry.name.startswith("."):
                 desc = _infer_description(entry.name)
-                packages.append(PackageInfo(
-                    name=entry.name,
-                    path=f"{container}/{entry.name}",
-                    description=desc,
-                ))
+                packages.append(
+                    PackageInfo(
+                        name=entry.name,
+                        path=f"{container}/{entry.name}",
+                        description=desc,
+                    )
+                )
     return packages
 
 
 def _infer_description(name: str) -> str:
     hints = {
-        "web": "web frontend", "app": "application", "api": "API server",
-        "core": "core business logic", "shared": "shared utilities",
-        "types": "shared types", "ui": "UI components", "db": "database layer",
-        "auth": "authentication", "cli": "CLI tool", "server": "backend server",
+        "web": "web frontend",
+        "app": "application",
+        "api": "API server",
+        "core": "core business logic",
+        "shared": "shared utilities",
+        "types": "shared types",
+        "ui": "UI components",
+        "db": "database layer",
+        "auth": "authentication",
+        "cli": "CLI tool",
+        "server": "backend server",
     }
     return hints.get(name, f"{name} package")
 
@@ -253,20 +270,24 @@ def generate_scaffold(scan: ScanResult, existing_files: set[str] | None = None) 
 
     # Root AGENTS.md
     if "AGENTS.md" not in existing_files:
-        files.append(HarnessFile(
-            path="AGENTS.md",
-            content=_generate_root_agents_md(scan),
-        ))
+        files.append(
+            HarnessFile(
+                path="AGENTS.md",
+                content=_generate_root_agents_md(scan),
+            )
+        )
 
     # Sub-AGENTS.md for monorepo packages
     if scan.is_monorepo:
         for pkg in scan.packages:
             pkg_agents = f"{pkg.path}/AGENTS.md"
             if pkg_agents not in existing_files:
-                files.append(HarnessFile(
-                    path=pkg_agents,
-                    content=_generate_sub_agents_md(pkg, scan),
-                ))
+                files.append(
+                    HarnessFile(
+                        path=pkg_agents,
+                        content=_generate_sub_agents_md(pkg, scan),
+                    )
+                )
 
     # ── Constrain + Verify (only if git repo) ─────────────────
 
@@ -277,27 +298,33 @@ def generate_scaffold(scan: ScanResult, existing_files: set[str] | None = None) 
         if ".pre-commit-config.yaml" not in existing_files:
             precommit = _generate_precommit_config(scan)
             if precommit:
-                files.append(HarnessFile(
-                    path=".pre-commit-config.yaml",
-                    content=precommit,
-                ))
+                files.append(
+                    HarnessFile(
+                        path=".pre-commit-config.yaml",
+                        content=precommit,
+                    )
+                )
 
         # CI pipeline (detect remote platform)
         git_remote = _detect_git_platform(scan.root)
         if git_remote == "github" and ".github/workflows/ci.yml" not in existing_files:
             ci = _generate_ci_pipeline(scan)
             if ci:
-                files.append(HarnessFile(
-                    path=".github/workflows/ci.yml",
-                    content=ci,
-                ))
+                files.append(
+                    HarnessFile(
+                        path=".github/workflows/ci.yml",
+                        content=ci,
+                    )
+                )
         elif git_remote == "gitlab" and ".gitlab-ci.yml" not in existing_files:
             ci = _generate_gitlab_ci(scan)
             if ci:
-                files.append(HarnessFile(
-                    path=".gitlab-ci.yml",
-                    content=ci,
-                ))
+                files.append(
+                    HarnessFile(
+                        path=".gitlab-ci.yml",
+                        content=ci,
+                    )
+                )
 
     return files
 
@@ -309,7 +336,10 @@ def _detect_git_platform(root: str) -> str | None:
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            cwd=root, capture_output=True, text=True, timeout=5,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         url = result.stdout.strip()
         if "github.com" in url:
@@ -499,19 +529,19 @@ def _generate_ci_pipeline(scan: ScanResult) -> str | None:
         if scan.commands.get("lint"):
             steps.append(f"""
       - name: Lint
-        run: {run_prefix}{scan.commands['lint']}""")
+        run: {run_prefix}{scan.commands["lint"]}""")
         if scan.commands.get("format"):
             steps.append(f"""
       - name: Format check
-        run: {run_prefix}{scan.commands['format']} --check""")
+        run: {run_prefix}{scan.commands["format"]} --check""")
         if scan.commands.get("typecheck"):
             steps.append(f"""
       - name: Type check
-        run: {run_prefix}{scan.commands['typecheck']}""")
+        run: {run_prefix}{scan.commands["typecheck"]}""")
         if scan.commands.get("test"):
             steps.append(f"""
       - name: Test
-        run: {run_prefix}{scan.commands['test']}""")
+        run: {run_prefix}{scan.commands["test"]}""")
 
     elif "TypeScript" in scan.languages or "JavaScript" in scan.languages:
         pm = scan.package_manager or "npm"
@@ -570,14 +600,14 @@ lint:
   stage: test
   script:
     - {install}
-    - {run_prefix}{scan.commands['lint']}""")
+    - {run_prefix}{scan.commands["lint"]}""")
         if scan.commands.get("test"):
             jobs.append(f"""
 test:
   stage: test
   script:
     - {install}
-    - {run_prefix}{scan.commands['test']}""")
+    - {run_prefix}{scan.commands["test"]}""")
         if not jobs:
             return None
         return f"""image: python:3.11

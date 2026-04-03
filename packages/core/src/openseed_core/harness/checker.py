@@ -132,10 +132,17 @@ def check_harness_quality(working_dir: str) -> HarnessScore:
 
     # Linter config
     linter_configs = [
-        "pyproject.toml", "ruff.toml", ".flake8",  # Python
-        "biome.json", "biome.jsonc",  # Biome
-        ".eslintrc.json", ".eslintrc.js", "eslint.config.js", "eslint.config.mjs",  # ESLint
-        ".golangci.yml", ".golangci.yaml",  # Go
+        "pyproject.toml",
+        "ruff.toml",
+        ".flake8",  # Python
+        "biome.json",
+        "biome.jsonc",  # Biome
+        ".eslintrc.json",
+        ".eslintrc.js",
+        "eslint.config.js",
+        "eslint.config.mjs",  # ESLint
+        ".golangci.yml",
+        ".golangci.yaml",  # Go
     ]
     has_linter = False
     if (root / "pyproject.toml").is_file():

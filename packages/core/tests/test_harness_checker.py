@@ -128,7 +128,4 @@ monorepo: false
         """Verify openseed's own harness scores >= 60 (passing)."""
         project_root = str(Path(__file__).resolve().parent.parent.parent.parent)
         score = check_harness_quality(project_root)
-        assert score.passing, (
-            f"openseed's own harness should pass! Score: {score.total}/100. "
-            f"Missing: {score.missing}"
-        )
+        assert score.passing, f"openseed's own harness should pass! Score: {score.total}/100. Missing: {score.missing}"

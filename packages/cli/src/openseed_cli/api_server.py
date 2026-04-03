@@ -597,6 +597,7 @@ async def run_intake(req: IntakeRequest) -> dict:
             await _auto_harness_setup(resolved_dir, req.provider, desc)
     except Exception as exc:
         import logging
+
         logging.getLogger(__name__).warning("Intake harness setup failed: %s", exc)
 
     state = initial_state(task=req.task, working_dir=resolved_dir, provider=req.provider)
@@ -678,9 +679,7 @@ async def harness_setup(req: HarnessRequest) -> dict:
         "after": after.total,
         "passing": after.passing,
         "missing": after.missing,
-        "files_created": [
-            m for m in after.details if m not in before.details
-        ],
+        "files_created": [m for m in after.details if m not in before.details],
     }
 
 
@@ -1117,6 +1116,7 @@ async def _execute_pipeline(
             await _auto_harness_setup(resolved_dir, provider, "\n".join(desc_parts))
     except Exception as exc:
         import logging
+
         logging.getLogger(__name__).warning("Pipeline harness setup failed: %s", exc)
 
     state = initial_state(task=task, working_dir=resolved_dir, provider=provider)
@@ -1235,7 +1235,6 @@ async def _execute_pipeline(
 
                 # Node complete
                 await _broadcast({"type": "node.complete", "node": node_name, "data": {}})
-
 
         if _current_run:
             _current_run["status"] = "completed"

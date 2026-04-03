@@ -142,7 +142,9 @@ async def auto_detect_test_commands(working_dir: str) -> list[str]:
             # Relative prefix for subdirectory commands
             prefix = f"cd {os.path.basename(pkg_dir)} && " if pkg_dir != working_dir else ""
 
-            if ("dependencies" in data or "devDependencies" in data) and not os.path.exists(os.path.join(pkg_dir, "node_modules")):
+            if ("dependencies" in data or "devDependencies" in data) and not os.path.exists(
+                os.path.join(pkg_dir, "node_modules")
+            ):
                 commands.append(f"{prefix}npm install")
             if "test" in scripts and scripts["test"] != 'echo "Error: no test specified" && exit 1':
                 commands.append(f"{prefix}npm test")
@@ -151,9 +153,10 @@ async def auto_detect_test_commands(working_dir: str) -> list[str]:
         except Exception:
             pass
 
-    if (os.path.exists(os.path.join(working_dir, "pyproject.toml")) or os.path.exists(
-        os.path.join(working_dir, "setup.py")
-    )) and (os.path.exists(os.path.join(working_dir, "tests")) or os.path.exists(os.path.join(working_dir, "test"))):
+    if (
+        os.path.exists(os.path.join(working_dir, "pyproject.toml"))
+        or os.path.exists(os.path.join(working_dir, "setup.py"))
+    ) and (os.path.exists(os.path.join(working_dir, "tests")) or os.path.exists(os.path.join(working_dir, "test"))):
         commands.append("python -m pytest --tb=short -q")
 
     if os.path.exists(os.path.join(working_dir, "Makefile")):

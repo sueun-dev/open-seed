@@ -233,7 +233,9 @@ Full plan context:
     combined_output = ""
     for attempt in range(max_retries + 1):
         response = await agent.invoke(
-            prompt=prompt if attempt == 0 else (
+            prompt=prompt
+            if attempt == 0
+            else (
                 f"Continue implementing. Previous attempt ran out of turns.\n"
                 f"Check what files exist in {state['working_dir']}, finish any incomplete work.\n"
                 f"Your tasks:\n{task_descriptions}\n{rules}"
@@ -450,7 +452,9 @@ Fix any integration issues you find. If everything looks correct, confirm it."""
         agent2 = ClaudeAgent()
         r2 = await agent2.invoke(
             prompt=f"Continue checking integration in {state['working_dir']}. Fix remaining issues.",
-            model="sonnet", working_dir=state["working_dir"], max_turns=10,
+            model="sonnet",
+            working_dir=state["working_dir"],
+            max_turns=10,
         )
         combined += "\n" + r2.text
 
@@ -584,8 +588,12 @@ async def _install_build_fix_loop(
         await _emit("implement.install_run", message=f"Running {install_cmd}...")
         try:
             result = subprocess.run(
-                install_cmd, shell=True, cwd=working_dir,
-                capture_output=True, text=True, timeout=120,
+                install_cmd,
+                shell=True,
+                cwd=working_dir,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if result.returncode == 0:
                 messages.append(f"Install: {install_cmd} succeeded")
@@ -595,8 +603,12 @@ async def _install_build_fix_loop(
                 await _fix_with_ai(working_dir, f"Install failed:\n{result.stderr[:500]}", state)
                 # Retry install
                 result = subprocess.run(
-                    install_cmd, shell=True, cwd=working_dir,
-                    capture_output=True, text=True, timeout=120,
+                    install_cmd,
+                    shell=True,
+                    cwd=working_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
                 )
                 if result.returncode == 0:
                     messages.append("Install: fixed and succeeded on retry")
@@ -613,8 +625,12 @@ async def _install_build_fix_loop(
             await _emit("implement.build_run", message=f"Building (round {round_num}/{max_fix_rounds})...")
             try:
                 result = subprocess.run(
-                    build_cmd, shell=True, cwd=working_dir,
-                    capture_output=True, text=True, timeout=120,
+                    build_cmd,
+                    shell=True,
+                    cwd=working_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
                 )
                 if result.returncode == 0:
                     messages.append(f"Build: succeeded on round {round_num}")
