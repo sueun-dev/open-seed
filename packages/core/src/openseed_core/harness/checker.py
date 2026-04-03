@@ -8,7 +8,6 @@ Scores the full Level 1 harness:
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -154,7 +153,7 @@ def check_harness_quality(working_dir: str) -> HarnessScore:
 
             _pkg = _json.loads((root / "package.json").read_text())
             _deps = {**_pkg.get("dependencies", {}), **_pkg.get("devDependencies", {})}
-            if any(l in _deps for l in ("eslint", "@biomejs/biome", "biome")):
+            if any(name in _deps for name in ("eslint", "@biomejs/biome", "biome")):
                 has_linter = True
         except Exception:
             pass
@@ -205,10 +204,7 @@ def check_harness_quality(working_dir: str) -> HarnessScore:
         has_ci = False
         for ci_path in ci_dirs:
             if ci_path.exists():
-                if ci_path.is_dir():
-                    has_ci = any(ci_path.iterdir()) if ci_path.is_dir() else True
-                else:
-                    has_ci = True
+                has_ci = any(ci_path.iterdir()) if ci_path.is_dir() else True
                 break
         if has_ci:
             details["ci_pipeline"] = 10
@@ -222,12 +218,6 @@ def check_harness_quality(working_dir: str) -> HarnessScore:
                 missing.append("CI: add CI pipeline for your platform")
 
     # Test files exist
-    test_patterns = [
-        "tests/", "test/", "__tests__/", "spec/",
-        "**/test_*.py", "**/tests.py",
-        "**/*.test.ts", "**/*.test.js", "**/*.spec.ts", "**/*.spec.js",
-        "pytest.ini", "jest.config.*", "vitest.config.*",
-    ]
     has_tests = False
     for pattern in ["tests", "test", "__tests__", "spec"]:
         if (root / pattern).is_dir():

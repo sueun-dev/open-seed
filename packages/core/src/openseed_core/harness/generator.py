@@ -198,9 +198,8 @@ def _build_commands(scan: ScanResult) -> dict[str, str]:
             cmds["lint"] = "biome check ."
         elif scan.linter == "eslint":
             cmds["lint"] = "eslint ."
-    if scan.formatter:
-        if scan.formatter == "ruff":
-            cmds["format"] = "ruff format ."
+    if scan.formatter and scan.formatter == "ruff":
+        cmds["format"] = "ruff format ."
     if scan.type_checker:
         cmds["typecheck"] = f"{scan.type_checker} ."
 
@@ -241,7 +240,6 @@ def generate_scaffold(scan: ScanResult, existing_files: set[str] | None = None) 
     Only generates files that don't already exist (checks existing_files set
     or defaults to checking the filesystem).
     """
-    import os
 
     if existing_files is None:
         existing_files = set()
@@ -561,8 +559,6 @@ jobs:
 
 def _generate_gitlab_ci(scan: ScanResult) -> str | None:
     """Generate .gitlab-ci.yml based on detected toolchain."""
-    stages: list[str] = []
-
     if "Python" in scan.languages:
         pm = scan.package_manager or "pip"
         install = "uv sync" if pm == "uv" else "pip install -r requirements.txt"

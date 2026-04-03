@@ -12,7 +12,6 @@ Dependency flow (from AGENTS.md):
 from __future__ import annotations
 
 import ast
-import os
 from pathlib import Path
 
 PACKAGES_DIR = Path(__file__).resolve().parent.parent / "packages"
