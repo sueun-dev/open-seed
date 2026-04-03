@@ -273,13 +273,15 @@ async def fix_node(state: PipelineState) -> dict:
     intake_context = ""
     if intake:
         parts = []
-        if intake.get("approach"):
-            parts.append(f"Approach: {intake['approach']}")
-        if intake.get("requirements"):
-            reqs = intake["requirements"]
+        approach = intake.get("approach", "")
+        if approach:
+            parts.append(f"Approach: {approach}")
+        reqs = intake.get("requirements", [])
+        if reqs:
             parts.append(f"Requirements: {', '.join(reqs) if isinstance(reqs, list) else reqs}")
-        if intake.get("tech_stack"):
-            parts.append(f"Tech stack: {intake['tech_stack']}")
+        tech = intake.get("tech_stack", "")
+        if tech:
+            parts.append(f"Tech stack: {tech}")
         if parts:
             intake_context = "\n## Project Context\n" + "\n".join(parts) + "\n"
 
