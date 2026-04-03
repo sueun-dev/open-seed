@@ -270,29 +270,57 @@ def generate_scaffold(scan: ScanResult, existing_files: set[str] | None = None) 
                     content=_generate_sub_agents_md(pkg, scan),
                 ))
 
-    # ── Constrain ───────────────────────────────────────────────
+    # ── Constrain + Verify (only if git repo) ─────────────────
 
-    # Pre-commit config
-    if ".pre-commit-config.yaml" not in existing_files:
-        precommit = _generate_precommit_config(scan)
-        if precommit:
-            files.append(HarnessFile(
-                path=".pre-commit-config.yaml",
-                content=precommit,
-            ))
+    has_git = os.path.isdir(os.path.join(scan.root, ".git"))
 
-    # ── Verify ──────────────────────────────────────────────────
+    if has_git:
+        # Pre-commit config
+        if ".pre-commit-config.yaml" not in existing_files:
+            precommit = _generate_precommit_config(scan)
+            if precommit:
+                files.append(HarnessFile(
+                    path=".pre-commit-config.yaml",
+                    content=precommit,
+                ))
 
-    # CI pipeline
-    if ".github/workflows/ci.yml" not in existing_files:
-        ci = _generate_ci_pipeline(scan)
-        if ci:
-            files.append(HarnessFile(
-                path=".github/workflows/ci.yml",
-                content=ci,
-            ))
+        # CI pipeline (detect remote platform)
+        git_remote = _detect_git_platform(scan.root)
+        if git_remote == "github" and ".github/workflows/ci.yml" not in existing_files:
+            ci = _generate_ci_pipeline(scan)
+            if ci:
+                files.append(HarnessFile(
+                    path=".github/workflows/ci.yml",
+                    content=ci,
+                ))
+        elif git_remote == "gitlab" and ".gitlab-ci.yml" not in existing_files:
+            ci = _generate_gitlab_ci(scan)
+            if ci:
+                files.append(HarnessFile(
+                    path=".gitlab-ci.yml",
+                    content=ci,
+                ))
 
     return files
+
+
+def _detect_git_platform(root: str) -> str | None:
+    """Detect git remote platform."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=root, capture_output=True, text=True, timeout=5,
+        )
+        url = result.stdout.strip()
+        if "github.com" in url:
+            return "github"
+        if "gitlab" in url:
+            return "gitlab"
+        return "other" if url else None
+    except Exception:
+        return None
 
 
 def _generate_root_agents_md(scan: ScanResult) -> str:
@@ -529,6 +557,61 @@ jobs:
     steps:
 {"".join(steps)}
 """
+
+
+def _generate_gitlab_ci(scan: ScanResult) -> str | None:
+    """Generate .gitlab-ci.yml based on detected toolchain."""
+    stages: list[str] = []
+
+    if "Python" in scan.languages:
+        pm = scan.package_manager or "pip"
+        install = "uv sync" if pm == "uv" else "pip install -r requirements.txt"
+        run_prefix = "uv run " if pm == "uv" else ""
+        jobs = []
+        if scan.commands.get("lint"):
+            jobs.append(f"""
+lint:
+  stage: test
+  script:
+    - {install}
+    - {run_prefix}{scan.commands['lint']}""")
+        if scan.commands.get("test"):
+            jobs.append(f"""
+test:
+  stage: test
+  script:
+    - {install}
+    - {run_prefix}{scan.commands['test']}""")
+        if not jobs:
+            return None
+        return f"""image: python:3.11
+
+stages:
+  - test
+{"".join(jobs)}
+"""
+
+    elif "TypeScript" in scan.languages or "JavaScript" in scan.languages:
+        pm = scan.package_manager or "npm"
+        jobs = []
+        for intent in ["lint", "test"]:
+            if scan.commands.get(intent):
+                jobs.append(f"""
+{intent}:
+  stage: test
+  script:
+    - {pm} install
+    - {scan.commands[intent]}""")
+        if not jobs:
+            return None
+        return f"""image: node:20
+
+stages:
+  - test
+{"".join(jobs)}
+"""
+
+    return None
 
 
 def get_ai_guide() -> str:
