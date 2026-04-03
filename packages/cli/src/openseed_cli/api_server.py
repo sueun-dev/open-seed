@@ -1089,9 +1089,13 @@ async def _execute_pipeline(
     state["max_retries"] = cfg.sentinel.max_retries
     if clarification_answers:
         state["clarification_answers"] = clarification_answers
-    if intake_analysis:
-        # Ensure intake_analysis is always a dict (frontend cache can send string)
-        state["intake_analysis"] = intake_analysis if isinstance(intake_analysis, dict) else {}
+    if intake_analysis and isinstance(intake_analysis, dict):
+        # Verify intake_analysis matches current task (prevent stale cache)
+        if intake_analysis.get("plan") and task not in str(intake_analysis.get("approach", "")):
+            # Stale plan from different task — ignore
+            pass
+        else:
+            state["intake_analysis"] = intake_analysis
     graph = compile_graph(
         checkpoint_dir=str(Path(str(cfg.brain.checkpoint_dir)).expanduser()),
         interrupt_on_escalation=False,  # Web UI handles escalation via events, not interrupts

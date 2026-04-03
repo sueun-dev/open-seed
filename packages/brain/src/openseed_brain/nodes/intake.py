@@ -40,10 +40,18 @@ async def intake_node(state: PipelineState) -> dict:
     # ── Fast path: plan already approved by user (from frontend Phase 2) ──
     existing_raw = state.get("intake_analysis")
     existing = existing_raw if isinstance(existing_raw, dict) else None
-    if existing and existing.get("plan"):
+    # Fast path: only use pre-approved plan if it has plan + scope + done_when
+    # AND has clarification_answers (meaning user went through the full flow)
+    has_full_plan = (
+        existing
+        and existing.get("plan")
+        and (existing.get("scope") or existing.get("done_when"))
+        and state.get("clarification_answers")
+    )
+    if has_full_plan:
         logger.info("Intake: using pre-approved plan, sending to plan_node for structuring")
         return {
-            "skip_planning": False,  # Still go through plan_node to convert text → Plan object
+            "skip_planning": False,
             "intake_analysis": existing,
             "messages": ["Intake: using user-approved plan"],
         }

@@ -321,7 +321,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
         body: JSON.stringify({
           task, working_dir: workingDir, provider,
           clarification_answers: answers.filter((a) => a.trim()),
-          intake_analysis: savedIntakeAnalysis,
+          intake_analysis: (savedIntakeAnalysis && typeof savedIntakeAnalysis === 'object' && savedIntakeAnalysis.plan) ? savedIntakeAnalysis : null,
         }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
