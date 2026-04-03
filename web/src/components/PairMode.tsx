@@ -36,9 +36,8 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
   const [rightTab, setRightTab] = useState<"chat" | "changes">("chat");
   const [changedFiles, setChangedFiles] = useState<string[]>([]);
 
-  // Harness quality state
+  // Harness quality state (info only — setup handled by backend on chat)
   const [harness, setHarness] = useState<HarnessStatus>({ total: 0, passing: true, missing: [], checking: false });
-  const [harnessSetupLoading, setHarnessSetupLoading] = useState(false);
 
   useEffect(() => {
     if (!workingDir) return;
@@ -60,21 +59,6 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
       });
     return () => { cancelled = true; };
   }, [workingDir]);
-
-  const runHarnessSetup = async () => {
-    setHarnessSetupLoading(true);
-    try {
-      const res = await fetch("/api/harness/setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ working_dir: workingDir, provider }),
-      });
-      const data = await res.json();
-      setHarness({ total: data.after, passing: data.passing, missing: data.missing || [], checking: false });
-    } catch { /* ignore */ } finally {
-      setHarnessSetupLoading(false);
-    }
-  };
   const [viewingFiles, setViewingFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -245,29 +229,19 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
                       </button>
                     ))}
                   </div>
-                  {/* Harness banner */}
+                  {/* Harness banner (info only — setup handled by backend on first message) */}
                   {!harness.checking && !harness.passing && (
                     <div style={{
                       background: "#1a1207", border: "1px solid #854d0e", borderRadius: 8,
                       padding: "10px 14px",
                     }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                        <span style={{ color: "#fbbf24", fontSize: 11, fontWeight: 600 }}>
-                          Harness: {harness.total}/100
-                        </span>
-                        <button
-                          onClick={runHarnessSetup}
-                          disabled={harnessSetupLoading}
-                          style={{
-                            padding: "3px 10px", borderRadius: 5, fontSize: 10, fontWeight: 600,
-                            cursor: harnessSetupLoading ? "wait" : "pointer",
-                            border: "1px solid #854d0e", background: "#422006", color: "#fbbf24",
-                          }}
-                        >
-                          {harnessSetupLoading ? "Setting up..." : "Auto Setup"}
-                        </button>
-                      </div>
-                      <div style={{ color: "#a3a3a3", fontSize: 10, lineHeight: 1.4 }}>
+                      <span style={{ color: "#fbbf24", fontSize: 11, fontWeight: 600 }}>
+                        Harness: {harness.total}/100
+                      </span>
+                      <span style={{ color: "#a3a3a3", fontSize: 10, marginLeft: 6 }}>
+                        — will be set up on first message
+                      </span>
+                      <div style={{ color: "#a3a3a3", fontSize: 10, lineHeight: 1.4, marginTop: 4 }}>
                         {harness.missing.slice(0, 3).map((m, i) => (
                           <div key={i}>- {m}</div>
                         ))}
