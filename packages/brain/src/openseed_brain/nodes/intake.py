@@ -1273,8 +1273,86 @@ async def _enhance_scaffold_with_ai(
                 f.content = enhanced_content
                 break
 
+        # Enhance sub-AGENTS.md files with AI
+        sub_files = [f for f in scaffold_files if f.path != "AGENTS.md" and f.path.endswith("AGENTS.md")]
+        if sub_files:
+            await _enhance_sub_agents_with_ai(sub_files, scan, working_dir, provider)
+
     except Exception as exc:
         logger.debug("AI enhancement skipped: %s", exc)
         # Fall back to deterministic scaffold (still useful)
 
     return scaffold_files
+
+
+async def _enhance_sub_agents_with_ai(
+    sub_files: list,
+    scan,
+    working_dir: str,
+    provider: str,
+) -> None:
+    """Enhance sub-package AGENTS.md files with AI-generated rules."""
+    import os
+
+    for f in sub_files:
+        # Read key files from the package to give AI context
+        pkg_dir = os.path.join(working_dir, os.path.dirname(f.path))
+        pkg_context = ""
+        for name in ["__init__.py", "index.ts", "index.js", "main.py", "app.py"]:
+            entry = os.path.join(pkg_dir, name)
+            if not os.path.isfile(entry):
+                # Check src/ subdirectory
+                for src_sub in os.listdir(pkg_dir) if os.path.isdir(pkg_dir) else []:
+                    candidate = os.path.join(pkg_dir, src_sub, name)
+                    if os.path.isfile(candidate):
+                        entry = candidate
+                        break
+            if os.path.isfile(entry):
+                try:
+                    with open(entry) as fh:
+                        pkg_context = fh.read(2000)
+                    break
+                except Exception:
+                    pass
+
+        if not pkg_context:
+            continue  # No context to enhance with — keep deterministic version
+
+        prompt = (
+            f"You are writing a sub-package AGENTS.md for {f.path}.\n\n"
+            f"## Rules\n"
+            f"- Under 30 lines total\n"
+            f"- Sections: Scope (1 line), Rules (package-specific only), Testing\n"
+            f"- Do NOT include toolchain rules (linter, formatter)\n"
+            f"- Only include what agents cannot infer from code\n\n"
+            f"## Package entry point code:\n```\n{pkg_context}\n```\n\n"
+            f"## Current scaffold:\n```markdown\n{f.content}\n```\n\n"
+            f"Replace [TODO] with accurate rules based on the code. "
+            f"Return ONLY the markdown content."
+        )
+
+        try:
+            if provider == "codex":
+                from openseed_codex.agent import CodexAgent
+
+                agent = CodexAgent()
+                response = await agent.invoke(prompt=prompt, max_turns=1)
+            else:
+                from openseed_claude.agent import ClaudeAgent
+
+                agent = ClaudeAgent()
+                response = await agent.invoke(prompt=prompt, model="haiku", max_turns=1)
+
+            content = response.text.strip()
+            if "```markdown" in content:
+                start = content.index("```markdown") + len("```markdown")
+                end = content.rindex("```")
+                content = content[start:end].strip()
+            elif content.startswith("```"):
+                lines = content.split("\n")
+                content = "\n".join(lines[1:-1]).strip()
+
+            if content and len(content.splitlines()) <= 35:
+                f.content = content
+        except Exception as exc:
+            logger.debug("Sub-AGENTS.md AI enhancement skipped for %s: %s", f.path, exc)
