@@ -31,7 +31,13 @@ _RULES_CORE = """\
 - Each file must be COMPLETE and RUNNABLE
 - No placeholders, no TODOs
 - Dev defaults: Every config value (ports, origins, DB paths) must work out-of-the-box \
-in a dev environment with zero env vars set. Use sensible defaults, not empty strings."""
+in a dev environment with zero env vars set. Use sensible defaults, not empty strings.
+- NEVER use interactive CLI tools (npm create, npx create-*, yarn create, etc.) — they \
+prompt for input which cannot be provided. Instead, write package.json and config files \
+directly, then run npm install.
+- NEVER run commands that require user input or confirmation. Use --yes, -y, or \
+non-interactive flags when available.
+- If a command hangs or times out, write the files manually instead of retrying the command."""
 
 _RULES_WEB = """\
 - If package.json is needed, create it with all deps
@@ -207,8 +213,7 @@ async def _run_specialist(
     if micro_ctx:
         microagent_section = "\n\n" + "\n".join(micro_ctx) + "\n"
 
-    response = await agent.invoke(
-        prompt=f"""You are implementing the {domain} portion of this project.
+    prompt = f"""You are implementing the {domain} portion of this project.
 
 Original task: {state["task"]}
 Working directory: {state["working_dir"]}
@@ -220,16 +225,36 @@ Full plan context:
 {plan_text}
 {f"{chr(10)}{intake_context}" if intake_context else ""}\
 {microagent_section}
-{rules}""",
-        system_prompt=specialist_prompt,
-        model="sonnet",
-        working_dir=state["working_dir"],
-        max_turns=max_turns,
-    )
+{rules}"""
+
+    # Retry loop: if max_turns reached, continue with a fresh agent
+    max_retries = 2
+    combined_output = ""
+    for attempt in range(max_retries + 1):
+        response = await agent.invoke(
+            prompt=prompt if attempt == 0 else (
+                f"Continue implementing. Previous attempt ran out of turns.\n"
+                f"Check what files exist in {state['working_dir']}, finish any incomplete work.\n"
+                f"Your tasks:\n{task_descriptions}\n{rules}"
+            ),
+            system_prompt=specialist_prompt,
+            model="sonnet",
+            working_dir=state["working_dir"],
+            max_turns=max_turns,
+        )
+        combined_output += response.text + "\n"
+
+        # If response doesn't indicate max turns hit, we're done
+        if "Reached max turns" not in response.text and "max turns" not in response.text.lower():
+            break
+
+        # Max turns hit — retry with fresh agent
+        if attempt < max_retries:
+            agent = ClaudeAgent()
 
     return Implementation(
-        summary=f"[{domain}] {response.text[:400]}",
-        raw_output=response.text,
+        summary=f"[{domain}] {combined_output[:400]}",
+        raw_output=combined_output,
     )
 
 
