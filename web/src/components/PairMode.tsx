@@ -19,6 +19,13 @@ type Props = {
   updateThreadEvents: (threadId: string, events: any[]) => void;
 };
 
+type HarnessStatus = {
+  total: number;
+  passing: boolean;
+  missing: string[];
+  checking: boolean;
+};
+
 export default function PairMode({ activeThread, workingDir, setWorkingDir, createThread, updateThreadEvents }: Props) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -28,6 +35,46 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
   const [provider, setProvider] = useState<"claude" | "codex" | "both">("claude");
   const [rightTab, setRightTab] = useState<"chat" | "changes">("chat");
   const [changedFiles, setChangedFiles] = useState<string[]>([]);
+
+  // Harness quality state
+  const [harness, setHarness] = useState<HarnessStatus>({ total: 0, passing: true, missing: [], checking: false });
+  const [harnessSetupLoading, setHarnessSetupLoading] = useState(false);
+
+  useEffect(() => {
+    if (!workingDir) return;
+    let cancelled = false;
+    setHarness(prev => ({ ...prev, checking: true }));
+    fetch("/api/harness/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ working_dir: workingDir }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (!cancelled) {
+          setHarness({ total: data.total, passing: data.passing, missing: data.missing || [], checking: false });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHarness({ total: 0, passing: true, missing: [], checking: false });
+      });
+    return () => { cancelled = true; };
+  }, [workingDir]);
+
+  const runHarnessSetup = async () => {
+    setHarnessSetupLoading(true);
+    try {
+      const res = await fetch("/api/harness/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ working_dir: workingDir, provider }),
+      });
+      const data = await res.json();
+      setHarness({ total: data.after, passing: data.passing, missing: data.missing || [], checking: false });
+    } catch { /* ignore */ } finally {
+      setHarnessSetupLoading(false);
+    }
+  };
   const [viewingFiles, setViewingFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -198,6 +245,40 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
                       </button>
                     ))}
                   </div>
+                  {/* Harness banner */}
+                  {!harness.checking && !harness.passing && (
+                    <div style={{
+                      background: "#1a1207", border: "1px solid #854d0e", borderRadius: 8,
+                      padding: "10px 14px",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                        <span style={{ color: "#fbbf24", fontSize: 11, fontWeight: 600 }}>
+                          Harness: {harness.total}/100
+                        </span>
+                        <button
+                          onClick={runHarnessSetup}
+                          disabled={harnessSetupLoading}
+                          style={{
+                            padding: "3px 10px", borderRadius: 5, fontSize: 10, fontWeight: 600,
+                            cursor: harnessSetupLoading ? "wait" : "pointer",
+                            border: "1px solid #854d0e", background: "#422006", color: "#fbbf24",
+                          }}
+                        >
+                          {harnessSetupLoading ? "Setting up..." : "Auto Setup"}
+                        </button>
+                      </div>
+                      <div style={{ color: "#a3a3a3", fontSize: 10, lineHeight: 1.4 }}>
+                        {harness.missing.slice(0, 3).map((m, i) => (
+                          <div key={i}>- {m}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {!harness.checking && harness.passing && harness.total > 0 && (
+                    <div style={{ color: "#22c55e", fontSize: 11, fontWeight: 500, textAlign: "center" }}>
+                      Harness: {harness.total}/100
+                    </div>
+                  )}
                   {/* Suggestions */}
                   {[
                     "Review this file for issues",

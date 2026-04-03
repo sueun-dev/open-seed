@@ -56,6 +56,13 @@ const DEFAULT_UI_STATE: ThreadUIState = {
   provider: "claude",
 };
 
+type HarnessStatus = {
+  total: number;
+  passing: boolean;
+  missing: string[];
+  checking: boolean;
+};
+
 export default function AGIMode({ activeThread, workingDir, setWorkingDir, createThread, updateThreadEvents, appendThreadEvent, setThreadRunning }: Props) {
   // Current UI state (for active thread or new-thread view)
   const [task, setTask] = useState("");
@@ -63,6 +70,50 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
   const [clarification, setClarification] = useState<ClarificationState | null>(null);
   const [planReview, setPlanReview] = useState<PlanState | null>(null);
   const [intakeLoading, setIntakeLoading] = useState(false);
+
+  // Harness quality state
+  const [harness, setHarness] = useState<HarnessStatus>({ total: 0, passing: true, missing: [], checking: false });
+  const [harnessSetupLoading, setHarnessSetupLoading] = useState(false);
+
+  // Auto-check harness when workingDir changes
+  useEffect(() => {
+    if (!workingDir) return;
+    let cancelled = false;
+    setHarness(prev => ({ ...prev, checking: true }));
+    fetch("/api/harness/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ working_dir: workingDir }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (!cancelled) {
+          setHarness({ total: data.total, passing: data.passing, missing: data.missing || [], checking: false });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHarness({ total: 0, passing: true, missing: [], checking: false });
+      });
+    return () => { cancelled = true; };
+  }, [workingDir]);
+
+  // Harness setup handler
+  const runHarnessSetup = async () => {
+    setHarnessSetupLoading(true);
+    try {
+      const res = await fetch("/api/harness/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ working_dir: workingDir, provider }),
+      });
+      const data = await res.json();
+      setHarness({ total: data.after, passing: data.passing, missing: data.missing || [], checking: false });
+    } catch {
+      // ignore
+    } finally {
+      setHarnessSetupLoading(false);
+    }
+  };
 
   // Per-thread persistent stores (survive thread switches)
   const uiStatesRef = useRef<Map<string, ThreadUIState>>(new Map());
@@ -540,6 +591,41 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
             </button>
           ))}
         </div>
+
+        {/* Harness quality banner */}
+        {!harness.checking && !harness.passing && (
+          <div style={{
+            background: "#1a1207", border: "1px solid #854d0e", borderRadius: 10,
+            padding: "12px 18px", maxWidth: 500, width: "100%",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ color: "#fbbf24", fontSize: 13, fontWeight: 600 }}>
+                Harness: {harness.total}/100
+              </span>
+              <button
+                onClick={runHarnessSetup}
+                disabled={harnessSetupLoading}
+                style={{
+                  padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  cursor: harnessSetupLoading ? "wait" : "pointer",
+                  border: "1px solid #854d0e", background: "#422006", color: "#fbbf24",
+                }}
+              >
+                {harnessSetupLoading ? "Setting up..." : "Auto Setup"}
+              </button>
+            </div>
+            <div style={{ color: "#a3a3a3", fontSize: 11, lineHeight: 1.5 }}>
+              {harness.missing.slice(0, 4).map((m, i) => (
+                <div key={i}>- {m}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        {!harness.checking && harness.passing && harness.total > 0 && (
+          <div style={{ color: "#22c55e", fontSize: 12, fontWeight: 500 }}>
+            Harness: {harness.total}/100
+          </div>
+        )}
 
         {/* Suggested tasks */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", maxWidth: 600 }}>
