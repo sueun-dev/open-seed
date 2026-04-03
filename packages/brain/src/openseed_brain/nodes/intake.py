@@ -54,9 +54,26 @@ async def intake_node(state: PipelineState) -> dict:
     # ── Step 0: Harness Quality Gate ──
     # Harness must pass before AGI/Pair can proceed.
     await _emit("intake.harness", message="Checking harness quality...")
-    harness_result = await _harness_gate(working_dir, state.get("provider", "claude"))
+
+    # Check if user already confirmed harness setup (from previous clarification)
+    harness_confirmed = False
+    project_description = ""
+    prev_analysis = state.get("intake_analysis", {})
+    if prev_analysis.get("harness_needs_setup"):
+        # User responded to harness question — they confirmed
+        harness_confirmed = True
+        answers = state.get("clarification_answers", [])
+        if answers:
+            # Last answer might be project description
+            project_description = answers[-1] if answers[-1] else ""
+
+    harness_result = await _harness_gate(
+        working_dir, state.get("provider", "claude"),
+        harness_confirmed=harness_confirmed,
+        project_description=project_description,
+    )
     if harness_result is not None:
-        return harness_result  # Blocked — harness insufficient, return to user
+        return harness_result  # Needs user input or blocked
 
     # ── Step 1: Context Collection (always runs) ──
     await _emit("intake.context", message="Scanning codebase, recalling memories...")
@@ -1042,12 +1059,25 @@ def _parse_skip_planning(text: str) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _harness_gate(working_dir: str, provider: str = "claude") -> dict | None:
-    """Check harness quality. If insufficient, attempt auto-setup. If still insufficient, block.
+async def _harness_gate(
+    working_dir: str,
+    provider: str = "claude",
+    harness_confirmed: bool = False,
+    project_description: str = "",
+) -> dict | None:
+    """Check harness quality. If insufficient, ask user before setting up.
 
     Returns None if harness passes (proceed normally).
-    Returns a dict (intake result) if harness is blocked (return to user).
+    Returns a dict (intake result) if harness needs user input first.
+
+    Flow:
+      1. Score check (deterministic)
+      2. If passing → proceed
+      3. If not passing and not confirmed → ask user (return questions)
+      4. If not passing and confirmed → auto-setup with user's description
     """
+    import os
+
     try:
         from openseed_core.harness.checker import check_harness_quality
 
@@ -1058,12 +1088,72 @@ async def _harness_gate(working_dir: str, provider: str = "claude") -> dict | No
             await _emit("intake.harness.pass", message=f"Harness OK ({score.total}/100)")
             return None  # Pass — proceed to intake
 
-        # Attempt auto-setup
+        # ── Not passing: need user confirmation first ──
+
+        if not harness_confirmed:
+            # Gather context to show user what we detected
+            has_readme = os.path.isfile(os.path.join(working_dir, "README.md"))
+            readme_preview = ""
+            if has_readme:
+                try:
+                    with open(os.path.join(working_dir, "README.md")) as f:
+                        readme_preview = f.read(500).strip()
+                except Exception:
+                    pass
+
+            context_msg = ""
+            if has_readme and readme_preview:
+                context_msg = (
+                    f"README.md found. Preview:\n> {readme_preview[:200]}...\n\n"
+                    f"We can use this to generate your harness. "
+                    f"Or describe your project in your own words for more accurate results."
+                )
+            else:
+                context_msg = (
+                    "No README.md found. Please describe your project so we can "
+                    "generate an accurate harness."
+                )
+
+            await _emit(
+                "intake.harness.ask",
+                message=f"Harness quality low ({score.total}/100). Asking user...",
+                score=score.total,
+            )
+
+            return {
+                "skip_planning": True,
+                "intake_analysis": {
+                    "skip_planning": True,
+                    "harness_needs_setup": True,
+                    "harness_score": score.total,
+                    "harness_missing": score.missing,
+                },
+                "clarification_questions": [
+                    {
+                        "question": (
+                            f"Your project needs a harness setup ({score.total}/100, minimum: 60).\n\n"
+                            f"{context_msg}\n\n"
+                            f"Missing:\n"
+                            + "\n".join(f"- {m}" for m in score.missing)
+                        ),
+                        "options": [
+                            "Auto-generate from README" if has_readme else "",
+                            "Let me describe the project",
+                        ],
+                        "input_placeholder": "Describe your project (optional — improves accuracy)",
+                        "category": "harness",
+                    }
+                ],
+                "messages": ["Harness setup needed. Please confirm or describe your project."],
+            }
+
+        # ── User confirmed: run auto-setup ──
+
         await _emit(
             "intake.harness.setup",
-            message=f"Harness quality low ({score.total}/100). Auto-setting up...",
+            message=f"Setting up harness ({score.total}/100)...",
         )
-        await _auto_harness_setup(working_dir, provider)
+        await _auto_harness_setup(working_dir, provider, project_description)
 
         # Re-check after setup
         new_score = check_harness_quality(working_dir)
@@ -1076,12 +1166,10 @@ async def _harness_gate(working_dir: str, provider: str = "claude") -> dict | No
             )
             return None  # Pass — proceed to intake
 
-        # Still insufficient — block and ask user
+        # Still insufficient after auto-setup
         await _emit(
             "intake.harness.blocked",
-            message=f"Harness still insufficient ({new_score.total}/100). Manual setup needed.",
-            score=new_score.total,
-            missing=new_score.missing,
+            message=f"Harness still insufficient ({new_score.total}/100).",
         )
         return {
             "skip_planning": True,
@@ -1094,21 +1182,20 @@ async def _harness_gate(working_dir: str, provider: str = "claude") -> dict | No
             "clarification_questions": [
                 {
                     "question": (
-                        f"Your project's harness quality is {new_score.total}/100 (minimum: 60). "
-                        f"Please set up the following before proceeding:\n\n"
-                        + "\n".join(f"- {m}" for m in new_score.missing)
-                        + "\n\nOr click the Harness Setup button to auto-generate."
+                        f"Auto-setup completed but harness is still at {new_score.total}/100.\n\n"
+                        f"Missing:\n" + "\n".join(f"- {m}" for m in new_score.missing)
+                        + "\n\nPlease set these up manually."
                     ),
-                    "options": ["Run harness setup", "I'll set it up manually"],
+                    "options": [],
                     "category": "harness",
                 }
             ],
-            "messages": ["Harness quality insufficient. Setup required before proceeding."],
+            "messages": ["Harness auto-setup incomplete. Manual setup needed."],
         }
 
     except Exception as exc:
         logger.debug("Harness gate skipped (non-blocking): %s", exc)
-        return None  # Don't block on harness check failures
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1116,11 +1203,12 @@ async def _harness_gate(working_dir: str, provider: str = "claude") -> dict | No
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _auto_harness_setup(working_dir: str, provider: str = "claude") -> None:
-    """Check harness quality and auto-generate scaffold if below threshold.
-
-    This runs at the start of every intake. If AGENTS.md already exists and
-    scores well, this is a no-op (fast deterministic check only).
+async def _auto_harness_setup(
+    working_dir: str,
+    provider: str = "claude",
+    project_description: str = "",
+) -> None:
+    """Generate harness scaffold for a project.
 
     When scaffold is needed, AI (Claude or Codex) is used to enhance the
     deterministic scaffold with project-specific context.
@@ -1149,7 +1237,7 @@ async def _auto_harness_setup(working_dir: str, provider: str = "claude") -> Non
         # Step 2: AI enhancement — fill TODOs with project-specific content
         ai_guide = get_ai_guide()
         enhanced_files = await _enhance_scaffold_with_ai(
-            scaffold_files, scan, ai_guide, working_dir, provider,
+            scaffold_files, scan, ai_guide, working_dir, provider, project_description,
         )
 
         # Step 3: Write files to disk
@@ -1192,16 +1280,23 @@ async def _enhance_scaffold_with_ai(
     ai_guide: str,
     working_dir: str,
     provider: str,
+    project_description: str = "",
 ) -> list:
     """Use AI to replace [TODO] placeholders with project-specific content.
 
-    Reads key project files (README, main entry points) and asks AI to
-    fill in the Mission, Architecture Constraints, and other TODOs.
+    Uses (in priority order):
+    1. User's project description (if provided)
+    2. README.md content
+    3. Scan results only (fallback)
     """
     import os
 
     # Gather project context for AI
     context_parts: list[str] = []
+
+    # User description takes priority
+    if project_description.strip():
+        context_parts.append(f"User's project description:\n{project_description}")
 
     readme = os.path.join(working_dir, "README.md")
     if os.path.isfile(readme):
