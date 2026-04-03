@@ -91,31 +91,17 @@ async def chat(req: ChatRequest) -> dict:
     import hashlib
     import os
 
-    # ── Harness Gate (same as AGI Mode) ──
+    # ── Harness auto-setup (Pair Mode: use message as project description) ──
     try:
         from openseed_core.harness.checker import check_harness_quality
 
         score = check_harness_quality(req.working_dir)
         if not score.passing:
-            # Attempt auto-setup
             from openseed_brain.nodes.intake import _auto_harness_setup
 
-            await _auto_harness_setup(req.working_dir, req.provider)
-            new_score = check_harness_quality(req.working_dir)
-            if not new_score.passing:
-                return {
-                    "response": (
-                        f"⚠️ Harness quality insufficient ({new_score.total}/100). "
-                        f"Please set up your project harness before using Pair Mode.\n\n"
-                        f"Missing:\n" + "\n".join(f"- {m}" for m in new_score.missing)
-                        + "\n\nUse the Harness Setup button or run `openseed harness setup`."
-                    ),
-                    "session_id": req.session_id,
-                    "harness_blocked": True,
-                    "harness_score": new_score.total,
-                }
+            await _auto_harness_setup(req.working_dir, req.provider, req.message)
     except Exception:
-        pass  # Don't block on harness check failures
+        pass  # Don't block on harness setup failures
 
     await _broadcast({"type": "node.start", "node": "pair", "data": {"provider": req.provider}})
 
