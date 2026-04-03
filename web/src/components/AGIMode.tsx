@@ -61,9 +61,6 @@ type HarnessStatus = {
   passing: boolean;
   missing: string[];
   checking: boolean;
-  hasReadme: boolean;
-  readmePreview: string;
-  showInput: boolean;
 };
 
 export default function AGIMode({ activeThread, workingDir, setWorkingDir, createThread, updateThreadEvents, appendThreadEvent, setThreadRunning }: Props) {
@@ -74,17 +71,14 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
   const [planReview, setPlanReview] = useState<PlanState | null>(null);
   const [intakeLoading, setIntakeLoading] = useState(false);
 
-  // Harness quality state
-  const [harness, setHarness] = useState<HarnessStatus>({ total: 0, passing: true, missing: [], checking: false, hasReadme: false, readmePreview: "", showInput: false });
-  const [harnessSetupLoading, setHarnessSetupLoading] = useState(false);
-  const [harnessDescription, setHarnessDescription] = useState("");
+  // Harness quality state (info only — setup happens in intake when Run is clicked)
+  const [harness, setHarness] = useState<HarnessStatus>({ total: 0, passing: true, missing: [], checking: false });
 
   // Auto-check harness when workingDir changes
   useEffect(() => {
     if (!workingDir) return;
     let cancelled = false;
-    setHarness(prev => ({ ...prev, checking: true, showInput: false }));
-    setHarnessDescription("");
+    setHarness(prev => ({ ...prev, checking: true }));
     fetch("/api/harness/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -93,36 +87,14 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       .then(res => res.json())
       .then(data => {
         if (!cancelled) {
-          setHarness({
-            total: data.total, passing: data.passing, missing: data.missing || [],
-            checking: false, hasReadme: data.has_readme || false,
-            readmePreview: data.readme_preview || "", showInput: false,
-          });
+          setHarness({ total: data.total, passing: data.passing, missing: data.missing || [], checking: false });
         }
       })
       .catch(() => {
-        if (!cancelled) setHarness({ total: 0, passing: true, missing: [], checking: false, hasReadme: false, readmePreview: "", showInput: false });
+        if (!cancelled) setHarness({ total: 0, passing: true, missing: [], checking: false });
       });
     return () => { cancelled = true; };
   }, [workingDir]);
-
-  // Harness setup handler — called after user confirms
-  const runHarnessSetup = async () => {
-    setHarnessSetupLoading(true);
-    try {
-      const res = await fetch("/api/harness/setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ working_dir: workingDir, provider, project_description: harnessDescription }),
-      });
-      const data = await res.json();
-      setHarness(prev => ({ ...prev, total: data.after, passing: data.passing, missing: data.missing || [], showInput: false }));
-    } catch {
-      // ignore
-    } finally {
-      setHarnessSetupLoading(false);
-    }
-  };
 
   // Per-thread persistent stores (survive thread switches)
   const uiStatesRef = useRef<Map<string, ThreadUIState>>(new Map());
@@ -601,84 +573,23 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
           ))}
         </div>
 
-        {/* Harness quality banner */}
+        {/* Harness quality banner (info only — setup runs when user clicks Run) */}
         {!harness.checking && !harness.passing && (
           <div style={{
             background: "#1a1207", border: "1px solid #854d0e", borderRadius: 10,
             padding: "12px 18px", maxWidth: 500, width: "100%",
           }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ color: "#fbbf24", fontSize: 13, fontWeight: 600 }}>
-                Harness: {harness.total}/100
-              </span>
-              {!harness.showInput && (
-                <button
-                  onClick={() => setHarness(prev => ({ ...prev, showInput: true }))}
-                  style={{
-                    padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                    cursor: "pointer", border: "1px solid #854d0e", background: "#422006", color: "#fbbf24",
-                  }}
-                >
-                  Setup Harness
-                </button>
-              )}
-            </div>
-
-            {/* Missing items */}
-            <div style={{ color: "#a3a3a3", fontSize: 11, lineHeight: 1.5, marginBottom: harness.showInput ? 10 : 0 }}>
+            <span style={{ color: "#fbbf24", fontSize: 13, fontWeight: 600 }}>
+              Harness: {harness.total}/100
+            </span>
+            <span style={{ color: "#a3a3a3", fontSize: 11, marginLeft: 8 }}>
+              — will be set up when you run
+            </span>
+            <div style={{ color: "#a3a3a3", fontSize: 11, lineHeight: 1.5, marginTop: 6 }}>
               {harness.missing.slice(0, 4).map((m, i) => (
                 <div key={i}>- {m}</div>
               ))}
             </div>
-
-            {/* Step 2: Ask user before setup */}
-            {harness.showInput && (
-              <div style={{ marginTop: 10 }}>
-                {harness.hasReadme && harness.readmePreview && (
-                  <div style={{ color: "#888", fontSize: 11, marginBottom: 8, padding: "6px 8px", background: "#111", borderRadius: 6 }}>
-                    README found: {harness.readmePreview.slice(0, 150)}...
-                  </div>
-                )}
-                <div style={{ color: "#ccc", fontSize: 11, marginBottom: 6 }}>
-                  {harness.hasReadme
-                    ? "Describe your project or we'll use the README:"
-                    : "Describe your project (helps generate better harness):"}
-                </div>
-                <input
-                  type="text"
-                  value={harnessDescription}
-                  onChange={e => setHarnessDescription(e.target.value)}
-                  placeholder="e.g. FastAPI REST API for payment processing"
-                  style={{
-                    width: "100%", padding: "6px 10px", borderRadius: 6, fontSize: 12,
-                    border: "1px solid #333", background: "#0a0a0a", color: "#ddd",
-                    marginBottom: 8, boxSizing: "border-box",
-                  }}
-                />
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button
-                    onClick={runHarnessSetup}
-                    disabled={harnessSetupLoading}
-                    style={{
-                      padding: "5px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                      cursor: harnessSetupLoading ? "wait" : "pointer",
-                      border: "1px solid #854d0e", background: "#422006", color: "#fbbf24",
-                    }}
-                  >
-                    {harnessSetupLoading ? "Setting up..." : "Generate Harness"}
-                  </button>
-                  <button
-                    onClick={() => setHarness(prev => ({ ...prev, showInput: false }))}
-                    style={{
-                      padding: "5px 10px", borderRadius: 6, fontSize: 11,
-                      cursor: "pointer", border: "1px solid #333", background: "#111", color: "#888",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         )}
         {!harness.checking && harness.passing && harness.total > 0 && (
