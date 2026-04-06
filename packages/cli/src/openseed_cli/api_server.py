@@ -583,22 +583,9 @@ async def run_intake(req: IntakeRequest) -> dict:
 
     resolved_dir = str(Path(req.working_dir).resolve())
 
-    # Ensure harness exists before intake analysis
-    try:
-        from openseed_core.harness.checker import check_harness_quality
-
-        score = check_harness_quality(resolved_dir)
-        if not score.passing:
-            from openseed_brain.nodes.intake import _auto_harness_setup
-
-            desc = req.task
-            if req.clarification_answers:
-                desc += "\n" + "\n".join(req.clarification_answers)
-            await _auto_harness_setup(resolved_dir, req.provider, desc)
-    except Exception as exc:
-        import logging
-
-        logging.getLogger(__name__).warning("Intake harness setup failed: %s", exc)
+    # Harness check happens inside intake_node:
+    # Phase 1: adds "project description" gap to questions
+    # Phase 2: generates harness from all user answers
 
     state = initial_state(task=req.task, working_dir=resolved_dir, provider=req.provider)
 
@@ -1101,23 +1088,22 @@ async def _execute_pipeline(
 
     resolved_dir = str(Path(working_dir).resolve())
 
-    # ── Ensure harness exists before pipeline starts ──
+    # Harness should already exist from /api/intake Phase 2.
+    # If not (e.g. direct /api/run call), log warning but don't block.
     try:
         from openseed_core.harness.checker import check_harness_quality
 
         score = check_harness_quality(resolved_dir)
         if not score.passing:
-            from openseed_brain.nodes.intake import _auto_harness_setup
+            import logging
 
-            # Use task + answers as project description
-            desc_parts = [task]
-            if clarification_answers:
-                desc_parts.extend(clarification_answers)
-            await _auto_harness_setup(resolved_dir, provider, "\n".join(desc_parts))
-    except Exception as exc:
-        import logging
-
-        logging.getLogger(__name__).warning("Pipeline harness setup failed: %s", exc)
+            logging.getLogger(__name__).warning(
+                "Pipeline starting with low harness score (%d/100). "
+                "Harness should have been created during intake Phase 2.",
+                score.total,
+            )
+    except Exception:
+        pass
 
     state = initial_state(task=task, working_dir=resolved_dir, provider=provider)
     state["max_retries"] = cfg.sentinel.max_retries
