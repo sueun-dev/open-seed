@@ -119,12 +119,16 @@ async def intake_node(state: PipelineState) -> dict:
 
         return await _phase2_plan(agent, state, context)
 
-    # ── Step 2: Gap Analysis — AI identifies what it doesn't know ──
-    await _emit("intake.gaps", message="Analyzing task for knowledge gaps...")
-    gaps = await _identify_gaps(agent, task, context)
-    logger.info("Identified %d knowledge gaps", len(gaps))
+    # ── Step 2: Gap Analysis + Skill Select (parallel) ──
+    await _emit("intake.gaps", message="Analyzing gaps and selecting skills...")
 
-    # ── Step 2.5: Add harness gap if harness is insufficient ──
+    gaps_task = _identify_gaps(agent, task, context)
+    skills_task = _select_skills(agent, task, [], context)  # gaps not needed for skill selection
+
+    gaps, selected_skills = await asyncio.gather(gaps_task, skills_task)
+    logger.info("Identified %d gaps, selected %d skills: %s", len(gaps), len(selected_skills), selected_skills)
+
+    # Add harness gap if harness is insufficient
     if harness_needs_setup:
         gaps.append(
             {
@@ -134,11 +138,6 @@ async def intake_node(state: PipelineState) -> dict:
             }
         )
         logger.info("Added harness setup gap (total: %d gaps)", len(gaps))
-
-    # ── Step 2.5: Select Skills — pick relevant official skills for this task ──
-    await _emit("intake.skills", message="Selecting relevant skills...")
-    selected_skills = await _select_skills(agent, task, gaps, context)
-    logger.info("Selected %d skills: %s", len(selected_skills), selected_skills)
 
     if not gaps:
         # No gaps = simple task, skip questions entirely
@@ -184,18 +183,8 @@ async def _collect_context(task: str, working_dir: str) -> dict:
         "microagent_context": [],
     }
 
-    # Intent classification
-    try:
-        from openseed_guard.intent_gate import classify_intent
-
-        intent = await classify_intent(task)
-        context["intent_info"] = (
-            f"\nIntent classification: {intent.intent_type.value} "
-            f"(confidence: {intent.confidence:.1f})\n"
-            f"Suggested approach: {intent.suggested_approach}\n"
-        )
-    except Exception as exc:
-        logger.debug("Intent gate unavailable: %s", exc)
+    # Intent classification removed — gap analysis (Opus) handles intent detection.
+    # This was a redundant Claude call adding 5-10s to every intake.
 
     # Memory recall
     try:
