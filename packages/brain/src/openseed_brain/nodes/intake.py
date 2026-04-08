@@ -162,12 +162,23 @@ async def _analyze_and_ask(agent, task: str, context: dict, harness_hint: str) -
     tech_stack = context.get("detected_tech_stack", [])
     tech_hint = f"\nDetected tech stack: {', '.join(tech_stack)}" if tech_stack else ""
 
+    # Build skill catalog for AI to select from
+    skill_section = ""
+    try:
+        from openseed_brain.skill_loader import build_skill_catalog
+
+        catalog = build_skill_catalog()
+        if catalog:
+            skill_section = f"\n\nAvailable specialist skills (pick 0-5 most relevant):\n{catalog}"
+    except Exception:
+        pass
+
     response = await agent.invoke(
         prompt=f"""You are an expert software architect about to execute a task autonomously.
 Analyze this task, identify what you need to know, and generate clarification questions.
 
 Task: {task}
-{context_block}{tech_hint}{harness_hint}
+{context_block}{tech_hint}{harness_hint}{skill_section}
 
 Do ALL of the following in this single response:
 1. Classify the task (intent, complexity, existing project or new)
@@ -188,6 +199,7 @@ REQUIREMENTS:
 - Create dashboard with real-time data visualization
 APPROACH: Use React frontend with Express backend and JWT authentication
 LESSONS: none
+SELECTED_SKILLS: skill-name-1, skill-name-2
 QUESTIONS:
 - Which authentication method should we use? | OPTIONS: A. Passkey/WebAuthn (passwordless, best UX, adopted by Google/Apple in 2025), B. OAuth2 social login (Google/GitHub — fastest setup, no passwords), C. Email/password + MFA (traditional, full control), D. Other (specify)
 - Which database fits best? | OPTIONS: A. PostgreSQL + Prisma (production-ready, typed ORM), B. SQLite + better-sqlite3 (zero config, great for prototypes), C. Other (specify)
@@ -203,13 +215,21 @@ CRITICAL RULES:
 Rules for EXISTING_PROJECT:
 - If working directory has source files, this is MODIFICATION not building from scratch.""",
         model="high",
-        max_turns=1,  # Single turn — gpt-5.4 knows enough without web search
+        max_turns=2,  # 1 turn for web search, 1 for final answer
     )
 
     analysis_text = response.text
     skip_planning = _parse_skip_planning(analysis_text)
     intake_analysis = _parse_analysis(analysis_text)
     questions = _parse_questions_with_options(analysis_text)
+
+    # Extract selected skills from response
+    for line in analysis_text.splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith("SELECTED_SKILLS:"):
+            skills_str = stripped.split(":", 1)[1].strip()
+            if skills_str.lower() not in ("none", ""):
+                intake_analysis["selected_skills"] = [s.strip() for s in skills_str.split(",") if s.strip()]
 
     if context["detected_tech_stack"]:
         intake_analysis["tech_stack"] = ", ".join(context["detected_tech_stack"])
