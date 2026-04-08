@@ -15,7 +15,7 @@ import click
 
 
 @click.group()
-@click.version_option(version="2.0.0-alpha.0", prog_name="openseed")
+@click.version_option(version="2.1.0", prog_name="openseed")
 def cli() -> None:
     """Open Seed — Zero-Bug Autonomous AGI Coding Engine."""
 

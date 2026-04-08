@@ -43,16 +43,6 @@ def doctor_cmd() -> None:
     else:
         table.add_row("Node.js", "[red]✗[/]", "not found")
 
-    # Claude CLI
-    from openseed_core.auth.claude import check_claude_auth
-
-    claude = check_claude_auth()
-    table.add_row(
-        "Claude CLI",
-        "[green]✓[/]" if claude.authenticated else ("[yellow]![/]" if claude.installed else "[red]✗[/]"),
-        "authenticated" if claude.authenticated else (claude.error or "not installed")[:60],
-    )
-
     # Codex CLI
     from openseed_core.auth.openai import check_openai_auth
 
@@ -69,7 +59,7 @@ def doctor_cmd() -> None:
 
     console.print(table)
 
-    all_ok = py_ok and git_path and (claude.authenticated or openai.authenticated)
+    all_ok = py_ok and git_path and openai.authenticated
     if all_ok:
         console.print("\n[bold green]All critical checks passed.[/bold green]")
     else:

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { IndeterminateLoader, useFunMessages } from "./ProgressLoader";
 import { BrailleSpinner } from "./Spinner";
 
 type Props = {
@@ -46,6 +47,7 @@ export default function DiagramMode({ workingDir }: Props) {
   const [shareUrl, setShareUrl] = useState<string>("");
   const [filesScanned, setFilesScanned] = useState(0);
   const [loading, setLoading] = useState(false);
+  const diagramFunText = useFunMessages(loading);
   const [error, setError] = useState<string>("");
   const [rendered, setRendered] = useState(false);
   const [progressLog, setProgressLog] = useState<string[]>([]);
@@ -221,42 +223,38 @@ export default function DiagramMode({ workingDir }: Props) {
     );
   }
 
-  // Loading state — show live progress
+  // Loading state — show progress bar + live log
   if (loading && !diagram) {
     return (
-      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20 }}>
-        <div style={{ fontSize: 48 }}>📊</div>
-        <div style={{ fontSize: 14, color: "#60a5fa", fontWeight: 600 }}>
-          <BrailleSpinner /> Generating architecture diagram...
-        </div>
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, padding: "0 40px" }}>
+        <IndeterminateLoader text={diagramFunText} size="lg" />
 
         {/* Live progress log */}
-        <div style={{
-          width: "100%", maxWidth: 500, maxHeight: 300,
-          background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: 10,
-          padding: "12px 16px", overflowY: "auto",
-          fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 11, lineHeight: 1.8,
-        }}>
-          {progressLog.length === 0 && (
-            <div style={{ color: "#333" }}>Waiting for events...</div>
-          )}
-          {progressLog.map((msg, i) => {
-            const isLast = i === progressLog.length - 1;
-            let icon = "✓";
-            let color = "#4ade80";
-            if (isLast) { icon = "▶"; color = "#60a5fa"; }
-            if (msg.includes("BLOCK")) { icon = "✗"; color = "#f87171"; }
-            if (msg.includes("WARN")) { icon = "⚠"; color = "#facc15"; }
-            if (msg.includes("PASS")) { icon = "✓"; color = "#4ade80"; }
-            if (msg.includes("error") || msg.includes("Failed")) { icon = "✗"; color = "#f87171"; }
-            return (
-              <div key={i} style={{ color: isLast ? color : "#555" }}>
-                <span style={{ marginRight: 8 }}>{isLast ? icon : "✓"}</span>
-                {msg}
-              </div>
-            );
-          })}
-        </div>
+        {progressLog.length > 0 && (
+          <div style={{
+            width: "100%", maxWidth: 500, maxHeight: 200,
+            background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: 10,
+            padding: "12px 16px", overflowY: "auto",
+            fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 11, lineHeight: 1.8,
+          }}>
+            {progressLog.map((msg, i) => {
+              const isLast = i === progressLog.length - 1;
+              let icon = "✓";
+              let color = "#4ade80";
+              if (isLast) { icon = "▶"; color = "#60a5fa"; }
+              if (msg.includes("BLOCK")) { icon = "✗"; color = "#f87171"; }
+              if (msg.includes("WARN")) { icon = "⚠"; color = "#facc15"; }
+              if (msg.includes("PASS")) { icon = "✓"; color = "#4ade80"; }
+              if (msg.includes("error") || msg.includes("Failed")) { icon = "✗"; color = "#f87171"; }
+              return (
+                <div key={i} style={{ color: isLast ? color : "#555" }}>
+                  <span style={{ marginRight: 8 }}>{isLast ? icon : "✓"}</span>
+                  {msg}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }

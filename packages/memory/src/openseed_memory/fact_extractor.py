@@ -66,7 +66,7 @@ class FactExtractor:
     into discrete facts and decide how each should affect the memory store.
     """
 
-    def __init__(self, cli_path: str | None = None, model: str = "claude-sonnet-4-6") -> None:
+    def __init__(self, cli_path: str | None = None, model: str = "gpt-5.4") -> None:
         self._cli_path = cli_path
         self._model = model
 
@@ -75,9 +75,9 @@ class FactExtractor:
         if self._cli_path:
             return self._cli_path
         try:
-            from openseed_core.auth.claude import get_claude_cli_path
+            from openseed_core.auth.openai import get_codex_cli_path
 
-            return get_claude_cli_path()
+            return get_codex_cli_path()
         except Exception:
             return None
 
@@ -113,12 +113,10 @@ class FactExtractor:
 
         cmd = [
             cli,
-            "--print",
-            "--dangerously-skip-permissions",
-            "--model",
+            "exec",
+            "--full-auto",
+            "-m",
             self._model,
-            "--max-turns",
-            "1",
             prompt,
         ]
 

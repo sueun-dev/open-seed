@@ -20,14 +20,13 @@ PACKAGES_DIR = Path(__file__).resolve().parent.parent / "packages"
 # brain is the orchestrator — it coordinates all packages by design.
 ALLOWED_DEPS: dict[str, set[str]] = {
     "core": set(),  # zero openseed internal deps
-    "brain": {"core", "claude", "codex", "qa_gate", "guard", "deploy", "memory"},
-    "claude": {"core"},
+    "brain": {"core", "codex", "qa_gate", "guard", "deploy", "memory"},
     "codex": {"core"},
-    "qa_gate": {"core", "codex", "claude"},
-    "guard": {"core", "claude", "memory"},
+    "qa_gate": {"core", "codex"},
+    "guard": {"core", "codex", "memory"},
     "deploy": {"core"},
-    "memory": {"core", "claude"},
-    "cli": {"core", "brain", "claude", "codex", "qa_gate", "guard", "deploy", "memory"},
+    "memory": {"core", "codex"},
+    "cli": {"core", "brain", "codex", "qa_gate", "guard", "deploy", "memory"},
 }
 
 # Known violations to fix later (file path -> imported package)

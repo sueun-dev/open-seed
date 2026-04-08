@@ -46,11 +46,8 @@ async def run_specialist(
         )
 
     try:
-        # QA review always uses Claude (OAuth, read-only analysis).
-        # TOML agents may specify gpt-5.4 as their design model, but for
-        # review purposes Claude Haiku is faster, cheaper, and doesn't need
-        # Codex's full-auto mode which is designed for code generation, not review.
-        result = await _run_via_claude(agent, context, working_dir)
+        # QA review uses Codex (OAuth, read-only analysis).
+        result = await _run_via_codex(agent, context, working_dir)
 
         duration = int((time.monotonic() - start) * 1000)
         result.duration_ms = duration
@@ -76,15 +73,15 @@ async def run_specialist(
         )
 
 
-async def _run_via_claude(
+async def _run_via_codex(
     agent: AgentDefinition,
     context: str,
     working_dir: str,
 ) -> SpecialistResult:
-    """Run specialist via Claude CLI."""
-    from openseed_claude.agent import ClaudeAgent
+    """Run specialist via Codex CLI."""
+    from openseed_codex.agent import CodexAgent
 
-    claude = ClaudeAgent()
+    codex = CodexAgent()
     # Read-only agents get only read tools
 
     output_contract = """
@@ -97,10 +94,10 @@ Output your findings as a JSON array:
 If no issues found, output: []
 """
 
-    response = await claude.invoke(
+    response = await codex.invoke(
         prompt=f"{context}\n\n---\n\nApply the following review focus:\n{agent.instructions}\n{output_contract}",
         system_prompt=agent.instructions,
-        model="sonnet",  # Sonnet for thorough review (reads files, runs checks)
+        model="standard",  # Standard for thorough review (reads files, runs checks)
         max_turns=5,  # Enough turns to: read files → analyze → output findings
         working_dir=working_dir,
     )
@@ -110,41 +107,6 @@ If no issues found, output: []
         raw_output=response.text,
         findings=_extract_findings(response.text, agent.name),
     )
-
-
-async def _run_via_codex(
-    agent: AgentDefinition,
-    context: str,
-    working_dir: str,
-) -> SpecialistResult:
-    """Run specialist via Codex CLI."""
-    try:
-        from openseed_codex.agent import CodexAgent
-    except ImportError as exc:
-        # Codex package not installed — fall back to Claude
-        import logging
-
-        logging.getLogger(__name__).debug("CodexAgent unavailable (%s); falling back to Claude", exc)
-        return await _run_via_claude(agent, context, working_dir)
-
-    try:
-        codex = CodexAgent()
-        response = await codex.invoke(
-            prompt=f"{context}\n\n---\n\nApply the following review focus:\n{agent.instructions}",
-            working_dir=working_dir,
-            auto_mode=agent.sandbox_mode == "workspace-write",
-        )
-
-        return SpecialistResult(
-            agent_name=agent.name,
-            raw_output=response.text,
-            findings=_extract_findings(response.text, agent.name),
-        )
-    except Exception as exc:
-        import logging
-
-        logging.getLogger(__name__).debug("CodexAgent invocation failed (%s); falling back to Claude", exc)
-        return await _run_via_claude(agent, context, working_dir)
 
 
 def _extract_findings(text: str, agent_name: str) -> list[dict[str, Any]]:

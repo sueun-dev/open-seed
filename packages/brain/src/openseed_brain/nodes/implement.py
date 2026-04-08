@@ -177,9 +177,9 @@ async def _run_specialist(
     Returns:
         Implementation result from the specialist.
     """
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
     intake_raw = state.get("intake_analysis") or {}
     intake = intake_raw if isinstance(intake_raw, dict) else {}
 
@@ -241,7 +241,7 @@ Full plan context:
                 f"Your tasks:\n{task_descriptions}\n{rules}"
             ),
             system_prompt=specialist_prompt,
-            model="sonnet",
+            model="standard",
             working_dir=state["working_dir"],
             max_turns=max_turns,
         )
@@ -253,7 +253,7 @@ Full plan context:
 
         # Max turns hit — retry with fresh agent
         if attempt < max_retries:
-            agent = ClaudeAgent()
+            agent = CodexAgent()
 
     return Implementation(
         summary=f"[{domain}] {combined_output[:400]}",
@@ -345,11 +345,11 @@ async def _implement_fullstack(state: PipelineState) -> Implementation:
     Uses intake_analysis to tailor the prompt to the specific intent,
     complexity, and project context.
     """
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
     from openseed_brain.specialists import get_specialist_prompt
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
     plan_text = _build_plan_text(state)
     intake_raw = state.get("intake_analysis") or {}
     intake = intake_raw if isinstance(intake_raw, dict) else {}
@@ -383,7 +383,7 @@ Working directory: {state["working_dir"]}
 {microagent_section}
 {rules}""",
         system_prompt=get_specialist_prompt("fullstack"),
-        model="sonnet",
+        model="standard",
         working_dir=state["working_dir"],
         max_turns=max_turns,
     )
@@ -409,9 +409,9 @@ async def _integration_check(
     - Missing dependencies in package.json
     - Database schema not matching ORM models
     """
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
 
     summaries = "\n\n".join(f"--- {r.summary[:200]} ---" for r in specialist_results)
 
@@ -441,7 +441,7 @@ Grep the frontend for fetch/axios calls and verify each URL path exists as a bac
 10. Every REST resource has both PUT and PATCH endpoints if the frontend performs updates.
 
 Fix any integration issues you find. If everything looks correct, confirm it.""",
-        model="sonnet",
+        model="standard",
         working_dir=state["working_dir"],
         max_turns=15,
     )
@@ -449,10 +449,10 @@ Fix any integration issues you find. If everything looks correct, confirm it."""
     # If max_turns reached, continue with fresh agent
     combined = response.text
     if "max turns" in response.text.lower():
-        agent2 = ClaudeAgent()
+        agent2 = CodexAgent()
         r2 = await agent2.invoke(
             prompt=f"Continue checking integration in {state['working_dir']}. Fix remaining issues.",
-            model="sonnet",
+            model="standard",
             working_dir=state["working_dir"],
             max_turns=10,
         )
@@ -495,14 +495,13 @@ Write every file with complete code. No placeholders.""",
 
 
 async def _implement_both(state: PipelineState) -> Implementation:
-    """Claude designs architecture, Codex implements in parallel (legacy mode)."""
-    from openseed_claude.agent import ClaudeAgent
+    """Two Codex agents: one designs architecture, other implements (legacy mode)."""
     from openseed_codex.agent import CodexAgent
 
     plan_text = _build_plan_text(state)
 
-    claude = ClaudeAgent()
-    arch_response = await claude.invoke(
+    architect = CodexAgent()
+    arch_response = await architect.invoke(
         prompt=f"""Create the core architecture files for this project.
 Focus on: entry point, main server/app file, config, types.
 Other files will be created by a parallel agent.
@@ -514,7 +513,7 @@ Plan:
 {plan_text}
 
 Write only the 3-4 most critical files. Be thorough.""",
-        model="sonnet",
+        model="standard",
         working_dir=state["working_dir"],
         max_turns=8,
     )
@@ -654,9 +653,9 @@ async def _install_build_fix_loop(
 
 async def _fix_with_ai(working_dir: str, error_text: str, state: PipelineState) -> None:
     """Ask AI to fix build/install errors."""
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
     await agent.invoke(
         prompt=f"""Fix these errors in the project at {working_dir}.
 
@@ -668,7 +667,7 @@ Rules:
 - If a dependency is missing from package.json, add it and note that npm install needs to run
 - If an import is wrong, fix it
 - Be precise and minimal""",
-        model="sonnet",
+        model="standard",
         working_dir=working_dir,
         max_turns=10,
     )
@@ -716,14 +715,14 @@ async def _self_verify_and_fix(
         # Lint errors found — ask Claude to fix them immediately
         extra_messages.append(f"Implement [{label}]: {len(failures)} lint error(s) found, auto-fixing")
 
-        from openseed_claude.agent import ClaudeAgent
+        from openseed_codex.agent import CodexAgent
 
-        agent = ClaudeAgent()
+        agent = CodexAgent()
         error_text = "\n".join(f"- {f}" for f in failures[:10])
 
         # Fix loop — keep fixing until all lint passes or max 3 rounds
         for fix_round in range(1, 4):
-            agent = ClaudeAgent()
+            agent = CodexAgent()
             await agent.invoke(
                 prompt=f"""Lint/type checks found errors (round {fix_round}).
 Fix ALL of these errors NOW.
@@ -738,7 +737,7 @@ Rules:
 - Do NOT change any logic or features — only fix the lint/type errors
 - If an import is missing, add it. If a type is wrong, fix it.
 - Do NOT add new features or refactor""",
-                model="sonnet",
+                model="standard",
                 working_dir=working_dir,
                 max_turns=12,
             )
@@ -781,30 +780,6 @@ async def implement_node(state: PipelineState) -> dict:
        then run integration check
     4. Self-verify: run lint/type checks and auto-fix basic errors before QA
     """
-    provider = state.get("provider", "claude")
-
-    # Legacy provider modes — backward compatibility
-    if provider == "codex":
-        await _emit("implement.start", phase="codex", message="Starting Codex implementation...")
-        impl = await _implement_codex(state)
-        await _emit("implement.verify", message="Running lint checks...")
-        impl, extra = await _self_verify_and_fix(state, impl, "codex")
-        await _emit("implement.done", message="Codex implementation complete")
-        return {
-            "implementation": impl,
-            "messages": [f"Implement [codex]: {impl.summary[:300]}"] + extra,
-        }
-    if provider == "both":
-        await _emit("implement.start", phase="both", message="Starting Claude + Codex implementation...")
-        impl = await _implement_both(state)
-        await _emit("implement.verify", message="Running lint checks...")
-        impl, extra = await _self_verify_and_fix(state, impl, "both")
-        await _emit("implement.done", message="Both-mode implementation complete")
-        return {
-            "implementation": impl,
-            "messages": [f"Implement [both]: {impl.summary[:300]}"] + extra,
-        }
-
     # ── Specialist-based implementation ──────────────────────────────────────
 
     plan = state.get("plan")

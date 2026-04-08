@@ -61,7 +61,7 @@ class TestAssessRisk:
         mock_response = MagicMock()
         mock_response.text = '{"risk": "medium", "reason": "config changes", "flagged_items": ["config.yaml"]}'
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await assess_risk(
                 "Modify application config",
@@ -75,7 +75,7 @@ class TestAssessRisk:
     @pytest.mark.asyncio
     async def test_llm_failure_returns_low(self) -> None:
         """If security check fails, default to LOW (don't block)."""
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(side_effect=Exception("LLM down"))
             result = await assess_risk("Do something", ["file.py"], "/tmp")
 

@@ -145,10 +145,10 @@ async def _synthesize_with_llm(
     - Resolve conflicts, detect false positives
     - Return decision-oriented synthesis with traceability
     """
-    from openseed_core.auth.claude import require_claude_auth
+    from openseed_core.auth.openai import require_openai_auth
     from openseed_core.subprocess import run_streaming
 
-    cli = require_claude_auth()
+    cli = require_openai_auth()
 
     n_agents = len(results)
     n_findings = len(all_raw)
@@ -234,12 +234,10 @@ Output ONLY valid JSON, no markdown, no explanation outside the JSON:
 
     cmd = [
         cli,
-        "--print",
-        "--dangerously-skip-permissions",
-        "--model",
-        "claude-sonnet-4-6",
-        "--max-turns",
-        "1",
+        "exec",
+        "--full-auto",
+        "-m",
+        "gpt-5.4",
         prompt,
     ]
 

@@ -432,7 +432,7 @@ class TestEvaluateGate:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             should_continue, reason = await orchestrator._llm_gate_decision(WorkflowStage.DISCOVERY, findings)
 

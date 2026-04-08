@@ -29,7 +29,7 @@ class TestAIAnalyzeUI:
         mock_response = MagicMock()
         mock_response.text = "PASS: The page renders a functional todo app"
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await _ai_analyze_ui(
                 screenshot_b64="base64data",
@@ -45,7 +45,7 @@ class TestAIAnalyzeUI:
         mock_response = MagicMock()
         mock_response.text = "FAIL: The page shows a blank white screen with no content"
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await _ai_analyze_ui(
                 screenshot_b64="base64data",
@@ -58,7 +58,7 @@ class TestAIAnalyzeUI:
 
     @pytest.mark.asyncio
     async def test_ai_unavailable_returns_pass(self) -> None:
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(side_effect=Exception("LLM down"))
             result = await _ai_analyze_ui(
                 screenshot_b64="data",

@@ -87,10 +87,12 @@ async def run_streaming(
             else:
                 stderr_parts.append(text)
 
-            # Try to parse as JSON (NDJSON protocol)
+            # Try to parse as JSON (NDJSON protocol) — only accept dicts
             parsed = None
             with contextlib.suppress(json.JSONDecodeError, ValueError):
-                parsed = json.loads(text)
+                val = json.loads(text)
+                if isinstance(val, dict):
+                    parsed = val
 
             sl = StreamLine(source=source, text=text, parsed=parsed)
             lines.append(sl)

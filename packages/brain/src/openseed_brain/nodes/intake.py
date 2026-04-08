@@ -98,9 +98,9 @@ async def intake_node(state: PipelineState) -> dict:
     except Exception:
         pass
 
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
 
     if has_answers:
         # Phase 2: Generate harness (if needed) + execution plan from user's answers
@@ -113,9 +113,22 @@ async def intake_node(state: PipelineState) -> dict:
             all_questions = state.get("clarification_questions", [])
             # Combine all Q&A as project description for AI
             qa_context = "\n".join(f"Q: {q}\nA: {a}" for q, a in zip(all_questions, all_answers, strict=False) if a)
-            await _auto_harness_setup(working_dir, state.get("provider", "claude"), qa_context)
-            # Re-collect context now that AGENTS.md exists
-            context = await _collect_context(task, working_dir)
+            await _auto_harness_setup(working_dir, state.get("provider", "codex"), qa_context)
+            # Reload microagents only — AGENTS.md was just created, but
+            # memory/codebase haven't changed so no need for full re-scan
+            try:
+                from openseed_core.microagent import (
+                    format_microagent_context,
+                    load_microagents,
+                    select_relevant_microagents,
+                )
+
+                agents = load_microagents(working_dir)
+                relevant = await select_relevant_microagents(agents, task)
+                if relevant:
+                    context["microagent_context"] = [format_microagent_context(relevant)]
+            except Exception:
+                pass
 
         return await _phase2_plan(agent, state, context)
 
@@ -184,7 +197,7 @@ async def _collect_context(task: str, working_dir: str) -> dict:
     }
 
     # Intent classification removed — gap analysis (Opus) handles intent detection.
-    # This was a redundant Claude call adding 5-10s to every intake.
+    # Intent classification removed — gap analysis handles intent detection.
 
     # Memory recall
     try:
@@ -329,7 +342,7 @@ Rules:
 - Each gap must represent a REAL decision point where different choices lead to different outcomes.
 - Maximum 8 gaps even for the most complex tasks.
 - Be brutally honest: if you can make a good default decision yourself, it's NOT a gap.""",
-        model="opus",
+        model="xhigh",
         max_turns=1,
     )
 
@@ -387,7 +400,7 @@ TRADE_OFF: <1 sentence: the main downside or when NOT to use this>
 
 Focus on specific tools, libraries, patterns — not vague advice.
 Include version numbers where relevant.""",
-                model="sonnet",
+                model="standard",
                 max_turns=3,  # Allow web search tool use
             )
             return {"topic": gap["topic"], "why": gap["why"], "research": response.text}
@@ -431,33 +444,32 @@ Task: {task}
 Knowledge gaps identified:
 {chr(10).join(f"- {g['topic']}: {g['why']}" for g in gaps)}
 
-Respond with EXACTLY this structure:
+Respond with EXACTLY this structure (replace the example values with REAL content):
 
-INTENT: <implementation|fix|research|investigation|evaluation|open_ended>
-COMPLEXITY: <simple|moderate|complex>
+INTENT: implementation
+COMPLEXITY: moderate
 SKIP_PLANNING: no
-EXISTING_PROJECT: <yes|no>
+EXISTING_PROJECT: no
 REQUIREMENTS:
-- <requirement 1>
-- <requirement 2>
-APPROACH: <1-2 sentence approach>
-LESSONS: <any relevant lessons from past experiences, or "none">
+- Add user authentication with social login
+- Create dashboard with real-time data
+APPROACH: Build a React frontend with Express backend using JWT auth
+LESSONS: none
 QUESTIONS:
-- <question text> | OPTIONS: <A. option (rationale)>, <B. option (rationale)>, <C. option (rationale)>
-- <question text> | OPTIONS: <A. option (rationale)>, <B. option (rationale)>
+- Which authentication method should we use? | OPTIONS: A. Passkey/WebAuthn (passwordless, best UX, adopted by Google/Apple in 2025), B. OAuth2 social login (Google/GitHub — fastest to implement, users don't need new passwords), C. Email/password + MFA (traditional, full control, requires email service), D. Other (specify)
+- Which database fits this project best? | OPTIONS: A. PostgreSQL + Prisma ORM (production-ready, strong typing, great migrations), B. SQLite + better-sqlite3 (zero config, single file, perfect for prototypes), C. Other (specify)
 
-Rules for QUESTIONS:
+CRITICAL RULES:
 - Generate exactly ONE question per knowledge gap. {len(gaps)} gaps = {len(gaps)} questions.
-- EVERY option must include a brief rationale in parentheses, derived from your research.
-  Example: "A. Passkey/WebAuthn (passwordless, best UX, adopted by Google/Apple in 2025)"
-- Options must be concrete and specific — library names, pattern names, version numbers.
+- EVERY question text must be a REAL question about the task, NOT a placeholder like "question text".
+- EVERY option must be a REAL choice with a rationale, NOT a placeholder like "option (rationale)".
+- Options must be concrete: library names, pattern names, version numbers.
 - The LAST option can be "Other (specify)" for custom answers.
-- Do NOT add questions beyond the identified gaps.
-- Do NOT ask vague or yes/no questions. Every question is a decision point.
+- Do NOT copy the example questions above — write NEW ones specific to this task.
 
 Rules for EXISTING_PROJECT:
 - If working directory has source files, this is MODIFICATION not building from scratch.""",
-        model="opus",
+        model="high",
         max_turns=1,
     )
 
@@ -505,7 +517,7 @@ REQUIREMENTS:
 - <requirement 1>
 APPROACH: <1 sentence approach>
 LESSONS: none""",
-        model="sonnet",  # Sonnet is fine for simple classification
+        model="standard",  # Sonnet is fine for simple classification
         max_turns=1,
     )
 
@@ -570,7 +582,7 @@ Rules:
 - DO_NOT_TOUCH should include core config files, unrelated modules, etc.
 
 Be concise. No extra prose outside the structure.""",
-        model="opus",
+        model="xhigh",
         max_turns=3,
     )
 
@@ -1086,159 +1098,18 @@ def _parse_skip_planning(text: str) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Harness Gate — must pass before AGI/Pair can proceed
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-async def _harness_gate(
-    working_dir: str,
-    provider: str = "claude",
-    harness_confirmed: bool = False,
-    project_description: str = "",
-) -> dict | None:
-    """Check harness quality. If insufficient, ask user before setting up.
-
-    Returns None if harness passes (proceed normally).
-    Returns a dict (intake result) if harness needs user input first.
-
-    Flow:
-      1. Score check (deterministic)
-      2. If passing → proceed
-      3. If not passing and not confirmed → ask user (return questions)
-      4. If not passing and confirmed → auto-setup with user's description
-    """
-    import os
-
-    try:
-        from openseed_core.harness.checker import check_harness_quality
-
-        score = check_harness_quality(working_dir)
-        logger.info("Harness gate: %d/100 (pass=%s)", score.total, score.passing)
-
-        if score.passing:
-            await _emit("intake.harness.pass", message=f"Harness OK ({score.total}/100)")
-            return None  # Pass — proceed to intake
-
-        # ── Not passing: need user confirmation first ──
-
-        if not harness_confirmed:
-            # Gather context to show user what we detected
-            has_readme = os.path.isfile(os.path.join(working_dir, "README.md"))
-            readme_preview = ""
-            if has_readme:
-                try:
-                    with open(os.path.join(working_dir, "README.md")) as f:
-                        readme_preview = f.read(500).strip()
-                except Exception:
-                    pass
-
-            context_msg = ""
-            if has_readme and readme_preview:
-                context_msg = (
-                    f"README.md found. Preview:\n> {readme_preview[:200]}...\n\n"
-                    f"We can use this to generate your harness. "
-                    f"Or describe your project in your own words for more accurate results."
-                )
-            else:
-                context_msg = "No README.md found. Please describe your project so we can generate an accurate harness."
-
-            await _emit(
-                "intake.harness.ask",
-                message=f"Harness quality low ({score.total}/100). Asking user...",
-                score=score.total,
-            )
-
-            return {
-                "skip_planning": True,
-                "intake_analysis": {
-                    "skip_planning": True,
-                    "harness_needs_setup": True,
-                    "harness_score": score.total,
-                    "harness_missing": score.missing,
-                },
-                "clarification_questions": [
-                    {
-                        "question": (
-                            f"Your project needs a harness setup ({score.total}/100, minimum: 60).\n\n"
-                            f"{context_msg}\n\n"
-                            f"Missing:\n" + "\n".join(f"- {m}" for m in score.missing)
-                        ),
-                        "options": [
-                            "Auto-generate from README" if has_readme else "",
-                            "Let me describe the project",
-                        ],
-                        "input_placeholder": "Describe your project (optional — improves accuracy)",
-                        "category": "harness",
-                    }
-                ],
-                "messages": ["Harness setup needed. Please confirm or describe your project."],
-            }
-
-        # ── User confirmed: run auto-setup ──
-
-        await _emit(
-            "intake.harness.setup",
-            message=f"Setting up harness ({score.total}/100)...",
-        )
-        await _auto_harness_setup(working_dir, provider, project_description)
-
-        # Re-check after setup
-        new_score = check_harness_quality(working_dir)
-        logger.info("Harness gate after setup: %d/100", new_score.total)
-
-        if new_score.passing:
-            await _emit(
-                "intake.harness.pass",
-                message=f"Harness setup complete ({score.total} → {new_score.total}/100)",
-            )
-            return None  # Pass — proceed to intake
-
-        # Still insufficient after auto-setup
-        await _emit(
-            "intake.harness.blocked",
-            message=f"Harness still insufficient ({new_score.total}/100).",
-        )
-        return {
-            "skip_planning": True,
-            "intake_analysis": {
-                "skip_planning": True,
-                "harness_blocked": True,
-                "harness_score": new_score.total,
-                "harness_missing": new_score.missing,
-            },
-            "clarification_questions": [
-                {
-                    "question": (
-                        f"Auto-setup completed but harness is still at {new_score.total}/100.\n\n"
-                        f"Missing:\n"
-                        + "\n".join(f"- {m}" for m in new_score.missing)
-                        + "\n\nPlease set these up manually."
-                    ),
-                    "options": [],
-                    "category": "harness",
-                }
-            ],
-            "messages": ["Harness auto-setup incomplete. Manual setup needed."],
-        }
-
-    except Exception as exc:
-        logger.debug("Harness gate skipped (non-blocking): %s", exc)
-        return None
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # Harness Auto-Setup
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 async def _auto_harness_setup(
     working_dir: str,
-    provider: str = "claude",
+    provider: str = "codex",
     project_description: str = "",
 ) -> None:
     """Generate harness scaffold for a project.
 
-    When scaffold is needed, AI (Claude or Codex) is used to enhance the
+    When scaffold is needed, AI is used to enhance the
     deterministic scaffold with project-specific context.
     """
     try:
@@ -1373,16 +1244,10 @@ async def _enhance_scaffold_with_ai(
     )
 
     try:
-        if provider == "codex":
-            from openseed_codex.agent import CodexAgent
+        from openseed_codex.agent import CodexAgent
 
-            agent = CodexAgent()
-            response = await agent.invoke(prompt=prompt, max_turns=3)
-        else:
-            from openseed_claude.agent import ClaudeAgent
-
-            agent = ClaudeAgent()
-            response = await agent.invoke(prompt=prompt, model="sonnet", max_turns=3)
+        agent = CodexAgent()
+        response = await agent.invoke(prompt=prompt, model="standard", max_turns=3)
 
         enhanced_content = response.text.strip()
 
@@ -1429,17 +1294,17 @@ async def _enhance_sub_agents_with_ai(
     working_dir: str,
     provider: str,
 ) -> None:
-    """Enhance sub-package AGENTS.md files with AI-generated rules."""
+    """Enhance sub-package AGENTS.md files with AI-generated rules (parallel)."""
     import os
 
-    for f in sub_files:
-        # Read key files from the package to give AI context
+    from openseed_codex.agent import CodexAgent
+
+    async def _enhance_one(f) -> None:
         pkg_dir = os.path.join(working_dir, os.path.dirname(f.path))
         pkg_context = ""
         for name in ["__init__.py", "index.ts", "index.js", "main.py", "app.py"]:
             entry = os.path.join(pkg_dir, name)
             if not os.path.isfile(entry):
-                # Check src/ subdirectory
                 for src_sub in os.listdir(pkg_dir) if os.path.isdir(pkg_dir) else []:
                     candidate = os.path.join(pkg_dir, src_sub, name)
                     if os.path.isfile(candidate):
@@ -1454,7 +1319,7 @@ async def _enhance_sub_agents_with_ai(
                     pass
 
         if not pkg_context:
-            continue  # No context to enhance with — keep deterministic version
+            return
 
         prompt = (
             f"You are writing a sub-package AGENTS.md for {f.path}.\n\n"
@@ -1470,16 +1335,8 @@ async def _enhance_sub_agents_with_ai(
         )
 
         try:
-            if provider == "codex":
-                from openseed_codex.agent import CodexAgent
-
-                agent = CodexAgent()
-                response = await agent.invoke(prompt=prompt, max_turns=3)
-            else:
-                from openseed_claude.agent import ClaudeAgent
-
-                agent = ClaudeAgent()
-                response = await agent.invoke(prompt=prompt, model="haiku", max_turns=3)
+            agent = CodexAgent()
+            response = await agent.invoke(prompt=prompt, model="light", max_turns=3)
 
             content = response.text.strip()
             if "```markdown" in content:
@@ -1494,3 +1351,5 @@ async def _enhance_sub_agents_with_ai(
                 f.content = content
         except Exception as exc:
             logger.debug("Sub-AGENTS.md AI enhancement skipped for %s: %s", f.path, exc)
+
+    await asyncio.gather(*[_enhance_one(f) for f in sub_files])

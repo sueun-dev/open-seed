@@ -554,7 +554,7 @@ class TestInitialState:
 
     def test_initial_state_defaults(self):
         state = initial_state(task="t", working_dir="/w")
-        assert state["provider"] == "claude"
+        assert state["provider"] == "codex"
         assert state["retry_count"] == 0
         assert state["max_retries"] == 10
         assert state["skip_planning"] is False

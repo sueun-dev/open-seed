@@ -8,7 +8,13 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8200",
-        timeout: 300000,  // 5 minutes — intake can take a while
+        timeout: 600000,       // 10 minutes
+        proxyTimeout: 600000,  // 10 minutes — codex subprocess can be slow
+        configure: (proxy) => {
+          proxy.on("error", (err) => {
+            console.log("[proxy error]", err.message);
+          });
+        },
       },
       "/ws": { target: "ws://127.0.0.1:8200", ws: true },
     },

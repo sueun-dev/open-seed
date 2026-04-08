@@ -258,9 +258,9 @@ async def _ai_analyze_ui(
     Returns verdict string.
     """
     try:
-        from openseed_claude.agent import ClaudeAgent
+        from openseed_codex.agent import CodexAgent
 
-        agent = ClaudeAgent()
+        agent = CodexAgent()
         interaction_text = ""
         if interactions:
             interaction_text = "\nInteraction results:\n" + "\n".join(f"- {i}" for i in interactions)
@@ -278,7 +278,7 @@ async def _ai_analyze_ui(
                 f"3. Does it look like a functional web application?\n\n"
                 f"Answer with: 'PASS: <reason>' or 'FAIL: <reason>'"
             ),
-            model="haiku",
+            model="light",
             max_turns=1,
         )
         return response.text.strip()[:500]

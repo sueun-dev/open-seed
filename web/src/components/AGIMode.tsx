@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import Pipeline from "./Pipeline";
 import TaskLog from "./TaskLog";
-import { BrailleSpinner } from "./Spinner";
+import ProgressLoader, { IndeterminateLoader, InlineProgress, useFunMessages, usePipelineProgress } from "./ProgressLoader";
 import type { Thread, Mode } from "../App";
 
 type Props = {
@@ -45,7 +45,7 @@ type ThreadUIState = {
   clarification: ClarificationState | null;
   planReview: PlanState | null;
   intakeLoading: boolean;
-  provider: "claude" | "codex" | "both";
+  provider: "codex" | "debate";
 };
 
 const DEFAULT_UI_STATE: ThreadUIState = {
@@ -53,7 +53,7 @@ const DEFAULT_UI_STATE: ThreadUIState = {
   clarification: null,
   planReview: null,
   intakeLoading: false,
-  provider: "claude",
+  provider: "codex",
 };
 
 type HarnessStatus = {
@@ -66,10 +66,15 @@ type HarnessStatus = {
 export default function AGIMode({ activeThread, workingDir, setWorkingDir, createThread, updateThreadEvents, appendThreadEvent, setThreadRunning }: Props) {
   // Current UI state (for active thread or new-thread view)
   const [task, setTask] = useState("");
-  const [provider, setProvider] = useState<"claude" | "codex" | "both">("claude");
+  const [provider, setProvider] = useState<"codex" | "debate">("codex");
   const [clarification, setClarification] = useState<ClarificationState | null>(null);
   const [planReview, setPlanReview] = useState<PlanState | null>(null);
   const [intakeLoading, setIntakeLoading] = useState(false);
+
+  // Progress hooks
+  const intakeFunText = useFunMessages(intakeLoading);
+  const events = activeThread?.events || [];
+  const pipelineProgress = usePipelineProgress(events);
 
   // Harness quality state (info only — setup happens in intake when Run is clicked)
   const [harness, setHarness] = useState<HarnessStatus>({ total: 0, passing: true, missing: [], checking: false });
@@ -101,9 +106,8 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
   const wsRef = useRef<Map<string, WebSocket>>(new Map());
   const prevThreadIdRef = useRef<string | null>(null);
 
-  // Derive running & events from the thread object (source of truth)
+  // Derive running from the thread object (source of truth)
   const running = activeThread?.running ?? false;
-  const events = activeThread?.events ?? [];
 
   // Save current UI state for a thread
   const saveUIState = useCallback((threadId: string) => {
@@ -166,20 +170,83 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     };
   }, []);
 
-  // Step 1: Run intake to get clarification questions
+  // Ref to track which intake phase we're waiting for
+  const intakePhaseRef = useRef<"phase1" | "phase2" | null>(null);
+  const intakeAnswersRef = useRef<string[]>([]);
+  const intakeClarificationRef = useRef<ClarificationState | null>(null);
+
+  // Listen for intake results via WebSocket
+  useEffect(() => {
+    const ws = new WebSocket(`ws://${location.host}/ws/events`);
+    const intakeWsRef = { current: ws };
+
+    ws.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data);
+
+        if (event.type === "intake.done" && intakePhaseRef.current) {
+          const data = event.data || {};
+
+          if (intakePhaseRef.current === "phase1") {
+            // Phase 1: show questions or skip to run
+            const rawQ = data.clarification_questions || [];
+            const questions: QuestionItem[] = rawQ.map((q: any) =>
+              typeof q === "string" ? { question: q, options: [] } : q
+            );
+
+            if (questions.length > 0) {
+              setClarification({
+                questions,
+                answers: questions.map(() => ""),
+                intakeAnalysis: data.intake_analysis || {},
+              });
+            } else {
+              startRun([]);
+            }
+            setIntakeLoading(false);
+            intakePhaseRef.current = null;
+          } else if (intakePhaseRef.current === "phase2") {
+            // Phase 2: show plan or skip to run
+            const analysis = data.intake_analysis || {};
+            if (analysis.plan || analysis.done_when || analysis.scope) {
+              setPlanReview({
+                plan: {
+                  plan: analysis.plan || "",
+                  scope: analysis.scope || { modify: [], create: [], do_not_touch: [] },
+                  done_when: analysis.done_when || [],
+                  approach: analysis.approach || "",
+                },
+                intakeAnalysis: analysis,
+                answers: intakeAnswersRef.current,
+                previousClarification: intakeClarificationRef.current,
+              });
+              setIntakeLoading(false);
+              intakePhaseRef.current = null;
+              return;
+            }
+            // No plan in response — go straight to run
+            setIntakeLoading(false);
+            intakePhaseRef.current = null;
+            startRun(intakeAnswersRef.current);
+          }
+        }
+
+        if (event.type === "intake.error" && intakePhaseRef.current) {
+          console.error("[AGI] Intake error:", event.data?.error);
+          setIntakeLoading(false);
+          intakePhaseRef.current = null;
+        }
+      } catch {}
+    };
+
+    return () => { ws.close(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Step 1: Run intake to get clarification questions (async — no blocking fetch)
   const startIntake = async () => {
     if (!task.trim() || running || intakeLoading) return;
     setIntakeLoading(true);
-
-    try {
-      const healthCheck = await fetch("/api/health");
-      if (!healthCheck.ok) throw new Error("Backend not responding");
-    } catch {
-      setIntakeLoading(false);
-      setClarification(null);
-      startRun([]);
-      return;
-    }
+    intakePhaseRef.current = "phase1";
 
     try {
       const res = await fetch("/api/intake", {
@@ -187,39 +254,23 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task, working_dir: workingDir, provider }),
       });
-
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-
-      const rawQ = data.clarification_questions || [];
-      const questions: QuestionItem[] = rawQ.map((q: any) =>
-        typeof q === "string" ? { question: q, options: [] } : q
-      );
-
-      if (questions.length > 0) {
-        setClarification({
-          questions,
-          answers: questions.map(() => ""),
-          intakeAnalysis: data.intake_analysis || {},
-        });
-      } else {
-        startRun([]);
-      }
+      // Response is just {"status":"started"} — real data comes via WebSocket
     } catch (err) {
-      console.error("Intake failed:", err);
-      // Don't auto-run pipeline on intake failure — show error instead
+      console.error("[AGI] Intake request failed:", err);
       setIntakeLoading(false);
-      return;
-    } finally {
-      setIntakeLoading(false);
+      intakePhaseRef.current = null;
     }
   };
 
-  // Step 2: Generate plan from answers, show for approval
+  // Step 2: Generate plan from answers (async — no blocking fetch)
   const generatePlan = async (answers: string[]) => {
     const savedClarification = clarification;
     setClarification(null);
     setIntakeLoading(true);
+    intakePhaseRef.current = "phase2";
+    intakeAnswersRef.current = answers;
+    intakeClarificationRef.current = savedClarification;
 
     try {
       const res = await fetch("/api/intake", {
@@ -231,29 +282,12 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
           clarification_questions: savedClarification?.questions || [],
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        const analysis = data.intake_analysis || {};
-        if (analysis.plan || analysis.done_when || analysis.scope) {
-          setPlanReview({
-            plan: {
-              plan: analysis.plan || "",
-              scope: analysis.scope || { modify: [], create: [], do_not_touch: [] },
-              done_when: analysis.done_when || [],
-              approach: analysis.approach || "",
-            },
-            intakeAnalysis: analysis,
-            answers,
-            previousClarification: savedClarification,
-          });
-          setIntakeLoading(false);
-          return;
-        }
-      }
-    } catch {}
-
-    setIntakeLoading(false);
-    startRun(answers);
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    } catch {
+      setIntakeLoading(false);
+      intakePhaseRef.current = null;
+      startRun(answers);
+    }
   };
 
   // Step 3: Run pipeline (with or without answers)
@@ -563,7 +597,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
 
         {/* Provider selector */}
         <div style={{ display: "flex", gap: 6 }}>
-          {(["claude", "codex", "both"] as const).map((p) => (
+          {(["codex", "debate"] as const).map((p) => (
             <button key={p} onClick={() => setProvider(p)} style={{
               padding: "6px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
               border: provider === p ? "1px solid #2563eb" : "1px solid #222",
@@ -571,7 +605,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
               color: provider === p ? "#60a5fa" : "#666",
               transition: "all 0.15s",
             }}>
-              {p === "claude" ? "🟣 Claude" : p === "codex" ? "🟢 Codex" : "⚡ Both"}
+              {p === "codex" ? "🟢 Codex" : "⚡ Debate"}
             </button>
           ))}
         </div>
@@ -674,17 +708,11 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
     );
   }
 
-  // Intake loading state
+  // Intake loading state — no real events, so indeterminate + fun messages
   if (intakeLoading) {
     return (
-      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
-        <div style={{ fontSize: 36 }}>🧠</div>
-        <div style={{ fontSize: 14, color: "#60a5fa", fontWeight: 600 }}>
-          <BrailleSpinner /> Analyzing your task...
-        </div>
-        <p style={{ color: "#555", fontSize: 12 }}>
-          Scanning codebase, recalling memories, preparing questions
-        </p>
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "0 40px" }}>
+        <IndeterminateLoader text={intakeFunText} size="lg" />
       </div>
     );
   }
@@ -695,16 +723,15 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       {/* Pipeline progress */}
       <Pipeline events={events} />
 
-      {/* Status badge */}
+      {/* Status badge with progress */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         {running ? (
-          <span style={{ fontSize: 12, color: "#60a5fa", fontWeight: 600 }}><BrailleSpinner /> Pipeline running...</span>
-        ) : events.some((e) => e.type === "pipeline.complete") ? (
-          <span style={{ fontSize: 12, color: "#4ade80", fontWeight: 600 }}>✓ Pipeline complete</span>
-        ) : events.some((e) => e.type === "pipeline.fail") ? (
-          <span style={{ fontSize: 12, color: "#f87171", fontWeight: 600 }}>✗ Pipeline failed</span>
+          <InlineProgress pct={pipelineProgress.pct} text={pipelineProgress.text} />
+        ) : events.some((e: any) => e.type === "pipeline.complete") ? (
+          <span style={{ fontSize: 12, color: "#4ade80", fontWeight: 600 }}>🏆 Pipeline complete — {events.length} events</span>
+        ) : events.some((e: any) => e.type === "pipeline.fail") ? (
+          <InlineProgress pct={100} text="Pipeline failed" failed />
         ) : null}
-        <span style={{ fontSize: 11, color: "#444" }}>{events.length} events</span>
       </div>
 
       {/* Event log */}

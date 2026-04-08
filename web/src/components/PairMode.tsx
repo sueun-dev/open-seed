@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import CodeViewer from "./CodeViewer";
 import DiffPanel from "./DiffPanel";
-import { ThinkingSpinner } from "./Spinner";
+import { IndeterminateLoader, useFunMessages } from "./ProgressLoader";
 import type { Thread, Mode } from "../App";
 
 type Message = {
@@ -30,6 +30,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const pairFunText = useFunMessages(streaming);
   const [diffs, setDiffs] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [provider, setProvider] = useState<"claude" | "codex" | "both">("claude");
@@ -302,7 +303,11 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
                   )}
                 </div>
               ))}
-              {streaming && <ThinkingSpinner />}
+              {streaming && (
+                <div style={{ padding: "12px 16px" }}>
+                  <IndeterminateLoader text={pairFunText} size="sm" />
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
 

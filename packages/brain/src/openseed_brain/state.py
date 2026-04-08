@@ -24,7 +24,7 @@ from openseed_core.types import (
 )
 
 
-def initial_state(task: str, working_dir: str, provider: str = "claude") -> PipelineState:
+def initial_state(task: str, working_dir: str, provider: str = "codex") -> PipelineState:
     """Create the initial pipeline state for a new run."""
     return PipelineState(
         task=task,

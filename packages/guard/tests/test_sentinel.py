@@ -93,7 +93,7 @@ class TestIntentGate:
 
     @pytest.fixture
     def _patch_auth(self):
-        with patch("openseed_guard.intent_gate.require_claude_auth", return_value="/usr/bin/claude"):
+        with patch("openseed_guard.intent_gate.require_openai_auth", return_value="/usr/local/bin/codex"):
             yield
 
     # ── Implementation ────────────────────────────────────────────────────────
@@ -236,8 +236,8 @@ class TestExecutionLoop:
     @pytest.fixture
     def _patch_auth(self):
         with patch(
-            "openseed_guard.execution_loop.require_claude_auth",
-            return_value="/usr/bin/claude",
+            "openseed_guard.execution_loop.require_openai_auth",
+            return_value="/usr/local/bin/codex",
         ):
             yield
 
@@ -402,7 +402,7 @@ class TestExecutionLoop:
                 task="test",
                 working_dir="/tmp",
                 context={},
-                cli_path="/usr/bin/claude",
+                cli_path="/usr/local/bin/codex",
             )
 
         assert data["codebase_state"] == "disciplined"
@@ -421,7 +421,7 @@ class TestExecutionLoop:
                 task="test",
                 working_dir="/tmp",
                 explore={"codebase_state": "disciplined", "relevant_patterns": [], "summary": ""},
-                cli_path="/usr/bin/claude",
+                cli_path="/usr/local/bin/codex",
             )
 
         assert "files_to_create" in data
@@ -439,7 +439,7 @@ class TestExecutionLoop:
             data = await loop._route(
                 task="test",
                 plan={"complexity": "trivial", "steps": [], "approach_summary": ""},
-                cli_path="/usr/bin/claude",
+                cli_path="/usr/local/bin/codex",
             )
 
         assert data["decision"] in {"delegate", "execute", "ask", "challenge"}
@@ -483,7 +483,7 @@ class TestExecutionLoop:
                 task="test",
                 working_dir="/tmp",
                 context={},
-                cli_path="/usr/bin/claude",
+                cli_path="/usr/local/bin/codex",
             )
 
         # Fallback guarantees at least these keys

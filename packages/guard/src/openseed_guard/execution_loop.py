@@ -19,7 +19,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from openseed_core.auth.claude import require_claude_auth
+from openseed_core.auth.openai import require_openai_auth
 from openseed_core.config import SentinelConfig
 from openseed_core.events import EventBus, EventType
 from openseed_core.subprocess import run_streaming
@@ -65,12 +65,10 @@ async def _call_claude(
     await run_streaming(
         command=[
             cli_path,
-            "--print",
-            "--dangerously-skip-permissions",
-            "--model",
+            "exec",
+            "--full-auto",
+            "-m",
             model,
-            "--max-turns",
-            "1",
             prompt,
         ],
         timeout_seconds=timeout_seconds,
@@ -118,7 +116,7 @@ class ExecutionLoop:
         self.config = config or SentinelConfig()
         self.event_bus = event_bus
         self.model = model
-        self._model_family: ModelFamily = detect_model_family(model) if model else ModelFamily.CLAUDE
+        self._model_family: ModelFamily = detect_model_family(model) if model else ModelFamily.GPT
         self._prompt_variant: PromptVariant = get_prompt_variant(self._model_family)
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -140,7 +138,7 @@ class ExecutionLoop:
         Returns:
             ExecutionResult with success flag, summary, and steps completed.
         """
-        cli_path = require_claude_auth()
+        cli_path = require_openai_auth()
         ctx = context or {}
         steps_completed: list[str] = []
 
@@ -272,7 +270,7 @@ class ExecutionLoop:
             working_dir=working_dir,
             intent_summary=intent_summary,
         )
-        call_model = self.model or "claude-sonnet-4-6"
+        call_model = self.model or "gpt-5.4"
         raw = await _call_claude(prompt, model=call_model, cli_path=cli_path, timeout_seconds=90)
         data = _parse_json_from_text(raw)
         if not data:
@@ -307,7 +305,7 @@ class ExecutionLoop:
             patterns=", ".join(patterns) if patterns else "none identified",
             summary=summary,
         )
-        call_model = self.model or "claude-sonnet-4-6"
+        call_model = self.model or "gpt-5.4"
         raw = await _call_claude(prompt, model=call_model, cli_path=cli_path, timeout_seconds=120)
         data = _parse_json_from_text(raw)
         if not data:
@@ -347,7 +345,7 @@ class ExecutionLoop:
             approach=approach,
             steps=steps[:5],
         )
-        call_model = self.model or "claude-sonnet-4-6"
+        call_model = self.model or "gpt-5.4"
         raw = await _call_claude(prompt, model=call_model, cli_path=cli_path, timeout_seconds=60)
         data = _parse_json_from_text(raw)
         if not data:
@@ -462,7 +460,7 @@ class ExecutionLoop:
             evidence="\n".join(f"  - {e}" for e in evidence),
             approach_summary=plan.get("approach_summary", ""),
         )
-        call_model = self.model or "claude-sonnet-4-6"
+        call_model = self.model or "gpt-5.4"
         raw = await _call_claude(prompt, model=call_model, cli_path=cli_path, timeout_seconds=120)
         data = _parse_json_from_text(raw)
 
