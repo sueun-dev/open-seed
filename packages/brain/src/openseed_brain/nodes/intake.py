@@ -132,51 +132,97 @@ async def intake_node(state: PipelineState) -> dict:
 
         return await _phase2_plan(agent, state, context)
 
-    # ── Step 2: Gap Analysis + Skill Select (parallel) ──
-    await _emit("intake.gaps", message="Analyzing gaps and selecting skills...")
+    # ── Step 2: Single AI call — analyze task + generate questions ──
+    await _emit("intake.gaps", message="AI is analyzing your task and preparing questions...")
 
-    gaps_task = _identify_gaps(agent, task, context)
-    skills_task = _select_skills(agent, task, [], context)  # gaps not needed for skill selection
-
-    gaps, selected_skills = await asyncio.gather(gaps_task, skills_task)
-    logger.info("Identified %d gaps, selected %d skills: %s", len(gaps), len(selected_skills), selected_skills)
-
-    # Add harness gap if harness is insufficient
+    harness_hint = ""
     if harness_needs_setup:
-        gaps.append(
-            {
-                "topic": "Project description for harness setup",
-                "why": "No AGENTS.md found — need to understand the project to generate coding guidelines, "
-                "boundaries, and verification commands for AI agents",
-            }
+        harness_hint = (
+            "\n\nIMPORTANT: This project has no AGENTS.md (coding guidelines). "
+            "Include a question asking the user to describe their project so we can generate one."
         )
-        logger.info("Added harness setup gap (total: %d gaps)", len(gaps))
 
-    if not gaps:
-        # No gaps = simple task, skip questions entirely
-        analysis = await _quick_classify(agent, task, context)
-        if selected_skills:
-            analysis["selected_skills"] = selected_skills
-        return {
-            "skip_planning": analysis.get("skip_planning", True),
-            "intake_analysis": analysis,
-            "clarification_questions": [],
-            "messages": ["Intake: simple task, no clarification needed"],
-        }
+    result = await _analyze_and_ask(agent, task, context, harness_hint)
+    return result
 
-    # ── Step 3: Per-Gap Research — parallel web search for each gap ──
-    await _emit("intake.research", message=f"Researching {len(gaps)} gaps in parallel...", count=len(gaps))
-    research_results = await _research_gaps(agent, task, gaps, context)
-    logger.info("Completed research for %d gaps", len(research_results))
 
-    # ── Step 4: Formulate Questions — dynamic count, research-backed options ──
-    await _emit("intake.questions", message="Formulating clarification questions...")
-    result = await _formulate_questions(agent, task, context, gaps, research_results)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 2: Single-call Analysis + Questions (replaces separate gaps/research/formulate)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    # Inject selected skills into intake_analysis
-    if selected_skills and "intake_analysis" in result:
-        result["intake_analysis"]["selected_skills"] = selected_skills
 
+async def _analyze_and_ask(agent, task: str, context: dict, harness_hint: str) -> dict:
+    """
+    Single AI call that analyzes the task, identifies gaps, researches options,
+    and generates clarification questions — all in one invocation.
+
+    Replaces the previous 3+N separate AI calls (gap analysis + research × N + formulate).
+    """
+    context_block = _build_context_block(context)
+    tech_stack = context.get("detected_tech_stack", [])
+    tech_hint = f"\nDetected tech stack: {', '.join(tech_stack)}" if tech_stack else ""
+
+    response = await agent.invoke(
+        prompt=f"""You are an expert software architect about to execute a task autonomously.
+Analyze this task, identify what you need to know, and generate clarification questions.
+
+Task: {task}
+{context_block}{tech_hint}{harness_hint}
+
+Do ALL of the following in this single response:
+1. Classify the task (intent, complexity, existing project or new)
+2. Identify knowledge gaps — decisions that need the user's input
+3. For each gap, think about the best current options (use your knowledge of 2025-2026 best practices)
+4. Generate one multiple-choice question per gap, with researched options
+
+If the task is simple and unambiguous (e.g. "fix the typo", "add a console.log"), you may return ZERO questions.
+
+Respond with EXACTLY this structure (replace ALL example values with REAL content for this specific task):
+
+INTENT: implementation
+COMPLEXITY: moderate
+SKIP_PLANNING: no
+EXISTING_PROJECT: no
+REQUIREMENTS:
+- Build a user authentication system with social login
+- Create dashboard with real-time data visualization
+APPROACH: Use React frontend with Express backend and JWT authentication
+LESSONS: none
+QUESTIONS:
+- Which authentication method should we use? | OPTIONS: A. Passkey/WebAuthn (passwordless, best UX, adopted by Google/Apple in 2025), B. OAuth2 social login (Google/GitHub — fastest setup, no passwords), C. Email/password + MFA (traditional, full control), D. Other (specify)
+- Which database fits best? | OPTIONS: A. PostgreSQL + Prisma (production-ready, typed ORM), B. SQLite + better-sqlite3 (zero config, great for prototypes), C. Other (specify)
+
+CRITICAL RULES:
+- EVERY question must be a REAL question about THIS specific task
+- EVERY option must be a REAL technology choice with a rationale in parentheses
+- Do NOT use placeholders like "question text" or "option (rationale)" — write REAL content
+- Do NOT copy the example questions — write NEW ones specific to this task
+- Maximum 6 questions, minimum 0 (simple tasks need no questions)
+- If EXISTING_PROJECT is yes, tasks modify existing code — not build from scratch
+
+Rules for EXISTING_PROJECT:
+- If working directory has source files, this is MODIFICATION not building from scratch.""",
+        model="high",
+        max_turns=1,  # Single turn — gpt-5.4 knows enough without web search
+    )
+
+    analysis_text = response.text
+    skip_planning = _parse_skip_planning(analysis_text)
+    intake_analysis = _parse_analysis(analysis_text)
+    questions = _parse_questions_with_options(analysis_text)
+
+    if context["detected_tech_stack"]:
+        intake_analysis["tech_stack"] = ", ".join(context["detected_tech_stack"])
+
+    result: dict = {
+        "skip_planning": skip_planning,
+        "intake_analysis": intake_analysis,
+        "messages": [f"Intake: {analysis_text[:500]}"],
+    }
+    if questions:
+        result["clarification_questions"] = questions
+    if context["microagent_context"]:
+        result["microagent_context"] = context["microagent_context"]
     return result
 
 
@@ -248,7 +294,7 @@ async def _collect_context(task: str, working_dir: str) -> dict:
     except Exception as exc:
         logger.debug("Codebase scan skipped: %s", exc)
 
-    # Microagents
+    # Microagents — load and select (skip AI call if none found)
     try:
         from openseed_core.microagent import (
             format_microagent_context,
@@ -257,10 +303,13 @@ async def _collect_context(task: str, working_dir: str) -> dict:
         )
 
         all_agents = load_microagents(working_dir)
-        relevant_agents = await select_relevant_microagents(all_agents, task)
-        if relevant_agents:
-            context["microagent_context"] = [format_microagent_context(relevant_agents)]
-            logger.info("Loaded %d microagents", len(relevant_agents))
+        if all_agents:
+            relevant_agents = await select_relevant_microagents(all_agents, task)
+            if relevant_agents:
+                context["microagent_context"] = [format_microagent_context(relevant_agents)]
+                logger.info("Loaded %d microagents", len(relevant_agents))
+        else:
+            logger.debug("No microagents found, skipping AI selection")
     except Exception as exc:
         logger.debug("Microagent loading skipped: %s", exc)
 
