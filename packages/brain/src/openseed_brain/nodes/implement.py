@@ -28,8 +28,7 @@ async def _emit(event_type: str, **data) -> None:
 
 _RULES_CORE = """\
 - Write ALL files DIRECTLY in the working directory — do NOT create a subdirectory/subfolder for the project
-- Each file must be COMPLETE and RUNNABLE
-- No placeholders, no TODOs
+- Each file must be COMPLETE and RUNNABLE — no stubs, no placeholders, no TODOs
 - Dev defaults: Every config value (ports, origins, DB paths) must work out-of-the-box \
 in a dev environment with zero env vars set. Use sensible defaults, not empty strings.
 - NEVER use interactive CLI tools (npm create, npx create-*, yarn create, etc.) — they \
@@ -37,7 +36,12 @@ prompt for input which cannot be provided. Instead, write package.json and confi
 directly, then run npm install.
 - NEVER run commands that require user input or confirmation. Use --yes, -y, or \
 non-interactive flags when available.
-- If a command hangs or times out, write the files manually instead of retrying the command."""
+- If a command hangs or times out, write the files manually instead of retrying the command.
+- BEFORE finishing: re-read every file you wrote and verify imports resolve, types match, \
+and no syntax errors exist. Fix any issues you find before stopping.
+- ALL imports must point to files that exist. If file A imports from file B, file B MUST be written.
+- ALL TypeScript files must compile without errors. Use correct types, not `any`.
+- ALL API endpoints called by frontend MUST exist in the backend. Cross-check every fetch/axios call."""
 
 _RULES_WEB = """\
 - If package.json is needed, create it with all deps — DO NOT run npm install yourself, \
@@ -51,7 +55,9 @@ a specific port like 5173 — the dev server port can change.
 - REST updates: Always implement BOTH PUT (full replace, all fields required) AND \
 PATCH (partial update, only changed fields required) for every resource. A CRUD API \
 without PATCH is incomplete.
-- FOCUS ON WRITING FILES. Do not spend turns on install/build/test — just write complete code."""
+- FOCUS ON WRITING FILES. Do not spend turns on install/build/test — just write complete code.
+- After writing all files, run `npx tsc --noEmit` (if TypeScript) or the relevant type checker \
+to verify zero compile errors. Fix any errors before finishing."""
 
 _RULES_FIX = """\
 - Make MINIMAL, targeted changes — do NOT rewrite files that are not broken
