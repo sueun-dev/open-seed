@@ -58,9 +58,9 @@ async def assess_risk(
         return SecurityCheck(risk=SecurityRisk.LOW, reason="No plan to evaluate")
 
     try:
-        from openseed_claude.agent import ClaudeAgent
+        from openseed_codex.agent import CodexAgent
 
-        agent = ClaudeAgent()
+        agent = CodexAgent()
         files_text = "\n".join(f"- {f}" for f in files[:20]) if files else "None specified"
 
         response = await agent.invoke(
@@ -84,7 +84,7 @@ async def assess_risk(
                 '{"risk": "low|medium|high", "reason": "brief explanation", '
                 '"flagged_items": ["item1", "item2"]}\n'
             ),
-            model="haiku",
+            model="light",
             max_turns=1,
         )
 

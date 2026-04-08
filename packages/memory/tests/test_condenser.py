@@ -64,7 +64,7 @@ class TestLLMSummaryCondenser:
         mock_response = MagicMock()
         mock_response.text = "Summary of steps 1-11: various fixes attempted"
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await c.condense(messages)
 
@@ -78,7 +78,7 @@ class TestLLMSummaryCondenser:
         c = LLMSummaryCondenser(threshold=10, keep_recent=3)
         messages = [f"msg-{i}" for i in range(15)]
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(side_effect=Exception("LLM down"))
             result = await c.condense(messages)
 
@@ -97,7 +97,7 @@ class TestPipelineCondenser:
         mock_response = MagicMock()
         mock_response.text = "Summary"
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await c.condense(messages)
 
@@ -108,7 +108,7 @@ class TestPipelineCondenser:
         c = PipelineCondenser(llm_threshold=5, keep_recent=2)
         messages = [f"msg-{i}" for i in range(10)]
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(side_effect=Exception("fail"))
             result = await c.condense(messages)
 

@@ -3,7 +3,7 @@ Fix subgraph — encapsulates the diagnose → fix → verify cycle as a LangGra
 
 Nodes:
 1. diagnose  — LLM analyses errors and produces a structured repair plan
-2. fix       — applies the fix (delegates to ClaudeAgent)
+2. fix       — applies the fix (delegates to CodexAgent)
 3. verify    — evidence-based check that the fix landed correctly
 
 Usage in the parent graph:
@@ -45,7 +45,7 @@ async def diagnose_node(state: FixSubState) -> dict:
     Analyse the errors and produce a structured repair plan via LLM.
     Uses Claude Haiku for fast triage.
     """
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
     task = state.get("task", "")
     working_dir = state.get("working_dir", "")
@@ -53,7 +53,7 @@ async def diagnose_node(state: FixSubState) -> dict:
 
     errors_text = "\n".join(f"- {e}" for e in errors[:10]) if errors else "No specific errors reported."
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
     prompt = f"""Analyse the following errors for the project at {working_dir} and produce a concise repair plan.
 
 TASK: {task}
@@ -69,7 +69,7 @@ Be brief — this plan will be fed directly to an automated fix agent."""
 
     response = await agent.invoke(
         prompt=prompt,
-        model="sonnet",
+        model="standard",
         working_dir=working_dir,
         max_turns=1,
     )
@@ -79,11 +79,11 @@ Be brief — this plan will be fed directly to an automated fix agent."""
 
 async def fix_node(state: FixSubState) -> dict:
     """
-    Apply fixes according to the repair plan using ClaudeAgent (claude-sonnet).
+    Apply fixes according to the repair plan using CodexAgent (codex-standard).
     Mirrors the logic of openseed_brain.nodes.sentinel.fix_node but is
     driven by the locally produced repair_plan rather than QA findings.
     """
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
     task = state.get("task", "")
     working_dir = state.get("working_dir", "")
@@ -92,7 +92,7 @@ async def fix_node(state: FixSubState) -> dict:
 
     errors_text = "\n".join(f"- {e}" for e in errors[:10]) if errors else "No specific errors."
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
     prompt = f"""Apply the following repair plan to the project at {working_dir}.
 
 TASK: {task}
@@ -112,7 +112,7 @@ Rules:
 
     response = await agent.invoke(
         prompt=prompt,
-        model="sonnet",
+        model="standard",
         working_dir=working_dir,
         max_turns=5,
     )

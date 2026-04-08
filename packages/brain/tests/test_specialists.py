@@ -268,7 +268,7 @@ class TestRouteTasksLLM:
             )
         )
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await route_tasks(plan, "Build a landing page")
 
@@ -300,7 +300,7 @@ class TestRouteTasksLLM:
             )
         )
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await route_tasks(plan, "Build a todo app")
 
@@ -330,7 +330,7 @@ class TestRouteTasksLLM:
             )
         )
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await route_tasks(plan, "Build a REST API")
 
@@ -352,14 +352,14 @@ class TestRouteTasksLLM:
 
         mock_response = _mock_claude_response(json.dumps([{"task_id": "T1", "domain": "fullstack"}]))
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             mock_invoke = AsyncMock(return_value=mock_response)
             MockAgent.return_value.invoke = mock_invoke
             await route_tasks(plan, "Build something")
 
-        # Verify sonnet was used (upgraded from haiku for accuracy)
+        # Verify standard model was used for routing
         call_kwargs = mock_invoke.call_args
-        assert call_kwargs.kwargs.get("model") == "sonnet"
+        assert call_kwargs.kwargs.get("model") == "standard"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -379,7 +379,7 @@ class TestImplementNode:
 
         mock_response = _mock_claude_response("Built a calculator app.")
 
-        with patch("openseed_claude.agent.ClaudeAgent") as MockAgent:
+        with patch("openseed_codex.agent.CodexAgent") as MockAgent:
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await implement_node(state)
 
@@ -387,8 +387,8 @@ class TestImplementNode:
         assert "fullstack" in result["messages"][0].lower()
 
     @pytest.mark.asyncio
-    async def test_codex_provider_uses_legacy(self) -> None:
-        """Provider 'codex' should use the legacy codex implementation."""
+    async def test_codex_provider_no_plan_uses_fullstack(self) -> None:
+        """Provider 'codex' without plan should use fullstack specialist."""
         from openseed_brain.nodes.implement import implement_node
 
         state = initial_state("Build something", "/tmp/test", provider="codex")
@@ -402,7 +402,7 @@ class TestImplementNode:
             MockCodex.return_value.invoke = AsyncMock(return_value=mock_response)
             result = await implement_node(state)
 
-        assert "codex" in result["messages"][0].lower()
+        assert "fullstack" in result["messages"][0].lower()
 
     @pytest.mark.asyncio
     async def test_specialist_dispatch_with_plan(self) -> None:
@@ -430,7 +430,7 @@ class TestImplementNode:
 
         with (
             patch("openseed_brain.task_router.route_tasks", new_callable=AsyncMock) as mock_router,
-            patch("openseed_claude.agent.ClaudeAgent") as MockAgent,
+            patch("openseed_codex.agent.CodexAgent") as MockAgent,
         ):
             mock_router.return_value = routing_result
             MockAgent.return_value.invoke = AsyncMock(return_value=mock_specialist_response)

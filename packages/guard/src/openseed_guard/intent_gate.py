@@ -19,7 +19,7 @@ import json
 from dataclasses import dataclass
 from enum import StrEnum
 
-from openseed_core.auth.claude import require_claude_auth
+from openseed_core.auth.openai import require_openai_auth
 from openseed_core.subprocess import StreamLine, run_streaming
 
 from openseed_guard.prompts import ModelFamily, detect_model_family
@@ -110,15 +110,15 @@ async def classify_intent(
         task: The user's task description.
         codebase_context: Optional codebase summary to improve accuracy.
         model: Optional model name. Selects model-specific prompt prefix.
-               Defaults to claude-sonnet-4-6 if not specified.
+               Defaults to o4-mini if not specified.
 
     Returns:
         IntentClassification with type, confidence, reasoning, and approach.
     """
-    cli_path = require_claude_auth()
+    cli_path = require_openai_auth()
 
     # Select model-specific prefix overlay
-    model_family = detect_model_family(model) if model else ModelFamily.CLAUDE
+    model_family = detect_model_family(model) if model else ModelFamily.GPT
     if model_family == ModelFamily.GEMINI:
         prefix = _GEMINI_INTENT_PREFIX
     elif model_family == ModelFamily.GPT:
@@ -132,15 +132,13 @@ async def classify_intent(
     )
     prompt = prefix + base_prompt
 
-    call_model = model or "claude-sonnet-4-6"
+    call_model = model or "gpt-5.4"
     cmd = [
         cli_path,
-        "--print",
-        "--dangerously-skip-permissions",
-        "--model",
+        "exec",
+        "--full-auto",
+        "-m",
         call_model,
-        "--max-turns",
-        "1",
         prompt,
     ]
 

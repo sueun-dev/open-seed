@@ -314,10 +314,10 @@ class WorkflowOrchestrator:
 
         Returns (should_continue, reason).
         """
-        from openseed_core.auth.claude import require_claude_auth
+        from openseed_core.auth.openai import require_openai_auth
         from openseed_core.subprocess import run_streaming
 
-        cli = require_claude_auth()
+        cli = require_openai_auth()
 
         # Build a compact findings summary for the prompt
         finding_lines = []
@@ -345,12 +345,10 @@ Output ONLY valid JSON, no markdown:
 
         cmd = [
             cli,
-            "--print",
-            "--dangerously-skip-permissions",
-            "--model",
-            "claude-sonnet-4-6",
-            "--max-turns",
-            "1",
+            "exec",
+            "--full-auto",
+            "-m",
+            "gpt-5.4",
             prompt,
         ]
 

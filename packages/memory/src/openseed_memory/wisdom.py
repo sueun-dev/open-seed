@@ -91,12 +91,12 @@ async def extract_wisdom(
     summary = "\n".join(summary_parts)
 
     try:
-        from openseed_claude.agent import ClaudeAgent
+        from openseed_codex.agent import CodexAgent
 
-        agent = ClaudeAgent()
+        agent = CodexAgent()
         response = await agent.invoke(
             prompt=_EXTRACT_PROMPT.format(summary=summary),
-            model="haiku",
+            model="light",
             max_turns=1,
         )
         return _parse_wisdom(response.text)

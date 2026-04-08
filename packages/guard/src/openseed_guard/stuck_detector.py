@@ -178,9 +178,9 @@ async def _are_semantically_identical(texts: list[str]) -> bool:
         return True
 
     try:
-        from openseed_claude.agent import ClaudeAgent
+        from openseed_codex.agent import CodexAgent
 
-        agent = ClaudeAgent()
+        agent = CodexAgent()
         joined = "\n---\n".join(t[:300] for t in texts)
         response = await agent.invoke(
             prompt=(
@@ -188,7 +188,7 @@ async def _are_semantically_identical(texts: list[str]) -> bool:
                 f"the same outcome, error, or situation? "
                 f"Answer ONLY 'yes' or 'no'.\n\n{joined}"
             ),
-            model="haiku",
+            model="light",
             max_turns=1,
         )
         return response.text.strip().lower().startswith("yes")
@@ -233,9 +233,9 @@ async def _get_llm_suggestion(
     }
 
     try:
-        from openseed_claude.agent import ClaudeAgent
+        from openseed_codex.agent import CodexAgent
 
-        agent = ClaudeAgent()
+        agent = CodexAgent()
         context = "\n".join(items[:4])
         messages_ctx = "\n".join(recent_messages[:3])
         response = await agent.invoke(
@@ -246,7 +246,7 @@ async def _get_llm_suggestion(
                 f"In 1-2 sentences, suggest how to break out of this loop. "
                 f"Be specific and actionable."
             ),
-            model="haiku",
+            model="light",
             max_turns=1,
         )
         return response.text.strip()[:500]

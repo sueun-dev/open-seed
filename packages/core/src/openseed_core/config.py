@@ -19,7 +19,6 @@ from pydantic import BaseModel, Field
 
 
 class AuthConfig(BaseModel):
-    claude_keychain_service: str = "openseed-claude-oauth"
     openai_keychain_service: str = "openseed-openai-oauth"
 
 
@@ -31,21 +30,7 @@ class BrainConfig(BaseModel):
     max_parallel_sends: int = 4
 
 
-# ─── Left Hand (Claude) ──────────────────────────────────────────────────────
-
-
-class ClaudeConfig(BaseModel):
-    cli_path: str | None = None  # Auto-detect if None
-    opus_model: str = "claude-opus-4-6"
-    sonnet_model: str = "claude-sonnet-4-6"
-    haiku_model: str = "claude-haiku-4-5"
-    default_model: str = "claude-sonnet-4-6"
-    max_context_tokens: int = 1_000_000
-    thinking_budget: int = 10_000
-    max_turns: int = 20
-
-
-# ─── Right Hand (Codex) ──────────────────────────────────────────────────────
+# ─── Codex (Primary Engine) ──────────────────────────────────────────────────
 
 
 class CodexConfig(BaseModel):
@@ -54,6 +39,12 @@ class CodexConfig(BaseModel):
     max_parallel_agents: int = 3
     sandbox_mode: str = "workspace-write"
     model: str = "gpt-5.4"
+    # xhigh = gpt-5.4 (deep reasoning — pro not available on OAuth)
+    # high  = gpt-5.4 (implementation, general tasks)
+    xhigh_model: str = "gpt-5.4"
+    high_model: str = "gpt-5.4"
+    default_model: str = "gpt-5.4"
+    max_turns: int = 20
 
 
 # ─── QA Gate ──────────────────────────────────────────────────────────────────
@@ -148,7 +139,6 @@ class LoggingConfig(BaseModel):
 class OpenSeedConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     brain: BrainConfig = Field(default_factory=BrainConfig)
-    claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
     codex: CodexConfig = Field(default_factory=CodexConfig)
     qa_gate: QAGateConfig = Field(default_factory=QAGateConfig)
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)

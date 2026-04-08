@@ -205,7 +205,7 @@ Respond with EXACTLY:
 SKILLS: <skill-name-1>, <skill-name-2>, <skill-name-3>
 
 Example: SKILLS: frontend-design, webapp-testing, cloudflare-deploy""",
-        model="sonnet",
+        model="standard",
         max_turns=1,
     )
 

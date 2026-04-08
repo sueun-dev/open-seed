@@ -13,6 +13,14 @@
     ::-webkit-scrollbar-thumb:hover { background: #555; }
     ::selection { background: #2563eb40; }
     input::placeholder { color: #444; }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.1); opacity: 0.8; }
+    }
+    @keyframes indeterminate {
+      0% { left: -40%; }
+      100% { left: 100%; }
+    }
   </style>
 </head>
 <body>

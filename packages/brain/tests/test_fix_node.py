@@ -24,7 +24,7 @@ from openseed_core.types import (
 )
 
 # The fix_node does local imports, so we patch at the source module level.
-# ClaudeAgent: patched at openseed_claude.agent.ClaudeAgent
+# CodexAgent: patched at openseed_codex.agent.CodexAgent
 # _recall_past_fixes, _git_stash_push, etc.: patched on the sentinel module
 
 
@@ -68,7 +68,7 @@ def _patch_fix_node_deps(mock_agent, stash_push=None, stash_revert=None, insight
     import contextlib
 
     patches = [
-        patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+        patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
         patch(
             "openseed_brain.nodes.sentinel._recall_past_fixes",
             new_callable=AsyncMock,
@@ -119,7 +119,7 @@ class TestFixNodeSessionContinuity:
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -151,7 +151,7 @@ class TestFixNodeSessionContinuity:
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
         ):
             await fix_node(state)
@@ -267,7 +267,7 @@ class TestInsightConsultation:
         insight_mock = AsyncMock(return_value=mock_insight)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", insight_mock),
             patch("openseed_brain.nodes.sentinel._git_stash_revert", new_callable=AsyncMock, return_value=True),
@@ -336,7 +336,7 @@ class TestInsightConsultation:
         insight_mock = AsyncMock(return_value=None)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", insight_mock),
         ):
@@ -372,7 +372,7 @@ class TestInsightConsultation:
         insight_mock = AsyncMock(return_value=mock_insight)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._consult_insight_for_fix", insight_mock),
             patch("openseed_brain.nodes.sentinel._git_stash_revert", new_callable=AsyncMock, return_value=True),
@@ -408,7 +408,7 @@ class TestEvidenceVerification:
         mock_agent.invoke = AsyncMock(side_effect=invoke_and_modify)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -442,7 +442,7 @@ class TestEvidenceVerification:
         mock_agent.invoke = AsyncMock(side_effect=invoke_side_effect)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -467,7 +467,7 @@ class TestEvidenceVerification:
         mock_agent.invoke = AsyncMock(return_value=_mock_agent_response())
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", new_callable=AsyncMock, return_value=True),
         ):
@@ -505,7 +505,7 @@ class TestGitStash:
         stash_push = AsyncMock(return_value=True)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", stash_push),
         ):
@@ -536,7 +536,7 @@ class TestGitStash:
         stash_push = AsyncMock(return_value=True)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch("openseed_brain.nodes.sentinel._git_stash_push", stash_push),
         ):
@@ -573,7 +573,7 @@ class TestGitStash:
         stash_push = AsyncMock(return_value=True)
 
         with (
-            patch("openseed_claude.agent.ClaudeAgent", return_value=mock_agent),
+            patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
             patch("openseed_brain.nodes.sentinel._recall_past_fixes", new_callable=AsyncMock, return_value=""),
             patch(
                 "openseed_brain.nodes.sentinel._consult_insight_for_fix",

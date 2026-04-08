@@ -1,13 +1,9 @@
 """
-Multi-model prompt variants for the Sentinel execution loop.
-Separate prompt tuning per model family (Claude, GPT, Gemini).
+Model-specific prompt variants for the Sentinel execution loop.
 
-Claude: Dense, structured prompts. Follows instructions precisely.
-GPT: 8-block architecture. Benefits from explicit constraints.
-Gemini: Needs corrective overlays — tends to be aggressive.
-  - Tool mandate (MUST use tools, not reason internally)
-  - Delegation override (MUST delegate, not implement alone)
-  - Verification override (self-assessment unreliable)
+Each model family gets prompts optimized for its instruction-following style:
+  - GPT/Codex: 8-block architecture with explicit output contracts
+  - Gemini: Corrective overlays for tool-call and delegation enforcement
 """
 
 from __future__ import annotations
@@ -17,7 +13,6 @@ from enum import StrEnum
 
 
 class ModelFamily(StrEnum):
-    CLAUDE = "claude"
     GPT = "gpt"
     GEMINI = "gemini"
 
@@ -39,134 +34,10 @@ class PromptVariant:
 def detect_model_family(model: str) -> ModelFamily:
     """Detect model family from model name."""
     model_lower = model.lower()
-    if "claude" in model_lower or "sonnet" in model_lower or "opus" in model_lower or "haiku" in model_lower:
-        return ModelFamily.CLAUDE
-    if "gpt" in model_lower or "o4" in model_lower or "o3" in model_lower or "codex" in model_lower:
-        return ModelFamily.GPT
     if "gemini" in model_lower or "google" in model_lower:
         return ModelFamily.GEMINI
-    return ModelFamily.CLAUDE  # default
+    return ModelFamily.GPT  # default — covers o3, o4-mini, gpt-*, codex, heavy/standard/light
 
-
-# ─── Claude Prompts ───────────────────────────────────────────────────────────
-# Dense, structured. Claude follows instructions precisely.
-
-_CLAUDE_EXPLORE_PROMPT = """\
-You are exploring a codebase to prepare for task execution.
-
-## Task
-{task}
-
-## Working Directory
-{working_dir}
-
-{intent_summary}
-
-## Your Job
-1. Identify the codebase state: disciplined / transitional / chaotic / greenfield
-2. Note relevant patterns that should be followed
-3. Surface any implicit assumptions that could affect the outcome
-4. Summarise what exists that is relevant to this task
-
-Output ONLY valid JSON:
-{{
-  "codebase_state": "<disciplined|transitional|chaotic|greenfield>",
-  "relevant_patterns": ["pattern1", "pattern2"],
-  "assumptions": ["assumption1"],
-  "relevant_files": ["path/to/file1"],
-  "summary": "<2-3 sentence summary>"
-}}
-"""
-
-_CLAUDE_PLAN_PROMPT = """\
-You are planning the implementation of a task.
-
-## Task
-{task}
-
-## Working Directory
-{working_dir}
-
-## Codebase Assessment
-State: {codebase_state}
-Relevant patterns: {patterns}
-Context: {summary}
-
-## Your Job
-Produce a concrete, actionable implementation plan.
-
-Output ONLY valid JSON:
-{{
-  "files_to_change": ["path/to/existing/file"],
-  "files_to_create": ["path/to/new/file"],
-  "steps": ["Step 1: ...", "Step 2: ..."],
-  "expected_test_commands": ["pytest tests/", "python -m mypy src/"],
-  "complexity": "<trivial|moderate|complex>",
-  "approach_summary": "<1-2 sentences describing the approach>"
-}}
-"""
-
-_CLAUDE_ROUTE_PROMPT = """\
-You are the Sentinel orchestrator deciding how to handle a task.
-
-## Task
-{task}
-
-## Plan
-Complexity: {complexity}
-Approach: {approach}
-Steps: {steps}
-
-## Routing Options
-- "delegate"  — specialist sub-agent would do better (frontend, deep research, etc.)
-- "execute"   — I can handle this directly
-- "ask"       — I need clarification before proceeding (ambiguous or high-effort fork)
-- "challenge" — the user's approach seems problematic; I should raise a concern
-
-## Default Bias
-DELEGATE unless the task is trivially simple or delegation would add unnecessary overhead.
-
-Output ONLY valid JSON:
-{{
-  "decision": "<delegate|execute|ask|challenge>",
-  "reason": "<brief explanation>",
-  "sub_agent_type": "<agent type if delegate, else null>",
-  "clarification_question": "<question if ask, else null>",
-  "concern": "<concern description if challenge, else null>"
-}}
-"""
-
-_CLAUDE_RETRY_PROMPT = """\
-A previous implementation attempt failed verification. This is retry #{retry_count}.
-
-## Original Task
-{task}
-
-## Working Directory
-{working_dir}
-
-## What Failed
-Missing files: {missing}
-Failing commands: {failing}
-Evidence summary:
-{evidence}
-
-## Original Plan
-{approach_summary}
-
-## Your Job
-1. Diagnose WHY this failed (root cause, not just symptoms)
-2. Propose a CORRECTIVE approach — what should change
-3. If retry_count >= 3, consider a COMPLETELY DIFFERENT strategy
-
-Output ONLY valid JSON:
-{{
-  "diagnosis": "<root cause>",
-  "corrective_steps": ["Step 1: ...", "Step 2: ..."],
-  "files_to_check": ["path/that/may/need/fixing"],
-  "new_test_commands": ["command to verify the fix"]
-}}
-"""
 
 # ─── GPT Prompts ──────────────────────────────────────────────────────────────
 # 8-block architecture. GPT benefits from explicit output contracts and
@@ -637,16 +508,6 @@ Output ONLY valid JSON:
 
 # ─── Variant Registry ─────────────────────────────────────────────────────────
 
-_CLAUDE_VARIANT = PromptVariant(
-    model_family=ModelFamily.CLAUDE,
-    explore_prompt=_CLAUDE_EXPLORE_PROMPT,
-    plan_prompt=_CLAUDE_PLAN_PROMPT,
-    route_prompt=_CLAUDE_ROUTE_PROMPT,
-    retry_prompt=_CLAUDE_RETRY_PROMPT,
-    system_prefix="",
-    constraints=[],
-)
-
 _GPT_VARIANT = PromptVariant(
     model_family=ModelFamily.GPT,
     explore_prompt=_GPT_EXPLORE_PROMPT,
@@ -679,7 +540,6 @@ _GEMINI_VARIANT = PromptVariant(
 )
 
 _VARIANTS: dict[ModelFamily, PromptVariant] = {
-    ModelFamily.CLAUDE: _CLAUDE_VARIANT,
     ModelFamily.GPT: _GPT_VARIANT,
     ModelFamily.GEMINI: _GEMINI_VARIANT,
 }

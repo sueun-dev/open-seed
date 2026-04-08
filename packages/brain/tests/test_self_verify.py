@@ -137,7 +137,7 @@ async def test_lint_fails_fix_succeeds():
             side_effect=mock_verify_command,
         ),
         patch(
-            "openseed_claude.agent.ClaudeAgent",
+            "openseed_codex.agent.CodexAgent",
             return_value=mock_agent,
         ),
     ):
@@ -175,7 +175,7 @@ async def test_lint_fails_fix_still_fails():
             side_effect=mock_verify_always_fails,
         ),
         patch(
-            "openseed_claude.agent.ClaudeAgent",
+            "openseed_codex.agent.CodexAgent",
             return_value=mock_agent,
         ),
     ):
@@ -237,7 +237,7 @@ async def test_multiple_lint_commands_partial_failure():
             side_effect=lambda *a, **kw: next(results),
         ),
         patch(
-            "openseed_claude.agent.ClaudeAgent",
+            "openseed_codex.agent.CodexAgent",
             return_value=mock_agent,
         ),
     ):

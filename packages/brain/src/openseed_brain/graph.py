@@ -47,10 +47,9 @@ def route_plan_to_specialists(state: PipelineState) -> list[Send] | Literal["imp
     - Task routing fails
     """
     plan = state.get("plan")
-    provider = state.get("provider", "claude")
 
-    # Legacy modes or no plan — use single implement node
-    if provider in ("codex", "both") or not plan or not plan.tasks:
+    # No plan — use single implement node
+    if not plan or not plan.tasks:
         return "implement"
 
     try:
@@ -212,9 +211,9 @@ async def _interpret_user_response(
     - "저 에러 무시하고 나머지만 고쳐" → continue (with context)
     """
     try:
-        from openseed_claude.agent import ClaudeAgent
+        from openseed_codex.agent import CodexAgent
 
-        agent = ClaudeAgent()
+        agent = CodexAgent()
         response = await agent.invoke(
             prompt=(
                 f"A coding pipeline asked the user if they want to continue fixing errors.\n\n"
@@ -227,7 +226,7 @@ async def _interpret_user_response(
                 f"- 'stop' if they want to stop completely (아니, stop, 그만, 됐어, etc.)\n\n"
                 f"Answer:"
             ),
-            model="haiku",
+            model="light",
             max_turns=1,
         )
         result = response.text.strip().lower()

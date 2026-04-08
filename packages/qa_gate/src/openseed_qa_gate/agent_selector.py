@@ -94,10 +94,10 @@ async def _select_with_llm(
     Returns a filtered subset of available_agents.
     Raises on failure so the caller can fall back.
     """
-    from openseed_core.auth.claude import require_claude_auth
+    from openseed_core.auth.openai import require_openai_auth
     from openseed_core.subprocess import run_streaming
 
-    cli = require_claude_auth()
+    cli = require_openai_auth()
 
     # Build agent catalog for the prompt
     agent_lines = []
@@ -131,12 +131,10 @@ Output ONLY a JSON array of agent names (strings), no markdown, no explanation:
 
     cmd = [
         cli,
-        "--print",
-        "--dangerously-skip-permissions",
-        "--model",
-        "claude-sonnet-4-6",
-        "--max-turns",
-        "1",
+        "exec",
+        "--full-auto",
+        "-m",
+        "gpt-5.4",
         prompt,
     ]
 

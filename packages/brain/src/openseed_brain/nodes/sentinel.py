@@ -295,9 +295,9 @@ async def fix_node(state: PipelineState) -> dict:
     skill_system_prompt = _build_fix_skill_prompt(state)
 
     # ── Main fix with session continuity ──
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
 
     # Deterministic session key based on task content
     task_hash = abs(hash(task)) % 10000
@@ -318,7 +318,7 @@ async def fix_node(state: PipelineState) -> dict:
     before = _snapshot_dir(working_dir)
 
     # Escalate to Opus after initial Sonnet attempts fail
-    fix_model = "sonnet" if retry_count < 2 else "opus"
+    fix_model = "standard" if retry_count < 2 else "heavy"
 
     # Use session continuity: first attempt creates session, subsequent reuse it
     await agent.invoke(
@@ -351,7 +351,7 @@ async def fix_node(state: PipelineState) -> dict:
         before2 = _snapshot_dir(working_dir)
         await agent.invoke(
             prompt=noop_prompt,
-            model="sonnet",
+            model="standard",
             working_dir=working_dir,
             max_turns=10,
             continue_session=True,

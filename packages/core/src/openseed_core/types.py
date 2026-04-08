@@ -41,7 +41,6 @@ class StepStatus(StrEnum):
 
 
 class AgentProvider(StrEnum):
-    CLAUDE = "claude"
     CODEX = "codex"
 
 
@@ -65,7 +64,7 @@ class PlanTask:
 
     id: str = ""
     description: str = ""
-    assigned_to: AgentProvider = AgentProvider.CLAUDE
+    assigned_to: AgentProvider = AgentProvider.CODEX
     role: str = "executor"
     dependencies: list[str] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
@@ -91,7 +90,7 @@ class Implementation:
     files_created: list[str] = field(default_factory=list)
     files_modified: list[str] = field(default_factory=list)
     commands_run: list[str] = field(default_factory=list)
-    agent: AgentProvider = AgentProvider.CLAUDE
+    agent: AgentProvider = AgentProvider.CODEX
     raw_output: str = ""
 
 
@@ -181,7 +180,7 @@ class PipelineState(TypedDict):
     # Input
     task: str
     working_dir: str
-    provider: str  # "claude", "codex", "both"
+    provider: str  # "codex" or "debate"
 
     # Planning
     plan: Plan | None

@@ -297,13 +297,13 @@ async def generate_diagram(working_dir: str, generator: str = "claude", verifier
     await _emit(f"{gen_label} analyzing architecture...", step="generate")
 
     if generator == "claude":
-        from openseed_claude.agent import ClaudeAgent
+        from openseed_codex.agent import CodexAgent
 
-        agent = ClaudeAgent()
+        agent = CodexAgent()
         response = await agent.invoke(
             prompt=f"Analyze this codebase and create an architecture diagram.\n\n{file_block}",
             system_prompt=SYSTEM_PROMPT,
-            model="opus",
+            model="high",
             max_turns=1,
         )
     else:
@@ -372,10 +372,10 @@ async def _run_verify(provider: str, file_block: str, mermaid_code: str) -> tupl
     prompt = f"{VERIFY_PROMPT}\n\nCodebase files:\n{file_block}\n\nDiagram to verify:\n```mermaid\n{mermaid_code}\n```"
     try:
         if provider == "claude":
-            from openseed_claude.agent import ClaudeAgent
+            from openseed_codex.agent import CodexAgent
 
-            agent = ClaudeAgent()
-            response = await agent.invoke(prompt=prompt, model="opus", max_turns=1)
+            agent = CodexAgent()
+            response = await agent.invoke(prompt=prompt, model="high", max_turns=1)
         else:
             from openseed_codex.agent import CodexAgent
 
@@ -410,10 +410,10 @@ Output ONLY the corrected ```mermaid code block. Be thorough but do NOT over-eng
 
     try:
         if provider == "claude":
-            from openseed_claude.agent import ClaudeAgent
+            from openseed_codex.agent import CodexAgent
 
-            agent = ClaudeAgent()
-            response = await agent.invoke(prompt=fix_prompt, system_prompt=SYSTEM_PROMPT, model="opus", max_turns=1)
+            agent = CodexAgent()
+            response = await agent.invoke(prompt=fix_prompt, system_prompt=SYSTEM_PROMPT, model="high", max_turns=1)
         else:
             from openseed_codex.agent import CodexAgent
 

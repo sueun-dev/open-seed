@@ -55,9 +55,9 @@ async def consult_insight(
             retry_count=len(failure_history),
         )
 
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
-    agent = ClaudeAgent(event_bus=event_bus)
+    agent = CodexAgent(event_bus=event_bus)
 
     prompt = f"""You are Insight — the deep-thinking advisor for the Open Seed pipeline.
 
@@ -80,7 +80,7 @@ Output JSON:
 
     response = await agent.invoke(
         prompt=prompt,
-        model="opus",
+        model="high",
         system_prompt="You are Insight. Analyze deeply. Be creative. Think outside the box. Output valid JSON.",
         allowed_tools=["Read", "Grep", "Glob"],  # Read-only
     )

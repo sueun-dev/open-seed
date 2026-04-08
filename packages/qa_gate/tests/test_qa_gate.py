@@ -37,7 +37,7 @@ def _make_subprocess_result(
 def _make_agent(
     name: str = "test-agent",
     description: str = "A test agent",
-    model: str = "claude-sonnet-4-6",
+    model: str = "gpt-5.4",
     sandbox_mode: str = "read-only",
     instructions: str = "Review the code carefully.",
 ) -> AgentDefinition:
@@ -127,7 +127,7 @@ class TestSynthesizeWithLLMSuccess:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, summary, llm_verdict = await synthesize(results)
 
@@ -158,7 +158,7 @@ class TestSynthesizeWithLLMSuccess:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, summary, llm_verdict = await synthesize(results)
 
@@ -199,7 +199,7 @@ class TestSynthesizeWithLLMSuccess:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, summary, llm_verdict = await synthesize(results)
 
@@ -266,7 +266,7 @@ class TestSynthesizeWithLLMSuccess:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, _, llm_verdict = await synthesize(results)
 
@@ -295,7 +295,7 @@ class TestSynthesizeFallback:
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("subprocess failed"),
             ),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, summary, llm_verdict = await synthesize(results)
 
@@ -319,7 +319,7 @@ class TestSynthesizeFallback:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, summary, llm_verdict = await synthesize(results)
 
@@ -341,7 +341,7 @@ class TestSynthesizeFallback:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, summary, llm_verdict = await synthesize(results)
 
@@ -362,7 +362,7 @@ class TestSynthesizeDeduplicate:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, _, _ = await synthesize(results)
 
@@ -380,7 +380,7 @@ class TestSynthesizeDeduplicate:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, _, _ = await synthesize(results)
 
@@ -398,7 +398,7 @@ class TestSynthesizeAgentFailures:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, summary, _ = await synthesize(results)
 
@@ -422,7 +422,7 @@ class TestSynthesizeAgentFailures:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("fail")),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             findings, _, _ = await synthesize(results)
 
@@ -508,7 +508,7 @@ class TestSynthesizeConflictResolution:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=fake_run),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             await synthesize(results)  # returns 3-tuple but we only care about the prompt
 
@@ -554,7 +554,7 @@ class TestSelectAgentsLLMSelectsSubset:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             result = await select_agents("task", "summary", agents, max_agents=3)
 
@@ -572,7 +572,7 @@ class TestSelectAgentsLLMSelectsSubset:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             result = await select_agents("task", "summary", agents, max_agents=3)
 
@@ -590,7 +590,7 @@ class TestSelectAgentsFallback:
             patch(
                 "openseed_core.subprocess.run_streaming", new_callable=AsyncMock, side_effect=RuntimeError("timeout")
             ),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             result = await select_agents("task", "summary", agents, max_agents=3)
 
@@ -606,7 +606,7 @@ class TestSelectAgentsFallback:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             result = await select_agents("task", "summary", agents, max_agents=3)
 
@@ -625,7 +625,7 @@ class TestSelectAgentsValidatesNames:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             result = await select_agents("task", "summary", agents, max_agents=1)
 
@@ -642,7 +642,7 @@ class TestSelectAgentsValidatesNames:
 
         with (
             patch("openseed_core.subprocess.run_streaming", new_callable=AsyncMock, return_value=mock_proc),
-            patch("openseed_core.auth.claude.require_claude_auth", return_value="/usr/bin/claude"),
+            patch("openseed_core.auth.openai.require_openai_auth", return_value="/usr/local/bin/codex"),
         ):
             result = await select_agents("task", "summary", agents, max_agents=5)
 
@@ -883,13 +883,13 @@ class TestAgentDefinitionFields:
         agent = AgentDefinition(
             name="security-agent",
             description="Security focused",
-            model="claude-sonnet-4-6",
+            model="gpt-5.4",
             sandbox_mode="workspace-write",
             instructions="Look for XSS and SQLi",
             mcp_servers={"tools": {"command": "npx", "args": ["-y", "mcp-server"]}},
         )
 
-        assert agent.model == "claude-sonnet-4-6"
+        assert agent.model == "gpt-5.4"
         assert agent.sandbox_mode == "workspace-write"
         assert "XSS" in agent.instructions
         assert "tools" in agent.mcp_servers

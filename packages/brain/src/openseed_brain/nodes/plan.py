@@ -74,9 +74,9 @@ async def plan_node(state: PipelineState) -> dict:
             micro_ctx
         )
 
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
 
     response = await agent.invoke(
         prompt=f"""Create an implementation plan for this task.
@@ -111,11 +111,11 @@ the backend MUST have a corresponding task and route for it. Walk through every 
 - CROSS-CHECK: If the backend exposes an endpoint, the frontend must have code that calls it. \
 No orphan endpoints, no orphan UI actions.
 - Output ONLY the JSON object, nothing else""",
-        model="opus",
+        model="xhigh",
         max_turns=1,
     )
 
-    plan = _parse_claude_plan(task, response.text)
+    plan = _parse_plan(task, response.text)
 
     if not plan.tasks:
         logger.warning("Plan generation produced 0 tasks — implement will use fullstack fallback")
@@ -133,7 +133,7 @@ async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict) -> Plan
     Uses Sonnet to accurately assign roles and files to each step,
     instead of unreliable keyword matching.
     """
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
     approach = intake_analysis.get("approach", "")
     plan_text = intake_analysis.get("plan", "")
@@ -166,7 +166,7 @@ async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict) -> Plan
         except Exception:
             pass
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
     response = await agent.invoke(
         prompt=f"""Convert this approved plan into structured JSON tasks with accurate role and skill assignments.
 
@@ -212,7 +212,7 @@ File assignment rules:
 - A task can have 0 files if it's a conceptual step (e.g. "verify integration")
 
 Output ONLY the JSON object.""",
-        model="sonnet",
+        model="standard",
         max_turns=1,
     )
 
@@ -342,7 +342,7 @@ def _build_analysis_context(intake_analysis: dict) -> str:
     return "\n".join(parts) + "\n"
 
 
-def _parse_claude_plan(task: str, text: str) -> Plan:
+def _parse_plan(task: str, text: str) -> Plan:
     """Parse Claude's JSON plan response into a Plan object."""
     plan = Plan(summary=f"Plan for: {task[:100]}")
     try:

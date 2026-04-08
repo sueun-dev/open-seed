@@ -65,7 +65,7 @@ async def route_tasks(plan: Plan, task: str) -> dict[str, list[PlanTask]]:
         Dictionary mapping domain names to lists of PlanTasks.
         Example: {"frontend": [task1, task2], "backend": [task3]}
     """
-    from openseed_claude.agent import ClaudeAgent
+    from openseed_codex.agent import CodexAgent
 
     if not plan.tasks:
         return {}
@@ -77,7 +77,7 @@ async def route_tasks(plan: Plan, task: str) -> dict[str, list[PlanTask]]:
         task_lines.append(f"- {t.id}: {t.description} (files: {files_str})")
     task_list = "\n".join(task_lines)
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
     response = await agent.invoke(
         prompt=f"""Route these implementation tasks to specialist domains.
 
@@ -90,7 +90,7 @@ Tasks to route:
 
 Assign each task to exactly one domain. Output ONLY valid JSON.""",
         system_prompt=ROUTING_SYSTEM_PROMPT,
-        model="sonnet",  # Sonnet for accurate domain routing
+        model="standard",  # Standard for accurate domain routing
         max_turns=1,
     )
 

@@ -80,7 +80,7 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
     state = initial_state(
         task=task,
         working_dir=str(wd),
-        provider="claude",  # Default; could be overridden via CLI flag later
+        provider="codex",  # Default; could be overridden via CLI flag later
     )
     # Apply sentinel max_retries from config
     state["max_retries"] = cfg.sentinel.max_retries

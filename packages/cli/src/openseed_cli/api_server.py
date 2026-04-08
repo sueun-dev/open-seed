@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="Open Seed v2", version="2.0.0-alpha.0")
+app = FastAPI(title="Open Seed v2.1", version="2.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,7 +51,7 @@ class RunRequest(BaseModel):
     task: str
     working_dir: str = "."
     config_path: str | None = None
-    provider: str = "claude"  # "claude", "codex", "both"
+    provider: str = "codex"  # "codex" or "debate"
     clarification_answers: list[str] = []  # Answers to intake questions
     intake_analysis: Any = None  # Plan from Phase 2 — can be dict or string from frontend cache
 
@@ -59,7 +59,7 @@ class RunRequest(BaseModel):
 class IntakeRequest(BaseModel):
     task: str
     working_dir: str = "."
-    provider: str = "claude"
+    provider: str = "codex"
     clarification_answers: list[str] = []
     clarification_questions: list[dict] = []
 
@@ -68,7 +68,7 @@ class ChatRequest(BaseModel):
     message: str
     working_dir: str = "."
     session_id: str | None = None
-    provider: str = "claude"  # "claude", "codex", "both"
+    provider: str = "codex"  # "codex" or "debate"
     viewing_files: list[str] = []  # Files the user has open in the code viewer
     active_file: str | None = None  # File the user is currently looking at
 
@@ -83,7 +83,7 @@ class MemorySearchRequest(BaseModel):
 
 @app.get("/api/health")
 async def health() -> dict:
-    return {"status": "ok", "version": "2.0.0-alpha.0"}
+    return {"status": "ok", "version": "2.1.0"}
 
 
 @app.post("/api/chat")
@@ -126,12 +126,10 @@ async def chat(req: ChatRequest) -> dict:
     before = _snapshot(req.working_dir)
 
     try:
-        if req.provider == "codex":
-            response_text, session = await _chat_codex(req)
-        elif req.provider == "both":
-            response_text, session = await _chat_both(req)
+        if req.provider == "debate":
+            response_text, session = await _chat_debate(req)
         else:
-            response_text, session = await _chat_claude(req)
+            response_text, session = await _chat_codex(req)
 
         # Detect file changes
         after = _snapshot(req.working_dir)
@@ -179,14 +177,14 @@ def _build_chat_prompt(req: ChatRequest) -> str:
     return "\n".join(parts)
 
 
-async def _chat_claude(req: ChatRequest) -> tuple[str, str | None]:
-    """Direct Claude CLI call."""
-    from openseed_claude.agent import ClaudeAgent
+async def _chat_codex(req: ChatRequest) -> tuple[str, str | None]:
+    """Direct Codex CLI call."""
+    from openseed_codex.agent import CodexAgent
 
-    agent = ClaudeAgent()
+    agent = CodexAgent()
     response = await agent.invoke(
         prompt=_build_chat_prompt(req),
-        model="sonnet",
+        model="standard",
         working_dir=req.working_dir,
         max_turns=20,
         session_id=req.session_id,
@@ -195,94 +193,71 @@ async def _chat_claude(req: ChatRequest) -> tuple[str, str | None]:
     return response.text, response.session_id or None
 
 
-async def _chat_codex(req: ChatRequest) -> tuple[str, str | None]:
-    """Direct Codex CLI call."""
-    try:
-        from openseed_codex.agent import CodexAgent
-
-        agent = CodexAgent()
-        response = await agent.invoke(
-            prompt=_build_chat_prompt(req),
-            working_dir=req.working_dir,
-        )
-        return response.text, None
-    except Exception as e:
-        return f"Codex error: {e}\n\nCodex CLI may require a terminal. Try using Claude or Both mode instead.", None
-
-
-async def _chat_both(req: ChatRequest) -> tuple[str, str | None]:
-    """Claude + Codex debate: both analyze, then best approach executes. User sees every step."""
-    from openseed_claude.agent import ClaudeAgent
+async def _chat_debate(req: ChatRequest) -> tuple[str, str | None]:
+    """Two Codex agents debate: both analyze independently, then a judge picks the best approach."""
     from openseed_codex.agent import CodexAgent
 
-    claude_agent = ClaudeAgent()
-    codex_agent = CodexAgent()
+    agent_a = CodexAgent()
+    agent_b = CodexAgent()
 
     # Step 1: Both analyze in parallel
     await _broadcast(
         {
             "type": "debate.start",
             "node": "pair",
-            "data": {"step": "analyzing", "message": "Claude and Codex are both analyzing your request..."},
+            "data": {"step": "analyzing", "message": "Two AI engineers are analyzing your request independently..."},
         }
     )
 
     chat_prompt = _build_chat_prompt(req)
 
-    claude_task = claude_agent.invoke(
+    task_a = agent_a.invoke(
         prompt=chat_prompt,
-        model="sonnet",
+        model="standard",
+        working_dir=req.working_dir,
+        max_turns=10,
+    )
+    task_b = agent_b.invoke(
+        prompt=chat_prompt,
+        model="standard",
         working_dir=req.working_dir,
         max_turns=10,
     )
 
-    # Codex may fail in non-terminal environments — handle gracefully
-    codex_text = ""
-    try:
-        codex_task = codex_agent.invoke(
-            prompt=chat_prompt,
-            working_dir=req.working_dir,
-        )
-        claude_analysis, codex_analysis = await asyncio.gather(claude_task, codex_task)
-        codex_text = codex_analysis.text
-    except Exception:
-        claude_analysis = await claude_task
-        codex_text = "(Codex unavailable)"
+    analysis_a, analysis_b = await asyncio.gather(task_a, task_b, return_exceptions=True)
+
+    text_a = analysis_a.text if not isinstance(analysis_a, Exception) else f"(Agent A error: {analysis_a})"
+    text_b = analysis_b.text if not isinstance(analysis_b, Exception) else f"(Agent B error: {analysis_b})"
 
     # Step 2: Show both analyses to user
     await _broadcast(
-        {
-            "type": "debate.opinion",
-            "node": "pair",
-            "data": {"speaker": "claude", "message": claude_analysis.text[:2000]},
-        }
+        {"type": "debate.opinion", "node": "pair", "data": {"speaker": "engineer_a", "message": text_a[:2000]}}
     )
-
     await _broadcast(
-        {"type": "debate.opinion", "node": "pair", "data": {"speaker": "codex", "message": codex_text[:2000]}}
+        {"type": "debate.opinion", "node": "pair", "data": {"speaker": "engineer_b", "message": text_b[:2000]}}
     )
 
-    # Step 3: Opus judges (neutral arbiter, not Claude judging itself)
+    # Step 3: Heavy model judges (neutral arbiter)
     await _broadcast(
         {
             "type": "debate.deciding",
             "node": "pair",
-            "data": {"step": "deciding", "message": "Opus is judging both approaches..."},
+            "data": {"step": "deciding", "message": "Judge is evaluating both approaches..."},
         }
     )
 
-    judge = ClaudeAgent()
+    judge = CodexAgent()
     response = await judge.invoke(
-        prompt=f"""You are a neutral judge. Two AI engineers (Claude and Codex) analyzed the same task independently.
+        prompt=f"""You are a neutral judge. Two AI engineers analyzed the same task independently.
 Review both approaches objectively and execute the better one.
 
 TASK: {req.message}
 
 ENGINEER A:
-{claude_analysis.text[:1500]}
+{text_a[:1500]}
 
 ENGINEER B:
-{codex_text[:1500]}
+{text_b[:1500]}
 
 Instructions:
 1. Compare both approaches objectively. State which is better and why (1-2 sentences).
@@ -290,7 +265,7 @@ Instructions:
 3. If both have good ideas, combine the best parts.
 
 Start with "VERDICT: [Engineer A/Engineer B/Combined] because..." then execute.""",
-        model="opus",
+        model="high",
         working_dir=req.working_dir,
         max_turns=20,
     )
@@ -301,14 +276,13 @@ Start with "VERDICT: [Engineer A/Engineer B/Combined] because..." then execute."
         {"type": "debate.verdict", "node": "pair", "data": {"verdict": verdict_line, "message": response.text[:500]}}
     )
 
-    # Build combined response showing the full debate
     full_response = f"""## Debate
 
-**🟣 Claude's Analysis:**
-{claude_analysis.text[:1000]}
+**Engineer A's Analysis:**
+{text_a[:1000]}
 
-**🟢 Codex's Analysis:**
-{codex_text[:1000]}
+**Engineer B's Analysis:**
+{text_b[:1000]}
 
 ## Decision & Execution
 
@@ -575,49 +549,77 @@ async def save_file(body: dict) -> dict:
 
 @app.post("/api/intake")
 async def run_intake(req: IntakeRequest) -> dict:
-    """Run intake analysis. Phase 1: questions. Phase 2 (with answers): plan."""
+    """Start intake analysis (async). Results delivered via WebSocket.
+
+    Returns immediately with {"status":"started"}.
+    Events sent via WS:
+      - intake.progress: {message, step}
+      - intake.questions: {questions, intake_analysis, skip_planning}
+      - intake.error: {error}
+    """
+    resolved_dir = str(Path(req.working_dir).resolve())
+
+    asyncio.create_task(
+        _execute_intake(
+            task=req.task,
+            working_dir=resolved_dir,
+            provider=req.provider,
+            clarification_answers=req.clarification_answers,
+            clarification_questions=req.clarification_questions,
+        )
+    )
+
+    return {"status": "started"}
+
+
+async def _execute_intake(
+    task: str,
+    working_dir: str,
+    provider: str,
+    clarification_answers: list[str],
+    clarification_questions: list[dict],
+) -> None:
+    """Run intake in background, broadcast results via WebSocket."""
     import traceback
 
     from openseed_brain.nodes.intake import intake_node
     from openseed_brain.state import initial_state
 
-    resolved_dir = str(Path(req.working_dir).resolve())
-
-    # Harness check happens inside intake_node:
-    # Phase 1: adds "project description" gap to questions
-    # Phase 2: generates harness from all user answers
-
-    state = initial_state(task=req.task, working_dir=resolved_dir, provider=req.provider)
-
-    # Pass answers and questions for Phase 2 (plan generation)
-    if req.clarification_answers:
-        state["clarification_answers"] = req.clarification_answers
-        # Pass question texts so intake can reference them
-        state["clarification_questions"] = [
-            q.get("question", q) if isinstance(q, dict) else q for q in req.clarification_questions
-        ]
-
     try:
+        state = initial_state(task=task, working_dir=working_dir, provider=provider)
+
+        if clarification_answers:
+            state["clarification_answers"] = clarification_answers
+            state["clarification_questions"] = [
+                q.get("question", q) if isinstance(q, dict) else q for q in clarification_questions
+            ]
+
         result = await intake_node(state)
+
+        await _broadcast(
+            {
+                "type": "intake.done",
+                "data": {
+                    "intake_analysis": result.get("intake_analysis", {}),
+                    "clarification_questions": result.get("clarification_questions", []),
+                    "skip_planning": result.get("skip_planning", False),
+                },
+            }
+        )
     except Exception as exc:
         print(f"[INTAKE ERROR] {exc}")
         traceback.print_exc()
-        return {
-            "intake_analysis": {"skip_planning": True},
-            "clarification_questions": [],
-            "skip_planning": True,
-        }
-
-    return {
-        "intake_analysis": result.get("intake_analysis", {}),
-        "clarification_questions": result.get("clarification_questions", []),
-        "skip_planning": result.get("skip_planning", False),
-    }
+        await _broadcast(
+            {
+                "type": "intake.error",
+                "data": {"error": str(exc)},
+            }
+        )
 
 
 class HarnessRequest(BaseModel):
     working_dir: str
-    provider: str = "claude"
+    provider: str = "codex"
     project_description: str = ""
 
 
@@ -726,13 +728,13 @@ async def trigger_diagram(body: dict) -> dict:
 
     # Clear cache and regenerate
     _diagram_cache.pop(wd, None)
-    gen = body.get("generator", "claude")
-    ver = body.get("verifier", "gpt")
+    gen = body.get("generator", "codex")
+    ver = body.get("verifier", "codex")
     asyncio.create_task(_generate_diagram_bg(wd, generator=gen, verifier=ver))
     return {"status": "generating"}
 
 
-async def _generate_diagram_bg(working_dir: str, generator: str = "claude", verifier: str = "gpt") -> None:
+async def _generate_diagram_bg(working_dir: str, generator: str = "codex", verifier: str = "codex") -> None:
     """Background diagram generation + broadcast when done."""
     _diagram_generating.add(working_dir)
     try:
@@ -763,19 +765,12 @@ async def _generate_diagram_bg(working_dir: str, generator: str = "claude", veri
 
 @app.get("/api/auth/status")
 async def auth_status() -> dict:
-    """Check authentication status for Claude and OpenAI."""
-    from openseed_core.auth.claude import check_claude_auth
+    """Check authentication status for OpenAI Codex."""
     from openseed_core.auth.openai import check_openai_auth
 
-    claude = check_claude_auth()
     openai = check_openai_auth()
 
     return {
-        "claude": {
-            "installed": claude.installed,
-            "authenticated": claude.authenticated,
-            "error": claude.error,
-        },
         "openai": {
             "installed": openai.installed,
             "authenticated": openai.authenticated,
@@ -786,39 +781,19 @@ async def auth_status() -> dict:
 
 @app.post("/api/auth/login")
 async def auth_login(body: dict) -> dict:
-    """Trigger OAuth login for a provider. Runs CLI auth command."""
+    """Trigger OAuth login. Runs CLI auth command."""
     import subprocess
 
-    provider = body.get("provider", "")
+    from openseed_core.auth.openai import get_codex_cli_path
 
-    if provider == "claude":
-        from openseed_core.auth.claude import get_claude_cli_path
-
-        cli = get_claude_cli_path()
-        if not cli:
-            return {
-                "status": "error",
-                "message": "Claude CLI not installed. Run: npm install -g @anthropic-ai/claude-code",
-            }
-        try:
-            result = subprocess.run([cli, "auth", "login"], capture_output=True, text=True, timeout=60)
-            return {"status": "ok" if result.returncode == 0 else "error", "message": result.stdout or result.stderr}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-
-    elif provider == "openai":
-        from openseed_core.auth.openai import get_codex_cli_path
-
-        cli = get_codex_cli_path()
-        if not cli:
-            return {"status": "error", "message": "Codex CLI not installed. Run: npm install -g @openai/codex"}
-        try:
-            result = subprocess.run([cli, "auth", "login"], capture_output=True, text=True, timeout=60)
-            return {"status": "ok" if result.returncode == 0 else "error", "message": result.stdout or result.stderr}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-
-    return {"status": "error", "message": f"Unknown provider: {provider}"}
+    cli = get_codex_cli_path()
+    if not cli:
+        return {"status": "error", "message": "Codex CLI not installed. Run: npm install -g @openai/codex"}
+    try:
+        result = subprocess.run([cli, "auth", "login"], capture_output=True, text=True, timeout=60)
+        return {"status": "ok" if result.returncode == 0 else "error", "message": result.stdout or result.stderr}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/api/config")
@@ -1069,7 +1044,7 @@ async def _execute_pipeline(
     task: str,
     working_dir: str,
     config_path: str | None,
-    provider: str = "claude",
+    provider: str = "codex",
     clarification_answers: list[str] | None = None,
     intake_analysis: dict[str, Any] | None = None,
 ) -> None:
@@ -1230,6 +1205,10 @@ async def _execute_pipeline(
         resolved_dir = str(Path(working_dir).resolve())
         asyncio.create_task(_generate_diagram_bg(resolved_dir))
     except Exception as e:
+        import traceback
+
+        tb = traceback.format_exc()
+        print(f"[PIPELINE ERROR] {e}\n{tb}", flush=True)
         if _current_run:
             _current_run["status"] = "failed"
             _current_run["error"] = str(e)

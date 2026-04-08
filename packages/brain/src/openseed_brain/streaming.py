@@ -169,7 +169,7 @@ async def stream_pipeline(
 async def run_pipeline_streaming(
     task: str,
     working_dir: str,
-    provider: str = "claude",
+    provider: str = "codex",
     checkpoint_dir: str | None = None,
     thread_id: str = "default",
     mode: PipelineStreamMode | list[PipelineStreamMode] = PipelineStreamMode.UPDATES,

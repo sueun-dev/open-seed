@@ -4,7 +4,7 @@ Open Seed v2 — Conversation Compression (OpenHands pattern).
 Prevents context window explosion by condensing message history.
 Two strategies:
   - RecentCondenser: Keep first + last N messages (zero-cost)
-  - LLMSummaryCondenser: Summarize older messages via Haiku
+  - LLMSummaryCondenser: Summarize older messages via Codex light
 
 Pattern from: openhands/memory/condenser/condenser.py
 """
@@ -41,7 +41,7 @@ class RecentCondenser(Condenser):
 
 class LLMSummaryCondenser(Condenser):
     """
-    When messages exceed threshold, summarize older messages via Claude Haiku.
+    When messages exceed threshold, summarize older messages via Codex light.
     Keeps first message + LLM summary of middle + last N verbatim.
     """
 
@@ -66,11 +66,11 @@ class LLMSummaryCondenser(Condenser):
         return [first, f"[CONDENSED HISTORY: {summary}]"] + recent
 
     async def _summarize(self, messages: list[str]) -> str:
-        """Use Haiku to summarize a batch of messages."""
+        """Use Codex light to summarize a batch of messages."""
         try:
-            from openseed_claude.agent import ClaudeAgent
+            from openseed_codex.agent import CodexAgent
 
-            agent = ClaudeAgent()
+            agent = CodexAgent()
             joined = "\n".join(f"- {m[:300]}" for m in messages[:30])
             response = await agent.invoke(
                 prompt=(
@@ -79,7 +79,7 @@ class LLMSummaryCondenser(Condenser):
                     "and the current state. Be concise.\n\n"
                     f"{joined}"
                 ),
-                model="haiku",
+                model="light",
                 max_turns=1,
             )
             return response.text.strip()[:1000]
