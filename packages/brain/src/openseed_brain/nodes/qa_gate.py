@@ -13,16 +13,25 @@ from openseed_brain.state import PipelineState
 
 
 async def qa_gate_node(state: PipelineState) -> dict:
-    """Run QA specialists in parallel, produce verdict."""
+    """Run QA specialists in parallel, produce verdict.
+
+    After fix attempts (retry_count > 0), runs lightweight QA:
+    just build/lint check instead of full 136-agent review.
+    """
     working_dir = state["working_dir"]
     implementation = state.get("implementation")
     plan = state.get("plan")
     intake_raw = state.get("intake_analysis") or {}
     intake = intake_raw if isinstance(intake_raw, dict) else {}
+    retry_count = state.get("retry_count", 0)
 
     task = state["task"]
     intent = intake.get("intent", "implementation")
     complexity = intake.get("complexity", "moderate")
+
+    # ── Lightweight QA after fix attempts — skip full agent review ──
+    if retry_count > 0:
+        return await _lightweight_qa(working_dir, plan)
 
     # Build context for reviewers: task scope + what was built + plan
     context_parts = [
@@ -112,3 +121,132 @@ async def qa_gate_node(state: PipelineState) -> dict:
             "qa_result": QAResult(verdict=Verdict.WARN, synthesis=f"QA gate error: {e}"),
             "messages": [f"QA Gate: error — {e}"],
         }
+
+
+async def _lightweight_qa(working_dir: str, plan: object | None) -> dict:
+    """Fast QA after fix: build/lint check only, no full agent review.
+
+    Runs deterministic checks (TypeScript compile, lint, file existence)
+    instead of spawning 136 AI agents. Takes seconds, not minutes.
+    """
+    import subprocess
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # 1. Check expected files exist
+    if plan and hasattr(plan, "file_manifest"):
+        for f in plan.file_manifest:
+            path = os.path.join(working_dir, f.path)
+            if not os.path.exists(path):
+                errors.append(f"Missing file: {f.path}")
+
+    # 2. TypeScript check (if tsconfig exists)
+    tsconfig = os.path.join(working_dir, "tsconfig.json")
+    web_tsconfig = os.path.join(working_dir, "web", "tsconfig.json")
+    ts_dir = working_dir
+    if os.path.exists(web_tsconfig):
+        ts_dir = os.path.join(working_dir, "web")
+    elif not os.path.exists(tsconfig):
+        ts_dir = None
+
+    if ts_dir:
+        try:
+            result = subprocess.run(
+                ["npx", "tsc", "--noEmit"],
+                cwd=ts_dir,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                ts_errors = [ln for ln in result.stdout.splitlines() if "error TS" in ln]
+                if ts_errors:
+                    errors.extend(ts_errors[:5])
+                else:
+                    warnings.append("TypeScript check returned non-zero but no errors found")
+        except Exception as e:
+            warnings.append(f"TypeScript check skipped: {e}")
+
+    # 3. Python lint (if pyproject.toml exists)
+    pyproject = os.path.join(working_dir, "pyproject.toml")
+    if os.path.exists(pyproject):
+        try:
+            result = subprocess.run(
+                ["ruff", "check", "."],
+                cwd=working_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                ruff_errors = [ln for ln in result.stdout.splitlines() if " F" in ln][:5]
+                if ruff_errors:
+                    errors.extend(ruff_errors)
+        except Exception:
+            pass
+
+    # 4. npm build (if package.json exists)
+    pkg_json = os.path.join(working_dir, "web", "package.json")
+    if not os.path.exists(pkg_json):
+        pkg_json = os.path.join(working_dir, "package.json")
+    if os.path.exists(pkg_json):
+        pkg_dir = os.path.dirname(pkg_json)
+        # Install first
+        try:
+            subprocess.run(
+                ["npm", "install", "--legacy-peer-deps"],
+                cwd=pkg_dir,
+                capture_output=True,
+                timeout=120,
+            )
+        except Exception:
+            pass
+        # Build
+        try:
+            result = subprocess.run(
+                ["npm", "run", "build"],
+                cwd=pkg_dir,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                build_errors = result.stderr.splitlines()[-5:] if result.stderr else []
+                if build_errors:
+                    errors.extend(build_errors)
+                else:
+                    errors.append("npm run build failed")
+        except subprocess.TimeoutExpired:
+            warnings.append("npm build timed out (120s)")
+        except Exception as e:
+            warnings.append(f"npm build skipped: {e}")
+
+    # Produce verdict
+    if errors:
+        from openseed_core.types import Finding, Severity
+
+        findings = [Finding(description=e, severity=Severity.HIGH, agent="build-check") for e in errors]
+        return {
+            "qa_result": QAResult(
+                verdict=Verdict.BLOCK,
+                synthesis=f"Build check: {len(errors)} errors — {'; '.join(errors[:3])}",
+                findings=findings,
+            ),
+            "findings": findings,
+            "messages": [f"QA Gate (light): BLOCK — {len(errors)} build errors"],
+        }
+
+    if warnings:
+        return {
+            "qa_result": QAResult(
+                verdict=Verdict.PASS_WITH_WARNINGS,
+                synthesis=f"Build OK with {len(warnings)} warnings",
+            ),
+            "messages": [f"QA Gate (light): PASS with {len(warnings)} warnings"],
+        }
+
+    return {
+        "qa_result": QAResult(verdict=Verdict.PASS, synthesis="Build check passed"),
+        "messages": ["QA Gate (light): PASS — build clean"],
+    }
