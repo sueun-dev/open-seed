@@ -1,0 +1,56 @@
+- generic [active] [ref=e1]:
+  - link "Skip to main content" [ref=e2] [cursor=pointer]:
+    - /url: "#todo-main"
+  - main [ref=e3]:
+    - region "todo.local" [ref=e4]:
+      - generic [ref=e5]:
+        - paragraph [ref=e6]: Express + SQLite
+        - heading "todo.local" [level=1] [ref=e7]
+        - paragraph [ref=e8]: Capture work, finish it, and keep the list small enough to trust.
+      - complementary "Display settings and counts" [ref=e9]:
+        - button "Change color theme" [ref=e10] [cursor=pointer]: "Theme: System"
+        - generic "Task summary" [ref=e11]:
+          - generic [ref=e12]:
+            - term [ref=e13]: Total
+            - definition [ref=e14]: "1"
+          - generic [ref=e15]:
+            - term [ref=e16]: Open
+            - definition [ref=e17]: "1"
+          - generic [ref=e18]:
+            - term [ref=e19]: Done
+            - definition [ref=e20]: "0"
+    - region "Todo workspace" [ref=e21]:
+      - region "Add a task" [ref=e22]:
+        - generic [ref=e24]:
+          - heading "Add a task" [level=2] [ref=e25]
+          - paragraph [ref=e26]: Blank entries are blocked. Titles can be edited later.
+        - generic [ref=e27]:
+          - generic [ref=e28]: Task title
+          - generic [ref=e29]:
+            - textbox "Task title" [ref=e30]:
+              - /placeholder: Ship the SQLite-backed todo app
+            - button "Add task" [ref=e31] [cursor=pointer]
+          - paragraph [ref=e32]: Keep titles short and action-first.
+        - status [ref=e33]: Loaded 1 task.
+      - region "Tasks" [ref=e34]:
+        - generic [ref=e36]:
+          - heading "Tasks" [level=2] [ref=e37]
+          - paragraph [ref=e38]: Load on startup, edit inline, toggle complete, or remove.
+        - list [ref=e39]:
+          - listitem [ref=e40]:
+            - generic [ref=e41]:
+              - generic [ref=e42]:
+                - checkbox "Mark task complete" [ref=e43]
+                - generic [ref=e45]: Toggle task completion
+              - generic [ref=e46]:
+                - paragraph [ref=e47]: Buy milk
+                - paragraph [ref=e48]: Open
+                - generic [ref=e49]:
+                  - generic [ref=e50]: Edit title for "Buy milk"
+                  - textbox "Edit title for \"Buy milk\"" [ref=e51]: Buy milk
+                  - generic [ref=e52]:
+                    - button "Save" [ref=e53] [cursor=pointer]
+                    - button "Cancel" [ref=e54] [cursor=pointer]
+              - generic [ref=e55]:
+                - button "Edit" [ref=e56] [cursor=pointer]
+                - button "Delete" [ref=e57] [cursor=pointer]

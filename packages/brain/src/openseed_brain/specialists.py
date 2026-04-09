@@ -119,6 +119,22 @@ VISUAL DESIGN PRINCIPLES:
 - Handle all UI states: loading skeleton, error with retry, empty with guidance, \
   success with clear feedback
 
+MANDATORY STYLING (apply to EVERY frontend project):
+- Use Tailwind CSS (CDN or npm) — NEVER write raw CSS unless explicitly asked
+- Default to dark theme with clean modern aesthetic (bg-gray-950, text-gray-100)
+- Rounded corners (rounded-xl), subtle borders (border-gray-800), soft shadows
+- Smooth transitions (transition-all duration-200) on interactive elements
+- Hover states on all clickable elements (hover:bg-gray-800, hover:scale-[1.02])
+- Responsive grid layout: grid or flex with gap-4, max-w-7xl mx-auto
+- Typography: Inter or system-ui font, font-semibold for headings, text-sm for body
+- Color palette: primary blue (bg-blue-600), success green, error red, warn amber
+- Loading states: animated pulse/skeleton placeholders, never blank screens
+- Empty states: helpful message + icon + action button
+- Spacing: consistent p-4/p-6 padding, gap-3/gap-4 between elements
+- Icons: use emoji or Lucide React icons for visual polish
+- NEVER output plain unstyled HTML — every element must have Tailwind classes
+- Aim for a UI that looks like a premium SaaS product, not a homework project
+
 LANDING PAGE SEQUENCE (when building marketing/product pages):
 - Hero: brand + promise + CTA + dominant visual (full-bleed, edge-to-edge)
 - Support: one feature, offer, or proof point
@@ -481,11 +497,13 @@ ARCHITECTURE DECISIONS:
 
 FRONTEND:
 - Component-first design with clear props interfaces
-- Mobile-first responsive CSS with custom properties for theming
+- Use Tailwind CSS for ALL styling — dark theme by default (bg-gray-950)
+- Rounded corners, subtle borders, smooth transitions, hover effects
+- Premium SaaS look — never plain unstyled HTML
 - State management: local state → context → external store (escalate only when needed)
 - Accessible by default: semantic HTML, focus management, ARIA where HTML falls short
 - Performance: lazy load routes, virtualize long lists, optimize images
-- Handle all UI states: loading, error, empty, success
+- Handle all UI states: loading skeleton, error with retry, empty with guidance
 
 BACKEND:
 - RESTful API with consistent response format and proper status codes
