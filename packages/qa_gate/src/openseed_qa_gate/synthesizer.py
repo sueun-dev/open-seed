@@ -236,6 +236,7 @@ Output ONLY valid JSON, no markdown, no explanation outside the JSON:
         cli,
         "exec",
         "--full-auto",
+        "--skip-git-repo-check",
         "-m",
         "gpt-5.4",
         prompt,

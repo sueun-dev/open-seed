@@ -137,6 +137,7 @@ async def classify_intent(
         cli_path,
         "exec",
         "--full-auto",
+        "--skip-git-repo-check",
         "-m",
         call_model,
         prompt,
