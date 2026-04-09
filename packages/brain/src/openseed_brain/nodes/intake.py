@@ -620,39 +620,45 @@ Task: {task}
 Working directory: {working_dir}
 {context_block}{answers_context}
 
-Respond with EXACTLY this structure:
-INTENT: <implementation|fix|research|investigation|evaluation|open_ended>
-COMPLEXITY: <simple|moderate|complex>
-SKIP_PLANNING: <yes|no>
-EXISTING_PROJECT: <yes|no>
+Respond with EXACTLY this structure (replace ALL example values with REAL content for this task):
+
+INTENT: implementation
+COMPLEXITY: moderate
+SKIP_PLANNING: no
+EXISTING_PROJECT: no
 REQUIREMENTS:
-- <requirement 1>
-- <requirement 2>
-APPROACH: <1-2 sentence approach>
-LESSONS: <any relevant lessons from past experiences, or "none">
+- Create Express REST API with CRUD endpoints for todos
+- Use SQLite with better-sqlite3 for persistence
+APPROACH: Build Express backend with SQLite, serve a simple React frontend from the same server
+LESSONS: none
 
 PLAN:
-<A clear, step-by-step execution plan in 3-8 steps. Each step should be one sentence.>
+1. Create package.json with express, better-sqlite3, and cors dependencies
+2. Create server.js with Express app, SQLite database initialization, and CRUD routes
+3. Create public/index.html with React CDN and todo UI components
+4. Add error handling middleware and input validation
+5. Verify server starts and all endpoints respond correctly
 
 SCOPE:
-- MODIFY: <comma-separated list of existing files/dirs that WILL be changed>
-- CREATE: <comma-separated list of new files/dirs to create>
-- DO_NOT_TOUCH: <comma-separated list of files/dirs that must NOT be modified>
+- MODIFY: none
+- CREATE: package.json, server.js, public/index.html, db/init.sql
+- DO_NOT_TOUCH: AGENTS.md, CLAUDE.md
 
 DONE_WHEN:
-- <success criterion 1: specific, testable condition>
-- <success criterion 2>
-- <success criterion 3>
+- npm install completes without errors
+- node server.js starts the server on port 3000
+- GET /api/todos returns an empty array initially
+- POST /api/todos creates a new todo and returns it
 
-Rules:
-- PLAN must incorporate the user's answers to your earlier questions.
-- SCOPE must be specific. List actual file paths where possible based on codebase analysis.
-- DONE_WHEN must be concrete and verifiable (e.g. "Server starts without errors", "All tests pass").
-- DO_NOT_TOUCH should include core config files, unrelated modules, etc.
-
-Be concise. No extra prose outside the structure.""",
+CRITICAL RULES:
+- Do NOT use placeholder text like "requirement 1" or "success criterion 1" — write REAL content
+- Do NOT copy the example above — write a NEW plan specific to this task
+- PLAN must incorporate the user's answers to the earlier questions
+- SCOPE must list actual file paths
+- DONE_WHEN must be concrete and testable
+- Be concise. No extra prose outside the structure.""",
         model="xhigh",
-        max_turns=3,
+        max_turns=1,
     )
 
     analysis_text = response.text
