@@ -1,0 +1,35 @@
+- generic [ref=e3]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: Projects
+      - button "«" [ref=e8] [cursor=pointer]
+    - generic [ref=e9]:
+      - button "+ Add Folder" [ref=e10] [cursor=pointer]:
+        - generic [ref=e11]: +
+        - text: Add Folder
+      - button "+ New Thread" [ref=e12] [cursor=pointer]:
+        - generic [ref=e13]: +
+        - text: New Thread
+    - generic [ref=e15]:
+      - generic [ref=e16]: No projects yet.
+      - button "+ Add folder" [ref=e17] [cursor=pointer]
+    - generic [ref=e18]:
+      - generic [ref=e19]: Open Seed v2.0
+      - generic [ref=e20]: 0 projects
+  - generic [ref=e21]:
+    - generic [ref=e22]:
+      - generic [ref=e23]:
+        - generic [ref=e24]: Open Seed
+        - generic [ref=e25]: v2
+      - generic [ref=e26]:
+        - button "⚙" [ref=e27] [cursor=pointer]
+        - generic [ref=e28]: No project selected
+    - generic [ref=e29]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: 📁
+        - heading "Drop a folder to start" [level=2] [ref=e33]
+        - paragraph [ref=e34]: Drag a project folder here, or click the button below to browse. Each folder becomes a workspace. All tasks run inside it.
+        - button "📁 Browse for folder" [ref=e35] [cursor=pointer]
+      - generic [ref=e37] [cursor=pointer]:
+        - generic [ref=e38]: ▲
+        - generic [ref=e39]: Terminal
