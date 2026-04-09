@@ -115,6 +115,7 @@ class FactExtractor:
             cli,
             "exec",
             "--full-auto",
+            "--skip-git-repo-check",
             "-m",
             self._model,
             prompt,

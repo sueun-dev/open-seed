@@ -67,6 +67,7 @@ async def _call_claude(
             cli_path,
             "exec",
             "--full-auto",
+            "--skip-git-repo-check",
             "-m",
             model,
             prompt,

@@ -106,6 +106,7 @@ class CodexAgent:
             if use_auto:
                 cmd.append("--full-auto")
             cmd.append("--ephemeral")  # Don't persist session files
+            cmd.append("--skip-git-repo-check")  # Allow running outside git repos
 
             # Model selection
             if resolved_model:
