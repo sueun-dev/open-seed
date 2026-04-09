@@ -2,7 +2,9 @@
 Open Seed v2 — Shared subprocess runner.
 
 Async subprocess execution with timeout, streaming, and OOM guard.
-Used by both claude (Claude CLI) and codex (Codex CLI).
+Two timeout layers:
+  1. Hard timeout — total wall-clock limit (kills process)
+  2. Idle timeout — kills if no output for N seconds (catches hangs)
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,6 +42,7 @@ async def run_streaming(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     timeout_seconds: int = 600,
+    idle_timeout_seconds: int = 120,
     on_line: Any | None = None,
 ) -> SubprocessResult:
     """
@@ -48,7 +52,8 @@ async def run_streaming(
         command: Command and arguments
         cwd: Working directory
         env: Environment variables (merged with current)
-        timeout_seconds: Max execution time
+        timeout_seconds: Max total wall-clock time
+        idle_timeout_seconds: Kill if no output for this many seconds
         on_line: Optional async callback for each StreamLine
 
     Returns:
@@ -57,7 +62,6 @@ async def run_streaming(
     import os
 
     full_env = {**os.environ, **(env or {})}
-    # Remove CLAUDECODE to allow nested Claude CLI calls (e.g., when server runs inside Claude Code)
     full_env.pop("CLAUDECODE", None)
 
     process = await asyncio.create_subprocess_exec(
@@ -68,19 +72,21 @@ async def run_streaming(
         cwd=cwd,
         env=full_env,
     )
-    # Close stdin immediately so child process doesn't wait for input
     if process.stdin:
         process.stdin.close()
 
     lines: list[StreamLine] = []
     stdout_parts: list[str] = []
     stderr_parts: list[str] = []
+    last_activity = time.monotonic()
 
     async def read_stream(stream: asyncio.StreamReader, source: str) -> None:
+        nonlocal last_activity
         while True:
             line_bytes = await stream.readline()
             if not line_bytes:
                 break
+            last_activity = time.monotonic()
             text = line_bytes.decode("utf-8", errors="replace").rstrip("\n")
             if source == "stdout":
                 stdout_parts.append(text)
@@ -101,14 +107,27 @@ async def run_streaming(
                 with contextlib.suppress(Exception):
                     await on_line(sl)
 
+    async def idle_watchdog() -> None:
+        """Kill process if no output for idle_timeout_seconds."""
+        while process.returncode is None:
+            await asyncio.sleep(5)
+            idle = time.monotonic() - last_activity
+            if idle > idle_timeout_seconds:
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
+                return
+
     timed_out = False
     try:
         assert process.stdout is not None
         assert process.stderr is not None
+
+        # Run readers + idle watchdog, with hard timeout on top
         await asyncio.wait_for(
             asyncio.gather(
                 read_stream(process.stdout, "stdout"),
                 read_stream(process.stderr, "stderr"),
+                idle_watchdog(),
             ),
             timeout=timeout_seconds,
         )
@@ -120,7 +139,6 @@ async def run_streaming(
         with contextlib.suppress(Exception):
             await process.wait()
     except Exception:
-        # Ensure process is always cleaned up (prevents zombie processes)
         with contextlib.suppress(ProcessLookupError):
             process.kill()
         with contextlib.suppress(Exception):
