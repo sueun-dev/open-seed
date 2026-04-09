@@ -1209,15 +1209,22 @@ async def _auto_harness_setup(
         scaffold_files = generate_scaffold(scan)
 
         # Step 2: AI enhancement — fill TODOs with project-specific content
-        ai_guide = get_ai_guide()
-        enhanced_files = await _enhance_scaffold_with_ai(
-            scaffold_files,
-            scan,
-            ai_guide,
-            working_dir,
-            provider,
-            project_description,
-        )
+        # Skip AI enhancement for empty/new projects (no source files to analyze)
+        # — deterministic scaffold is good enough, saves 2-3 codex cold starts
+        has_source_files = bool(scan.languages) and len(scan.languages) > 0
+        if has_source_files and project_description.strip():
+            ai_guide = get_ai_guide()
+            enhanced_files = await _enhance_scaffold_with_ai(
+                scaffold_files,
+                scan,
+                ai_guide,
+                working_dir,
+                provider,
+                project_description,
+            )
+        else:
+            enhanced_files = scaffold_files
+            logger.info("Harness: skipping AI enhancement (new project, using deterministic scaffold)")
 
         # Step 3: Write files to disk
         import os
