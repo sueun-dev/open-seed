@@ -38,7 +38,7 @@ _skills_cache: list[OfficialSkill] | None = None
 
 
 def _parse_frontmatter(text: str) -> dict[str, str]:
-    """Parse YAML-like frontmatter from SKILL.md."""
+    """Parse YAML-like frontmatter from SKILL.md (supports multiline values)."""
     if not text.startswith("---"):
         return {}
     end = text.find("---", 3)
@@ -46,13 +46,43 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
         return {}
     block = text[3:end].strip()
     result: dict[str, str] = {}
+    current_key = ""
+    current_value_lines: list[str] = []
+
     for line in block.splitlines():
+        # Indented line = continuation of multiline value
+        if line.startswith("  ") and current_key:
+            current_value_lines.append(line.strip())
+            continue
+
+        # Save previous key if exists
+        if current_key and current_value_lines:
+            result[current_key] = " ".join(current_value_lines)
+        elif current_key:
+            pass  # key with empty value
+
+        # Parse new key:value
+        current_key = ""
+        current_value_lines = []
         if ":" in line:
             key, _, value = line.partition(":")
             key = key.strip()
             value = value.strip().strip('"').strip("'")
-            if key and value:
-                result[key] = value
+            if key:
+                current_key = key
+                if value and value != "|":
+                    result[key] = value
+                    current_key = "" if value != "|" else key
+                elif value == "|":
+                    current_value_lines = []  # will collect indented lines
+                else:
+                    result[key] = ""
+                    current_key = ""
+
+    # Don't forget last key
+    if current_key and current_value_lines:
+        result[current_key] = " ".join(current_value_lines)
+
     return result
 
 
@@ -61,8 +91,7 @@ def _scan_skills_dir() -> list[OfficialSkill]:
     skills: list[OfficialSkill] = []
 
     if not _SKILLS_DIR.is_dir():
-        logger.warning("Skills directory not found: %s", _SKILLS_DIR)
-        return skills
+        logger.debug("Project skills directory not found: %s (checking user skills)", _SKILLS_DIR)
 
     # Anthropic skills: skills/anthropic/skills/<name>/SKILL.md
     anthropic_dir = _SKILLS_DIR / "anthropic" / "skills"
@@ -127,11 +156,57 @@ def _scan_skills_dir() -> list[OfficialSkill]:
                 except Exception as exc:
                     logger.debug("Failed to load skill %s: %s", entry.name, exc)
 
+    # gstack skills: ~/.claude/skills/gstack/<name>/SKILL.md
+    gstack_dir = Path.home() / ".claude" / "skills" / "gstack"
+    if gstack_dir.is_dir():
+        for entry in sorted(gstack_dir.iterdir()):
+            skill_md = entry / "SKILL.md"
+            if entry.is_dir() and skill_md.exists():
+                try:
+                    text = skill_md.read_text(encoding="utf-8", errors="ignore")
+                    fm = _parse_frontmatter(text)
+                    skills.append(
+                        OfficialSkill(
+                            name=fm.get("name", f"gstack-{entry.name}"),
+                            description=fm.get("description", ""),
+                            source="gstack",
+                            category="community",
+                            path=str(skill_md),
+                        )
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to load gstack skill %s: %s", entry.name, exc)
+
+    # User skills from ~/.claude/skills/ (non-gstack)
+    user_skills_dir = Path.home() / ".claude" / "skills"
+    if user_skills_dir.is_dir():
+        for entry in sorted(user_skills_dir.iterdir()):
+            if entry.name == "gstack" or not entry.is_dir():
+                continue
+            skill_md = entry / "SKILL.md"
+            if skill_md.exists():
+                try:
+                    text = skill_md.read_text(encoding="utf-8", errors="ignore")
+                    fm = _parse_frontmatter(text)
+                    skills.append(
+                        OfficialSkill(
+                            name=fm.get("name", entry.name),
+                            description=fm.get("description", ""),
+                            source="user",
+                            category="custom",
+                            path=str(skill_md),
+                        )
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to load user skill %s: %s", entry.name, exc)
+
     logger.info(
-        "Loaded %d skills (%d anthropic, %d openai)",
+        "Loaded %d skills (%d anthropic, %d openai, %d gstack, %d user)",
         len(skills),
         sum(1 for s in skills if s.source == "anthropic"),
         sum(1 for s in skills if s.source == "openai"),
+        sum(1 for s in skills if s.source == "gstack"),
+        sum(1 for s in skills if s.source == "user"),
     )
     return skills
 
