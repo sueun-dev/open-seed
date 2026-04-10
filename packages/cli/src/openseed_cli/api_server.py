@@ -36,12 +36,32 @@ app.add_middleware(
 # Active WebSocket connections for event streaming
 _ws_clients: list[WebSocket] = []
 
-# Current pipeline state (simplified — will be replaced with proper state management)
+# Current pipeline state — scoped by run_id to prevent cross-run leakage
 _current_run: dict[str, Any] | None = None
 
-# Cached diagram results per working directory
+# Cached diagram results — keyed by (working_dir, content_hash) to prevent stale cache
 _diagram_cache: dict[str, dict[str, Any]] = {}
 _diagram_generating: set[str] = set()
+
+
+def _dir_content_hash(working_dir: str) -> str:
+    """Quick hash of directory structure to detect project changes."""
+    import hashlib
+    import os
+
+    h = hashlib.md5()
+    try:
+        for root, dirs, files in os.walk(working_dir):
+            dirs[:] = [d for d in sorted(dirs) if d not in ("node_modules", ".git", "__pycache__", ".venv", "dist")]
+            depth = root.replace(working_dir, "").count(os.sep)
+            if depth > 2:
+                dirs.clear()
+                continue
+            for f in sorted(files):
+                h.update(f.encode())
+    except OSError:
+        pass
+    return h.hexdigest()[:12]
 
 
 # ─── Models ───────────────────────────────────────────────────────────────────
@@ -677,10 +697,19 @@ async def start_run(req: RunRequest) -> dict:
     """Start a pipeline run. Events streamed via WebSocket."""
     global _current_run
 
+    import uuid
+
     if _current_run and _current_run.get("status") == "running":
         return JSONResponse(status_code=409, content={"error": "Pipeline already running"})
 
-    _current_run = {"task": req.task, "status": "running", "messages": []}
+    run_id = str(uuid.uuid4())[:8]
+    _current_run = {
+        "run_id": run_id,
+        "task": req.task,
+        "working_dir": req.working_dir,
+        "status": "running",
+        "messages": [],
+    }
 
     # Run pipeline in background
     asyncio.create_task(
@@ -694,7 +723,7 @@ async def start_run(req: RunRequest) -> dict:
         )
     )
 
-    return {"status": "started", "task": req.task}
+    return {"status": "started", "task": req.task, "run_id": run_id}
 
 
 @app.get("/api/status")
@@ -708,9 +737,10 @@ async def get_status() -> dict:
 async def get_diagram(working_dir: str = ".") -> dict:
     """Get cached diagram. Does NOT auto-trigger generation — use POST /api/diagram/generate."""
     wd = str(Path(working_dir).resolve())
+    cache_key = f"{wd}:{_dir_content_hash(wd)}"
 
-    if wd in _diagram_cache:
-        return _diagram_cache[wd]
+    if cache_key in _diagram_cache:
+        return _diagram_cache[cache_key]
 
     if wd in _diagram_generating:
         return {"status": "generating"}
@@ -726,8 +756,10 @@ async def trigger_diagram(body: dict) -> dict:
     if wd in _diagram_generating:
         return {"status": "generating"}
 
-    # Clear cache and regenerate
-    _diagram_cache.pop(wd, None)
+    # Clear stale cache for this dir (any hash)
+    stale_keys = [k for k in _diagram_cache if k.startswith(f"{wd}:")]
+    for k in stale_keys:
+        del _diagram_cache[k]
     gen = body.get("generator", "codex")
     ver = body.get("verifier", "codex")
     asyncio.create_task(_generate_diagram_bg(wd, generator=gen, verifier=ver))
@@ -743,7 +775,8 @@ async def _generate_diagram_bg(working_dir: str, generator: str = "codex", verif
         from openseed_brain.nodes.diagram import generate_diagram
 
         result = await generate_diagram(working_dir, generator=generator, verifier=verifier)
-        _diagram_cache[working_dir] = result
+        cache_key = f"{working_dir}:{_dir_content_hash(working_dir)}"
+        _diagram_cache[cache_key] = result
 
         await _broadcast(
             {
@@ -1215,3 +1248,7 @@ async def _execute_pipeline(
         await _broadcast({"type": "pipeline.fail", "node": "brain", "data": {"error": str(e), "message": str(e)}})
     finally:
         set_progress_callback(None)  # Clean up callback
+        # Allow next run — mark as done so 409 doesn't block forever
+        if _current_run and _current_run.get("status") == "running":
+            _current_run["status"] = "failed"
+            _current_run["error"] = "Pipeline ended unexpectedly"

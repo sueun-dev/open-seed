@@ -46,6 +46,7 @@ type ThreadUIState = {
   planReview: PlanState | null;
   intakeLoading: boolean;
   provider: "codex" | "debate";
+  workingDir: string;  // Track which dir this state belongs to
 };
 
 const DEFAULT_UI_STATE: ThreadUIState = {
@@ -54,6 +55,7 @@ const DEFAULT_UI_STATE: ThreadUIState = {
   planReview: null,
   intakeLoading: false,
   provider: "codex",
+  workingDir: "",
 };
 
 type HarnessStatus = {
@@ -117,18 +119,26 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       planReview,
       intakeLoading,
       provider,
+      workingDir,
     });
-  }, [task, clarification, planReview, intakeLoading, provider]);
+  }, [task, clarification, planReview, intakeLoading, provider, workingDir]);
 
-  // Restore UI state for a thread
+  // Restore UI state for a thread — invalidate if workingDir changed
   const restoreUIState = useCallback((threadId: string) => {
     const saved = uiStatesRef.current.get(threadId);
     if (saved) {
       setTask(saved.task);
-      setClarification(saved.clarification);
-      setPlanReview(saved.planReview);
-      setIntakeLoading(saved.intakeLoading);
       setProvider(saved.provider);
+      // If workingDir changed since this state was saved, discard stale plan/clarification
+      if (saved.workingDir === workingDir) {
+        setClarification(saved.clarification);
+        setPlanReview(saved.planReview);
+        setIntakeLoading(saved.intakeLoading);
+      } else {
+        setClarification(null);
+        setPlanReview(null);
+        setIntakeLoading(false);
+      }
     } else {
       setTask("");
       setClarification(null);
@@ -307,6 +317,7 @@ export default function AGIMode({ activeThread, workingDir, setWorkingDir, creat
       planReview: null,
       intakeLoading: false,
       provider,
+      workingDir,
     });
 
     try {

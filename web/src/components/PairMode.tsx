@@ -33,7 +33,16 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
   const pairFunText = useFunMessages(streaming);
   const [diffs, setDiffs] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [provider, setProvider] = useState<"claude" | "codex" | "both">("claude");
+  const prevWorkingDirRef = useRef(workingDir);
+  const [provider, setProvider] = useState<"codex" | "debate">("codex");
+
+  // Clear session when working directory changes (prevents stale context)
+  useEffect(() => {
+    if (workingDir !== prevWorkingDirRef.current) {
+      setSessionId(null);
+      prevWorkingDirRef.current = workingDir;
+    }
+  }, [workingDir]);
   const [rightTab, setRightTab] = useState<"chat" | "changes">("chat");
   const [changedFiles, setChangedFiles] = useState<string[]>([]);
 
@@ -81,7 +90,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
 
     // WebSocket for debate events (Both mode)
     let ws: WebSocket | null = null;
-    if (provider === "both") {
+    if (provider === "debate") {
       try {
         ws = new WebSocket(`ws://${location.host}/ws/events`);
         ws.onmessage = (e) => {
@@ -90,8 +99,8 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
             if (event.type === "debate.start") {
               setMessages((prev) => [...prev, { role: "assistant", content: "⚡ " + event.data.message, timestamp: new Date().toISOString() }]);
             } else if (event.type === "debate.opinion") {
-              const icon = event.data.speaker === "claude" ? "🟣" : "🟢";
-              const name = event.data.speaker === "claude" ? "Claude" : "Codex";
+              const icon = event.data.speaker === "engineer_a" ? "🔵" : "🟢";
+              const name = event.data.speaker === "engineer_a" ? "Engineer A" : "Engineer B";
               setMessages((prev) => [...prev, { role: "assistant", content: `${icon} **${name}:**\n${event.data.message}`, timestamp: new Date().toISOString() }]);
             } else if (event.type === "debate.deciding") {
               setMessages((prev) => [...prev, { role: "assistant", content: "⚖️ " + event.data.message, timestamp: new Date().toISOString() }]);
@@ -199,7 +208,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
           </button>
           {/* Provider indicator */}
           <div style={{ marginLeft: "auto", fontSize: 10, color: "#444", paddingRight: 8 }}>
-            {provider === "claude" ? "🟣" : provider === "codex" ? "🟢" : "⚡"}
+            {provider === "codex" ? "🟢" : "⚡"}
           </div>
         </div>
 
@@ -218,7 +227,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
                   </div>
                   {/* Provider selector */}
                   <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                    {(["claude", "codex", "both"] as const).map((p) => (
+                    {(["codex", "debate"] as const).map((p) => (
                       <button key={p} onClick={() => setProvider(p)} style={{
                         padding: "5px 10px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer",
                         border: provider === p ? "1px solid #2563eb" : "1px solid #222",
@@ -226,7 +235,7 @@ export default function PairMode({ activeThread, workingDir, setWorkingDir, crea
                         color: provider === p ? "#60a5fa" : "#666",
                         transition: "all 0.15s",
                       }}>
-                        {p === "claude" ? "🟣 Claude" : p === "codex" ? "🟢 Codex" : "⚡ Both"}
+                        {p === "codex" ? "🟢 Codex" : "⚡ Debate"}
                       </button>
                     ))}
                   </div>
