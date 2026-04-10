@@ -148,9 +148,9 @@ class CodexAgent:
                         text=line.text[:500],
                     )
 
-            # Timeout: use max_turns for calculation, or config default
+            # Timeout: max_turns * 30s per turn, capped at 10 minutes absolute max
             turns = max_turns or self.config.max_turns
-            timeout = turns * 60
+            timeout = min(turns * 30, 600)  # 30s per turn, max 10 min
 
             start = time.monotonic()
 
@@ -158,6 +158,7 @@ class CodexAgent:
                 cmd,
                 cwd=None,  # -C handles working dir
                 timeout_seconds=timeout,
+                idle_timeout_seconds=60,  # Kill if no output for 60s
                 on_line=on_line,
             )
 
