@@ -1,17 +1,61 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/AGI-Autonomous_Coding_Engine-blue?style=for-the-badge" alt="AGI Badge">
+  <img src="https://img.shields.io/badge/Status-Legacy_(Paused)-orange?style=for-the-badge" alt="Status">
   <img src="https://img.shields.io/badge/v2.1-GPT--5.4_Powered-purple?style=for-the-badge" alt="v2.1">
-  <img src="https://img.shields.io/badge/OAuth-$0_Cost-green?style=for-the-badge" alt="OAuth">
   <img src="https://img.shields.io/badge/Tests-525_Passing-brightgreen?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License">
 </p>
 
-<h1 align="center">Open Seed v2.1</h1>
+<h1 align="center">Open Seed v2.1 <sup>(Legacy)</sup></h1>
 
 <p align="center">
-  <b>Autonomous AGI Coding Engine powered by GPT-5.4</b><br>
-  <sub>Give it a task. It understands, plans, builds, reviews, fixes, deploys, and remembers. Fully autonomous. Zero cost.</sub>
+  <b>An attempt to build a fully autonomous AGI coding engine. Paused for now.</b><br>
+  <sub>Will return with a better approach.</sub>
 </p>
+
+---
+
+## Postmortem: What Happened
+
+We tried to build an autonomous coding pipeline that takes a single sentence and outputs a working, deployed application — zero human intervention. The 7-node pipeline (intake → plan → implement → QA → fix → deploy → memorize) **works end-to-end**, but hit fundamental walls that make it impractical in its current form.
+
+### What Worked
+- **Pipeline architecture** — 7 LangGraph nodes with retry, checkpoint, and streaming. Solid foundation.
+- **Harness engineering** — Auto-generated AGENTS.md, quality scoring, propagation to all nodes.
+- **QA Gate** — 136 specialist agents with LLM selection and synthesis. Catches real bugs.
+- **Memory system** — Fact extraction, failure learning, vector search. Each run genuinely makes the next smarter.
+- **525 unit tests passing**, architecture enforcement, clean CI.
+
+### What Didn't Work
+- **Codex CLI subprocess overhead** — Every AI call spawns a new `codex exec` process. Cold start ~20-30s per call. A single pipeline run takes 20-40 minutes. Unusable for iterative development.
+- **OAuth-only constraint** — Anthropic banned third-party OAuth usage, forcing a full migration from Claude to GPT-5.4 via Codex CLI. API keys would have been 10x faster (streaming, no cold start) but we committed to $0 cost.
+- **Fix loop spiral** — QA finds 20 issues → fix attempts 1 file → QA finds 19 issues → repeat 10 times. Each cycle is ~10 minutes. Some runs never converge.
+- **Specialist file writing** — Codex CLI refuses to write files outside git repos (`--skip-git-repo-check` needed), silently fails in non-trusted directories, and hangs indefinitely when given too many files (30+ files to one specialist = 1+ hours).
+- **Prompt fragility** — GPT-5.4 copies placeholder text verbatim (`<question text>`, `<requirement 1>`). Every prompt needed real examples + "DO NOT COPY" instructions. Claude handled abstract templates naturally; GPT doesn't.
+- **Stale cache bugs** — Plan from Project A leaked into Project B via localStorage/global state. Fixed 6 separate leakage vectors, but the pattern kept recurring.
+- **Mock data tendency** — AI defaulted to hardcoded fake data instead of connecting to real APIs. Required explicit "NEVER use mock data" rules.
+
+### Key Numbers
+| Metric | Value |
+|--------|-------|
+| Intake (question generation) | ~2-3 min |
+| Plan generation | ~1-2 min |
+| Implementation | ~10-15 min |
+| QA + Fix loop (per cycle) | ~10 min |
+| **Total pipeline (simple app)** | **20-40 min** |
+| Fix loop convergence rate | ~60% (some never finish) |
+
+### Lessons Learned
+1. **Subprocess-based AI is too slow.** Direct API streaming is the only viable path for interactive use.
+2. **Multi-agent orchestration needs shared context.** Each specialist working in isolation creates integration nightmares.
+3. **Fix loops need circuit breakers, not just retries.** Exponential backoff doesn't help when the fix strategy is wrong.
+4. **AI coding tools are assistants, not autonomous agents.** The gap between "helps you code" and "codes by itself" is enormous.
+
+### What's Next
+**Coming back with a fundamentally different approach.** The pipeline architecture and harness system are worth keeping. The execution layer needs a complete rethink — probably direct API calls, shared agent context, and human-in-the-loop at decision points instead of full autonomy.
+
+---
+
+## Original README (v2.1)
 
 ---
 
