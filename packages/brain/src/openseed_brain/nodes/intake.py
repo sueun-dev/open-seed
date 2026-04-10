@@ -42,11 +42,21 @@ async def intake_node(state: PipelineState) -> dict:
     existing = existing_raw if isinstance(existing_raw, dict) else None
     # Fast path: only use pre-approved plan if it has plan + scope + done_when
     # AND has clarification_answers (meaning user went through the full flow)
+    # AND plan references the current working_dir (not a stale cache from different project)
+    working_dir_check = True
+    if existing and existing.get("plan"):
+        plan_text = str(existing.get("plan", "")) + str(existing.get("scope", ""))
+        # If plan mentions a different absolute path, it's stale
+        if "/Users/" in plan_text and state["working_dir"] not in plan_text:
+            logger.warning("Intake: stale plan detected (references different working_dir), ignoring cache")
+            working_dir_check = False
+
     has_full_plan = (
         existing
         and existing.get("plan")
         and (existing.get("scope") or existing.get("done_when"))
         and state.get("clarification_answers")
+        and working_dir_check
     )
     if has_full_plan:
         logger.info("Intake: using pre-approved plan, sending to plan_node for structuring")
