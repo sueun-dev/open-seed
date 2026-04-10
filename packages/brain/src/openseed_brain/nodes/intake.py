@@ -45,11 +45,20 @@ async def intake_node(state: PipelineState) -> dict:
     # AND plan references the current working_dir (not a stale cache from different project)
     working_dir_check = True
     if existing and existing.get("plan"):
-        plan_text = str(existing.get("plan", "")) + str(existing.get("scope", ""))
-        # If plan mentions a different absolute path, it's stale
-        if "/Users/" in plan_text and state["working_dir"] not in plan_text:
-            logger.warning("Intake: stale plan detected (references different working_dir), ignoring cache")
+        # Check 1: if plan has _working_dir metadata, it must match current
+        cached_dir = existing.get("_working_dir", "")
+        if cached_dir and cached_dir != state["working_dir"]:
+            logger.warning("Intake: stale plan (_working_dir mismatch: %s vs %s)", cached_dir, state["working_dir"])
             working_dir_check = False
+        # Check 2: if plan text mentions absolute paths from a different dir
+        if working_dir_check:
+            plan_text = str(existing.get("plan", "")) + str(existing.get("scope", ""))
+            if ("/" in plan_text or "\\" in plan_text) and state["working_dir"] not in plan_text:
+                # Only reject if plan has absolute paths that don't match
+                import os
+                if os.sep in plan_text and state["working_dir"] not in plan_text:
+                    logger.warning("Intake: stale plan (path mismatch in plan text)")
+                    working_dir_check = False
 
     has_full_plan = (
         existing
@@ -275,7 +284,9 @@ async def _collect_context(task: str, working_dir: str) -> dict:
     # Intent classification removed — gap analysis (Opus) handles intent detection.
     # Intent classification removed — gap analysis handles intent detection.
 
-    # Memory recall
+    # Memory recall — scoped to current project when possible
+    import os
+
     try:
         from openseed_memory.failure import recall_similar_failures
         from openseed_memory.store import MemoryStore
@@ -283,7 +294,15 @@ async def _collect_context(task: str, working_dir: str) -> dict:
         store = MemoryStore()
         await store.initialize()
 
-        results = await store.search(task, limit=5)
+        # Try project-scoped search first, fall back to global
+        project_name = os.path.basename(working_dir) if working_dir else ""
+        results = await store.search(
+            task, limit=5,
+            filters={"working_dir": working_dir} if working_dir else None,
+        )
+        # If no project-scoped results, search globally
+        if not results:
+            results = await store.search(task, limit=5)
         if results:
             context["memory_context"] += "\n\nRelevant past experiences:\n"
             for r in results:
@@ -677,6 +696,7 @@ CRITICAL RULES:
     intake_analysis["plan"] = _parse_section(analysis_text, "PLAN")
     intake_analysis["scope"] = _parse_scope(analysis_text)
     intake_analysis["done_when"] = _parse_list_section(analysis_text, "DONE_WHEN")
+    intake_analysis["_working_dir"] = working_dir  # Cache key for stale plan detection
 
     if context["detected_tech_stack"]:
         intake_analysis["tech_stack"] = ", ".join(context["detected_tech_stack"])
