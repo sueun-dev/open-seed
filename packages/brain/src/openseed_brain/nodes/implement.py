@@ -41,7 +41,11 @@ non-interactive flags when available.
 and no syntax errors exist. Fix any issues you find before stopping.
 - ALL imports must point to files that exist. If file A imports from file B, file B MUST be written.
 - ALL TypeScript files must compile without errors. Use correct types, not `any`.
-- ALL API endpoints called by frontend MUST exist in the backend. Cross-check every fetch/axios call."""
+- ALL API endpoints called by frontend MUST exist in the backend. Cross-check every fetch/axios call.
+- NEVER use hardcoded mock data, fake data, or placeholder data. Always connect to REAL APIs, \
+real databases, or real data sources. If an external API is specified in the task (e.g. CoinGecko, \
+OpenWeather), fetch from it DIRECTLY. If no API is specified, use a real database (SQLite, etc.). \
+Mock data is NEVER acceptable in production code."""
 
 _RULES_WEB = """\
 - If package.json is needed, create it with all deps — DO NOT run npm install yourself, \
