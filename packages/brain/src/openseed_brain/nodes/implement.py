@@ -190,7 +190,9 @@ async def _run_specialist(
     intake = intake_raw if isinstance(intake_raw, dict) else {}
 
     # Build specialist prompt: base domain expertise + all assigned skill contents
-    specialist_prompt = _build_specialist_prompt(domain, tasks, intake)
+    # Strip chunk suffix (e.g. "frontend-2" → "frontend") for prompt lookup
+    base_domain = domain.rsplit("-", 1)[0] if "-" in domain and domain.rsplit("-", 1)[1].isdigit() else domain
+    specialist_prompt = _build_specialist_prompt(base_domain, tasks, intake)
 
     task_descriptions = "\n".join(f"- {t.description} (files: {', '.join(t.files)})" for t in tasks)
 
@@ -820,8 +822,32 @@ async def implement_node(state: PipelineState) -> dict:
             "messages": [f"Implement [fullstack-fallback]: {impl.summary[:300]}"] + extra,
         }
 
-    # Execute specialists in parallel
-    domain_tasks = [(domain, tasks) for domain, tasks in routed.items() if tasks]
+    # Execute specialists in parallel — split large domains into chunks
+    MAX_FILES_PER_SPECIALIST = 8
+
+    domain_tasks: list[tuple[str, list[PlanTask]]] = []
+    for domain, tasks in routed.items():
+        if not tasks:
+            continue
+        total_files = sum(len(t.files) for t in tasks)
+        if total_files > MAX_FILES_PER_SPECIALIST and len(tasks) > 1:
+            # Split into chunks so each specialist handles ≤ MAX_FILES_PER_SPECIALIST files
+            chunk: list[PlanTask] = []
+            chunk_files = 0
+            chunk_idx = 0
+            for t in tasks:
+                if chunk_files + len(t.files) > MAX_FILES_PER_SPECIALIST and chunk:
+                    chunk_idx += 1
+                    domain_tasks.append((f"{domain}-{chunk_idx}", chunk))
+                    chunk = []
+                    chunk_files = 0
+                chunk.append(t)
+                chunk_files += len(t.files)
+            if chunk:
+                chunk_idx += 1
+                domain_tasks.append((f"{domain}-{chunk_idx}" if chunk_idx > 1 else domain, chunk))
+        else:
+            domain_tasks.append((domain, tasks))
 
     domains_used = [d for d, _ in domain_tasks]
     task_counts = {d: len(t) for d, t in domain_tasks}
