@@ -246,8 +246,8 @@ async def _chat_debate(req: ChatRequest) -> tuple[str, str | None]:
 
     analysis_a, analysis_b = await asyncio.gather(task_a, task_b, return_exceptions=True)
 
-    text_a = analysis_a.text if not isinstance(analysis_a, Exception) else f"(Agent A error: {analysis_a})"
-    text_b = analysis_b.text if not isinstance(analysis_b, Exception) else f"(Agent B error: {analysis_b})"
+    text_a = analysis_a.text if not isinstance(analysis_a, BaseException) else f"(Agent A error: {analysis_a})"
+    text_b = analysis_b.text if not isinstance(analysis_b, BaseException) else f"(Agent B error: {analysis_b})"
 
     # Step 2: Show both analyses to user
     await _broadcast(
@@ -425,6 +425,7 @@ async def ws_terminal(ws: WebSocket) -> None:
                     continue
 
                 # Run command as subprocess
+                exit_code = 1
                 try:
                     current_process = subprocess.Popen(
                         cmd,
@@ -693,7 +694,7 @@ async def harness_setup(req: HarnessRequest) -> dict:
 
 
 @app.post("/api/run")
-async def start_run(req: RunRequest) -> dict:
+async def start_run(req: RunRequest) -> dict | JSONResponse:
     """Start a pipeline run. Events streamed via WebSocket."""
     global _current_run
 

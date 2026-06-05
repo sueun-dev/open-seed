@@ -5,6 +5,7 @@ Tests for advanced memory filters — AND/OR/NOT with comparison operators.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from openseed_memory.filters import build_sql_where, matches_filter
 
@@ -495,9 +496,14 @@ class TestStoreSearchWithFilters:
         from openseed_memory.store import MemoryStore
 
         tmp = tempfile.mktemp(suffix=".db")
-        cfg = MemoryConfig(backend="sqlite", sqlite_path=tmp)
+        cfg = MemoryConfig(backend="sqlite", sqlite_path=Path(tmp))
         store = MemoryStore(config=cfg)
-        asyncio.get_event_loop().run_until_complete(store.initialize())
+        # Establish a dedicated event loop for this test so the subsequent
+        # asyncio.get_event_loop() calls reuse it (Python 3.12 no longer
+        # auto-creates a loop for the main thread).
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(store.initialize())
         return store
 
     def test_store_search_with_filters(self):
@@ -554,9 +560,14 @@ class TestStoreGetAllWithFilters:
         from openseed_memory.store import MemoryStore
 
         tmp = tempfile.mktemp(suffix=".db")
-        cfg = MemoryConfig(backend="sqlite", sqlite_path=tmp)
+        cfg = MemoryConfig(backend="sqlite", sqlite_path=Path(tmp))
         store = MemoryStore(config=cfg)
-        asyncio.get_event_loop().run_until_complete(store.initialize())
+        # Establish a dedicated event loop for this test so the subsequent
+        # asyncio.get_event_loop() calls reuse it (Python 3.12 no longer
+        # auto-creates a loop for the main thread).
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(store.initialize())
         return store
 
     def test_store_get_all_with_filters(self):

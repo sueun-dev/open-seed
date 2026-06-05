@@ -677,8 +677,9 @@ class TestGitStashHelpers:
 
         (tmp_path / ".git").mkdir()
 
+        # SubprocessResult exposes exit_code (not returncode); match the real contract.
         mock_result = MagicMock()
-        mock_result.returncode = 0
+        mock_result.exit_code = 0
 
         with patch("openseed_core.subprocess.run_simple", new_callable=AsyncMock, return_value=mock_result):
             result = await _git_stash_push(str(tmp_path))

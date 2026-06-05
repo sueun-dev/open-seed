@@ -258,7 +258,7 @@ class WorkflowOrchestrator:
 
         specialist_results: list[SpecialistResult] = []
         for r in raw_results:
-            if isinstance(r, Exception):
+            if isinstance(r, BaseException):
                 specialist_results.append(
                     SpecialistResult(
                         agent_name="unknown",

@@ -110,7 +110,7 @@ async def run_specialists_node(state: QASubState) -> dict:
     # Collect findings from successful runs; ignore exceptions
     all_findings: list = []
     for r in results:
-        if isinstance(r, Exception):
+        if isinstance(r, BaseException):
             continue
         if hasattr(r, "findings") and r.findings:
             all_findings.extend(r.findings)
@@ -138,7 +138,7 @@ async def synthesize_node(state: QASubState) -> dict:
     )
 
     try:
-        synthesized_findings, synthesis_text = await synthesize(specialist_results, None)
+        synthesized_findings, synthesis_text, _ = await synthesize(specialist_results, None)
     except Exception as exc:
         synthesized_findings = findings
         synthesis_text = f"Synthesis error: {exc}"

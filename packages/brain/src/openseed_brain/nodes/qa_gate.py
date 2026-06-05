@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 
-from openseed_core.types import QAResult, Verdict
+from openseed_core.types import Plan, QAResult, Verdict
 
 from openseed_brain.state import PipelineState
 
@@ -123,7 +123,7 @@ async def qa_gate_node(state: PipelineState) -> dict:
         }
 
 
-async def _lightweight_qa(working_dir: str, plan: object | None) -> dict:
+async def _lightweight_qa(working_dir: str, plan: Plan | None) -> dict:
     """Fast QA after fix: build/lint check only, no full agent review.
 
     Runs deterministic checks (TypeScript compile, lint, file existence)

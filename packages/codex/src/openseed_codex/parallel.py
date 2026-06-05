@@ -165,7 +165,7 @@ async def run_parallel(
     all_succeeded = True
 
     for r in results:
-        if isinstance(r, Exception):
+        if isinstance(r, BaseException):
             all_succeeded = False
             responses.append(CodexResponse(text=str(r), exit_code=1))
         else:

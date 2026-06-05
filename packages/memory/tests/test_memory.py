@@ -379,7 +379,7 @@ class TestReranker:
         # No mock needed — short-circuits before any CLI call
         import asyncio
 
-        result = asyncio.get_event_loop().run_until_complete(reranker.rerank(query="q", results=single))
+        result = asyncio.run(reranker.rerank(query="q", results=single))
         assert result == single
 
     async def test_rerank_applies_llm_ordering(self) -> None:
