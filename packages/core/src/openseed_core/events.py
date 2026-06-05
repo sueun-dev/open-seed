@@ -10,7 +10,7 @@ Fire-and-forget events for CLI HUD and web UI.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -23,6 +23,7 @@ class EventType(StrEnum):
     PIPELINE_START = "pipeline.start"
     PIPELINE_COMPLETE = "pipeline.complete"
     PIPELINE_FAIL = "pipeline.fail"
+    PIPELINE_STREAM = "pipeline.stream"
 
     # Node lifecycle
     NODE_START = "node.start"
@@ -141,7 +142,7 @@ class EventBus:
         """Convenience: emit an event with keyword data and optional causality."""
         await self.emit(Event(type=event_type, node=node, data=data, cause_id=cause_id))
 
-    async def stream(self) -> asyncio.AsyncIterator[Event]:
+    async def stream(self) -> AsyncIterator[Event]:
         """Yield events as they arrive. Ends when close() is called."""
         while True:
             event = await self._queue.get()

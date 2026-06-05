@@ -136,8 +136,12 @@ async def verify_node(state: FixSubState) -> dict:
             working_dir=working_dir,
             expected_files=[],  # Subgraph does not know the manifest; broad check
         )
-        passed = result.get("passed", False)
-        summary = result.get("summary", "Verification complete")
+        passed = result.all_passed
+        if passed:
+            summary = "Verification complete"
+        else:
+            problems = result.missing_files + result.failing_commands
+            summary = "Verification failed: " + (", ".join(problems) if problems else "evidence checks did not pass")
     except Exception as exc:
         # Fallback: if sentinel is unavailable, fail safe — don't assume success
         passed = False

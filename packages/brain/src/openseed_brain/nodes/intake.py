@@ -285,8 +285,6 @@ async def _collect_context(task: str, working_dir: str) -> dict:
     # Intent classification removed — gap analysis handles intent detection.
 
     # Memory recall — scoped to current project when possible
-    import os
-
     try:
         from openseed_memory.failure import recall_similar_failures
         from openseed_memory.store import MemoryStore
@@ -295,7 +293,6 @@ async def _collect_context(task: str, working_dir: str) -> dict:
         await store.initialize()
 
         # Try project-scoped search first, fall back to global
-        project_name = os.path.basename(working_dir) if working_dir else ""
         results = await store.search(
             task, limit=5,
             filters={"working_dir": working_dir} if working_dir else None,

@@ -14,9 +14,14 @@ Escalation chain: retry → retry (different approach) → Insight → User
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from openseed_core.types import Error, Verdict
 
 from openseed_brain.state import PipelineState
+
+if TYPE_CHECKING:
+    from openseed_guard.insight import InsightAdvice
 
 
 async def sentinel_check_node(state: PipelineState) -> dict:
@@ -130,8 +135,16 @@ async def sentinel_check_node(state: PipelineState) -> dict:
 
     # ── QA FAILED — evaluate_loop for retry/insight/escalate ──
     try:
+        from openseed_core.types import QAResult
         from openseed_guard.evidence import verify_implementation
         from openseed_guard.loop import LoopState, evaluate_loop
+
+        # evaluate_loop requires a concrete QAResult; synthesize a failing one
+        # if QA never produced a result (e.g. the QA node errored upstream).
+        effective_qa = qa_result or QAResult(
+            verdict=Verdict.BLOCK,
+            synthesis="No QA result available",
+        )
 
         verification = await verify_implementation(working_dir=working_dir, expected_files=expected_files)
 
@@ -139,7 +152,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
             retry_count=retry_count,
             consecutive_failures=retry_count,
             failure_history=[
-                f"Attempt {i + 1}: {(qa_result.findings[i].description if qa_result and i < len(qa_result.findings) else 'unknown')}"
+                f"Attempt {i + 1}: {(effective_qa.findings[i].description if i < len(effective_qa.findings) else 'unknown')}"
                 for i in range(retry_count)
             ],
         )
@@ -151,7 +164,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
             harness_ctx = "\n".join(micro_ctx)
 
         decision = await evaluate_loop(
-            qa_result=qa_result,
+            qa_result=effective_qa,
             verification=verification,
             loop_state=loop_state,
             task=task + (f"\n\n[Harness rules]\n{harness_ctx}" if harness_ctx else ""),
@@ -441,7 +454,7 @@ async def _git_stash_push(working_dir: str) -> bool:
             cwd=working_dir,
             timeout_seconds=15,
         )
-        return result.returncode == 0
+        return result.exit_code == 0
     except Exception:
         return False
 
@@ -460,7 +473,7 @@ async def _git_stash_revert(working_dir: str) -> bool:
             cwd=working_dir,
             timeout_seconds=15,
         )
-        return result.returncode == 0
+        return result.exit_code == 0
     except Exception:
         return False
 
@@ -469,7 +482,7 @@ async def _consult_insight_for_fix(
     task: str,
     failure_history: list[str],
     qa_result: object | None,
-) -> object | None:
+) -> InsightAdvice | None:
     """Consult Insight (Opus with extended thinking) for a different strategy."""
     try:
         from openseed_guard.insight import consult_insight
