@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Legacy_(Paused)-orange?style=for-the-badge" alt="Status">
   <img src="https://img.shields.io/badge/v2.1-GPT--5.4_Powered-purple?style=for-the-badge" alt="v2.1">
-  <img src="https://img.shields.io/badge/Tests-525_Passing-brightgreen?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-532_Passing-brightgreen?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License">
 </p>
 
@@ -21,9 +21,9 @@ We tried to build an autonomous coding pipeline that takes a single sentence and
 ### What Worked
 - **Pipeline architecture** — 7 LangGraph nodes with retry, checkpoint, and streaming. Solid foundation.
 - **Harness engineering** — Auto-generated AGENTS.md, quality scoring, propagation to all nodes.
-- **QA Gate** — 136 specialist agents with LLM selection and synthesis. Catches real bugs.
+- **QA Gate** — 137 specialist agents with LLM selection and synthesis. Catches real bugs.
 - **Memory system** — Fact extraction, failure learning, vector search. Each run genuinely makes the next smarter.
-- **525 unit tests passing**, architecture enforcement, clean CI.
+- **532 unit tests passing**, architecture enforcement, clean CI.
 
 ### What Didn't Work
 - **Codex CLI subprocess overhead** — Every AI call spawns a new `codex exec` process. Cold start ~20-30s per call. A single pipeline run takes 20-40 minutes. Unusable for iterative development.
@@ -70,7 +70,7 @@ Open Seed:
   1. Intake    → Analyzes task, researches options, asks smart questions
   2. Plan      → GPT-5.4 designs architecture with cross-checked file manifest
   3. Build     → Domain specialists (frontend/backend/db/infra) code in parallel
-  4. QA Gate   → 136 specialist AI reviewers verify the output
+  4. QA Gate   → 137 specialist AI reviewers verify the output
   5. Sentinel  → Evidence-based verification — reads files, runs tests, never trusts claims
   6. Deploy    → Git commit, push, build
   7. Memorize  → Extracts lessons, remembers failures, next run is smarter
@@ -91,7 +91,7 @@ Open Seed:
     │          │          │            │          fix ──→ qa_gate (retry)   │
     │          │          │            │                                    │
     ↓          ↓          ↓            ↓                                   ↓
-  GPT-5.4   GPT-5.4   Specialists   136 AI       Evidence              Vector DB
+  GPT-5.4   GPT-5.4   Specialists   137 AI       Evidence              Vector DB
   research   design    in parallel   reviewers    verification          learning
 ```
 
@@ -128,13 +128,13 @@ Tasks are routed to domain specialists that run **in parallel**:
 
 After parallel execution: **integration check** verifies all pieces work together.
 
-### QA Gate — 136 Specialist Reviewers
+### QA Gate — 137 Specialist Reviewers
 
-Not one reviewer. **136 TOML-defined specialist agents** across 10 categories:
+Not one reviewer. **137 TOML-defined specialist agents** across 10 categories:
 
 ```
-Core Dev (15) · Language (28) · Infrastructure (18) · Security (10)
-Data & AI (12) · DX (8) · Domain (15) · Business (10) · Orchestration (10) · Research (10)
+Core Dev (12) · Language (27) · Infrastructure (16) · Quality & Security (17)
+Data & AI (12) · DX (13) · Domain (12) · Business (11) · Orchestration (10) · Research (7)
 ```
 
 GPT-5.4 picks the 3-5 most relevant reviewers per task. A knowledge synthesizer resolves conflicts, removes false positives, and produces a verdict: **PASS / WARN / BLOCK**.
@@ -174,9 +174,13 @@ openseed auth login
 # Run autonomously
 openseed run "Build a REST API with JWT auth and CRUD"
 
-# Or use the web UI
-openseed serve
-# Open http://localhost:5173
+# Auto-fix a GitHub/GitLab issue and open a PR
+openseed resolve --repo owner/name --issue 42
+
+# Or use the web UI (two processes)
+openseed serve --port 8200             # FastAPI backend (the Vite dev server proxies to :8200)
+cd web && npm install && npm run dev   # Vite dev server on http://localhost:5173
+# Open http://localhost:5173 (the web UI proxies /api and /ws to the backend)
 ```
 
 ---
@@ -188,9 +192,6 @@ Full autonomous pipeline. Describe what to build, answer a few smart questions, 
 
 ### Pair Mode
 Direct conversation with GPT-5.4. Code together in real-time. File changes detected automatically.
-
-### Debate Mode
-Two GPT-5.4 agents analyze your request independently. A judge picks the best approach and executes it. You see every step of the debate.
 
 ### Diagram Mode
 Auto-generates Mermaid architecture diagrams from your codebase.
@@ -205,13 +206,13 @@ open-seed/
 │   ├── core/       # Types, events, config, auth (OAuth), harness, microagents
 │   ├── brain/      # LangGraph pipeline, 7 nodes, streaming, subgraphs
 │   ├── codex/      # GPT-5.4 agent via Codex CLI (OAuth subprocess)
-│   ├── qa_gate/    # 136 specialist agents, selector, synthesizer, workflow
+│   ├── qa_gate/    # 137 specialist agents, selector, synthesizer, workflow
 │   ├── guard/      # Sentinel loop, intent gate, stuck detection, security
 │   ├── deploy/     # Git, npm, Docker channels + cron scheduler
 │   ├── memory/     # Fact extraction, vector DB, failure learning, reranker
 │   └── cli/        # CLI (Click) + FastAPI + WebSocket streaming
-├── web/            # React 19 + Vite + TypeScript (AGI/Pair/Debate/Diagram)
-├── config/agents/  # 136 TOML specialist definitions
+├── web/            # React 19 + Vite + TypeScript (AGI/Pair/Diagram)
+├── config/agents/  # 137 TOML specialist definitions (10 categories)
 └── tests/          # Architecture enforcement tests
 ```
 
@@ -253,7 +254,7 @@ Open Seed auto-generates project harness (AGENTS.md, CLAUDE.md, pre-commit, CI) 
 | Vector DB | Qdrant, PostgreSQL+pgvector, SQLite (fallback) |
 | Web | FastAPI + WebSocket (backend), React 19 + Vite (frontend) |
 | Package Manager | uv workspace (Python), npm (web) |
-| Testing | pytest + pytest-asyncio (525 tests) |
+| Testing | pytest + pytest-asyncio (532 tests) |
 | Linting | ruff (Python), TypeScript strict mode |
 
 ---
@@ -272,16 +273,18 @@ Open Seed auto-generates project harness (AGENTS.md, CLAUDE.md, pre-commit, CI) 
 
 ```bash
 pytest packages/*/tests/ tests/ -q
-# 525 passed
+# 532 passed
 ```
 
 | Package | Tests | What's Tested |
 |---------|-------|--------------|
 | Brain | 177 | Pipeline, routing, specialists, plan parsing, implement, fix, self-verify |
+| Memory | 152 | Store, search, condenser, fact extraction, reranker, wisdom, failure patterns |
 | Guard | 86 | Intent gate, execution loop, sentinel, stuck detection, security, browser verify |
 | QA Gate | 67 | Synthesizer, agent selector, gate logic, workflow, specialist runner |
-| Memory | 152 | Store, search, condenser, fact extraction, reranker, wisdom, failure patterns |
-| Core | 43 | Harness checker, microagents, metrics, config, architecture enforcement |
+| Core | 41 | Harness checker, microagents, metrics, config |
+| Deploy | 6 | Git/npm/Docker channels, cron scheduler |
+| Architecture | 3 | Dependency-flow enforcement (`tests/test_architecture.py`) |
 
 ---
 
