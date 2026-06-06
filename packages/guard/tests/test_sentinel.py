@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -54,13 +55,13 @@ def _make_stream_result(stdout: str, exit_code: int = 0) -> MagicMock:
     return result
 
 
-def _make_streaming_side_effect(json_text: str):
+def _make_streaming_side_effect(json_text: str) -> Any:
     """
     Return an AsyncMock side-effect that, when awaited, calls on_line once
     with a fake stdout StreamLine bearing json_text, then returns None.
     """
 
-    async def _effect(command, timeout_seconds, on_line):  # noqa: ARG001
+    async def _effect(command: Any, timeout_seconds: Any, on_line: Any) -> None:  # noqa: ARG001
         line = MagicMock()
         line.source = "stdout"
         line.text = json_text
@@ -69,7 +70,7 @@ def _make_streaming_side_effect(json_text: str):
     return _effect
 
 
-def _make_qa_result(verdict: Verdict = Verdict.PASS, findings: list | None = None) -> QAResult:
+def _make_qa_result(verdict: Verdict = Verdict.PASS, findings: list[Any] | None = None) -> QAResult:
     return QAResult(verdict=verdict, findings=findings or [])
 
 
@@ -92,13 +93,13 @@ class TestIntentGate:
     """Tests for openseed_guard.intent_gate.classify_intent."""
 
     @pytest.fixture
-    def _patch_auth(self):
+    def _patch_auth(self) -> Any:
         with patch("openseed_guard.intent_gate.require_openai_auth", return_value="/usr/local/bin/codex"):
             yield
 
     # ── Implementation ────────────────────────────────────────────────────────
 
-    async def test_classify_intent_implementation(self, _patch_auth):
+    async def test_classify_intent_implementation(self, _patch_auth: Any) -> None:
         json_text = (
             '{"intent_type": "implementation", "confidence": 0.95, '
             '"reasoning": "User wants to add a feature.", '
@@ -116,7 +117,7 @@ class TestIntentGate:
 
     # ── Research ──────────────────────────────────────────────────────────────
 
-    async def test_classify_intent_research(self, _patch_auth):
+    async def test_classify_intent_research(self, _patch_auth: Any) -> None:
         json_text = (
             '{"intent_type": "research", "confidence": 0.88, '
             '"reasoning": "User is asking how something works.", '
@@ -133,7 +134,7 @@ class TestIntentGate:
 
     # ── Fix ───────────────────────────────────────────────────────────────────
 
-    async def test_classify_intent_fix(self, _patch_auth):
+    async def test_classify_intent_fix(self, _patch_auth: Any) -> None:
         json_text = (
             '{"intent_type": "fix", "confidence": 0.92, '
             '"reasoning": "There is a broken test.", '
@@ -150,7 +151,7 @@ class TestIntentGate:
 
     # ── Fallback on parse error ───────────────────────────────────────────────
 
-    async def test_classify_intent_fallback_on_parse_error(self, _patch_auth):
+    async def test_classify_intent_fallback_on_parse_error(self, _patch_auth: Any) -> None:
         """Garbled LLM output → open_ended fallback with low confidence."""
         with patch(
             "openseed_guard.intent_gate.run_streaming",
@@ -164,10 +165,10 @@ class TestIntentGate:
 
     # ── Fallback on CLI failure (no output) ───────────────────────────────────
 
-    async def test_classify_intent_fallback_on_cli_failure(self, _patch_auth):
+    async def test_classify_intent_fallback_on_cli_failure(self, _patch_auth: Any) -> None:
         """When run_streaming produces no stdout lines → graceful fallback."""
 
-        async def _noop(command, timeout_seconds, on_line):  # noqa: ARG001
+        async def _noop(command: Any, timeout_seconds: Any, on_line: Any) -> None:  # noqa: ARG001
             pass  # never calls on_line
 
         with patch("openseed_guard.intent_gate.run_streaming", side_effect=_noop):
@@ -178,7 +179,7 @@ class TestIntentGate:
 
     # ── Unknown intent_type in JSON → coerced to open_ended ──────────────────
 
-    async def test_classify_intent_unknown_type_coerced(self, _patch_auth):
+    async def test_classify_intent_unknown_type_coerced(self, _patch_auth: Any) -> None:
         json_text = '{"intent_type": "banana", "confidence": 0.7, "reasoning": "unknown", "suggested_approach": "?"}'
         with patch(
             "openseed_guard.intent_gate.run_streaming",
@@ -190,7 +191,7 @@ class TestIntentGate:
 
     # ── JSON embedded in prose ────────────────────────────────────────────────
 
-    async def test_classify_intent_json_embedded_in_prose(self, _patch_auth):
+    async def test_classify_intent_json_embedded_in_prose(self, _patch_auth: Any) -> None:
         """Parser should extract JSON even when surrounded by markdown text."""
         json_text = (
             "Sure! Here is my answer:\n"
@@ -208,7 +209,7 @@ class TestIntentGate:
 
     # ── Codebase context is truncated to 500 chars ────────────────────────────
 
-    async def test_classify_intent_codebase_context_truncated(self, _patch_auth):
+    async def test_classify_intent_codebase_context_truncated(self, _patch_auth: Any) -> None:
         """Verify that long codebase_context doesn't cause a crash."""
         long_context = "x" * 5000
         json_text = (
@@ -234,7 +235,7 @@ class TestExecutionLoop:
     """Tests for openseed_guard.execution_loop.ExecutionLoop."""
 
     @pytest.fixture
-    def _patch_auth(self):
+    def _patch_auth(self) -> Any:
         with patch(
             "openseed_guard.execution_loop.require_openai_auth",
             return_value="/usr/local/bin/codex",
@@ -242,7 +243,7 @@ class TestExecutionLoop:
             yield
 
     @pytest.fixture
-    def _always_pass_verify(self):
+    def _always_pass_verify(self) -> Any:
         """Patch verify_implementation to always succeed."""
         ok = VerificationResult(
             all_passed=True,
@@ -258,7 +259,7 @@ class TestExecutionLoop:
             yield ok
 
     @pytest.fixture
-    def _always_fail_verify(self):
+    def _always_fail_verify(self) -> Any:
         """Patch verify_implementation to always fail."""
         fail = VerificationResult(
             all_passed=False,
@@ -273,14 +274,14 @@ class TestExecutionLoop:
         ):
             yield fail
 
-    def _explore_side_effect(self):
+    def _explore_side_effect(self) -> Any:
         """Return a streaming side-effect for a valid EXPLORE response."""
         return _make_streaming_side_effect(
             '{"codebase_state": "disciplined", "relevant_patterns": ["pytest"], '
             '"assumptions": [], "relevant_files": [], "summary": "test project"}'
         )
 
-    def _plan_side_effect(self):
+    def _plan_side_effect(self) -> Any:
         return _make_streaming_side_effect(
             '{"files_to_change": [], "files_to_create": ["new.py"], '
             '"steps": ["Step 1: create new.py"], '
@@ -288,13 +289,13 @@ class TestExecutionLoop:
             '"approach_summary": "just create new.py"}'
         )
 
-    def _route_side_effect(self):
+    def _route_side_effect(self) -> Any:
         return _make_streaming_side_effect(
             '{"decision": "execute", "reason": "simple task", '
             '"sub_agent_type": null, "clarification_question": null, "concern": null}'
         )
 
-    def _retry_side_effect(self):
+    def _retry_side_effect(self) -> Any:
         return _make_streaming_side_effect(
             '{"diagnosis": "file was not created", '
             '"corrective_steps": ["Step 1: create the file"], '
@@ -303,7 +304,7 @@ class TestExecutionLoop:
 
     # ── Happy path: all steps complete ───────────────────────────────────────
 
-    async def test_execution_loop_completes_all_steps(self, _patch_auth, _always_pass_verify):
+    async def test_execution_loop_completes_all_steps(self, _patch_auth: Any, _always_pass_verify: Any) -> None:
         """Full run with passing verify — steps_completed must include all 7."""
         call_sequence = [
             self._explore_side_effect(),
@@ -328,7 +329,7 @@ class TestExecutionLoop:
 
     # ── Verify failure triggers a retry ──────────────────────────────────────
 
-    async def test_execution_loop_retries_on_verify_failure(self, _patch_auth):
+    async def test_execution_loop_retries_on_verify_failure(self, _patch_auth: Any) -> None:
         """First verify fails, second (after retry) passes."""
         fail = VerificationResult(
             all_passed=False,
@@ -368,7 +369,7 @@ class TestExecutionLoop:
 
     # ── Max 3 retries: verify always fails ───────────────────────────────────
 
-    async def test_execution_loop_max_3_retries(self, _patch_auth, _always_fail_verify):
+    async def test_execution_loop_max_3_retries(self, _patch_auth: Any, _always_fail_verify: Any) -> None:
         """When verify always fails the loop exits after exactly 3 retries."""
         retry_responses = [self._retry_side_effect() for _ in range(3)]
         with patch(
@@ -391,7 +392,7 @@ class TestExecutionLoop:
 
     # ── _explore returns structured data ─────────────────────────────────────
 
-    async def test_explore_returns_structured_data(self, _patch_auth):
+    async def test_explore_returns_structured_data(self, _patch_auth: Any) -> None:
         """_explore should parse JSON and return a dict with codebase_state."""
         with patch(
             "openseed_guard.execution_loop.run_streaming",
@@ -410,7 +411,7 @@ class TestExecutionLoop:
 
     # ── _plan returns structured data ─────────────────────────────────────────
 
-    async def test_plan_returns_structured_data(self, _patch_auth):
+    async def test_plan_returns_structured_data(self, _patch_auth: Any) -> None:
         """_plan should parse JSON and return files_to_create / complexity."""
         with patch(
             "openseed_guard.execution_loop.run_streaming",
@@ -429,7 +430,7 @@ class TestExecutionLoop:
 
     # ── _route returns a decision ─────────────────────────────────────────────
 
-    async def test_route_returns_decision(self, _patch_auth):
+    async def test_route_returns_decision(self, _patch_auth: Any) -> None:
         """_route decision must be one of the four valid routing choices."""
         with patch(
             "openseed_guard.execution_loop.run_streaming",
@@ -446,7 +447,7 @@ class TestExecutionLoop:
 
     # ── _verify uses evidence module ──────────────────────────────────────────
 
-    async def test_verify_uses_evidence_module(self, _patch_auth):
+    async def test_verify_uses_evidence_module(self, _patch_auth: Any) -> None:
         """_verify must delegate to verify_implementation and reflect its result."""
         ok = VerificationResult(
             all_passed=True,
@@ -472,7 +473,7 @@ class TestExecutionLoop:
 
     # ── _explore fallback when JSON is absent ─────────────────────────────────
 
-    async def test_explore_fallback_on_non_json(self, _patch_auth):
+    async def test_explore_fallback_on_non_json(self, _patch_auth: Any) -> None:
         """When Claude returns plain text instead of JSON, _explore uses fallback dict."""
         with patch(
             "openseed_guard.execution_loop.run_streaming",
@@ -499,7 +500,7 @@ class TestExecutionLoop:
 class TestDelegation:
     """Tests for openseed_guard.delegation.build_delegation_prompt."""
 
-    def test_build_delegation_prompt_has_all_sections(self):
+    def test_build_delegation_prompt_has_all_sections(self) -> None:
         prompt = build_delegation_prompt(
             task="Write a REST endpoint",
             expected_outcome="A working /health endpoint returning 200",
@@ -516,7 +517,7 @@ class TestDelegation:
         assert "## MUST NOT DO" in prompt
         assert "## CONTEXT" in prompt
 
-    def test_build_delegation_prompt_task_appears(self):
+    def test_build_delegation_prompt_task_appears(self) -> None:
         prompt = build_delegation_prompt(
             task="Implement OAuth login",
             expected_outcome="Users can log in",
@@ -527,7 +528,7 @@ class TestDelegation:
         )
         assert "Implement OAuth login" in prompt
 
-    def test_build_delegation_prompt_tools_listed(self):
+    def test_build_delegation_prompt_tools_listed(self) -> None:
         prompt = build_delegation_prompt(
             task="T",
             expected_outcome="O",
@@ -540,7 +541,7 @@ class TestDelegation:
         assert "- Glob" in prompt
         assert "- Grep" in prompt
 
-    def test_build_delegation_prompt_empty_lists_show_placeholder(self):
+    def test_build_delegation_prompt_empty_lists_show_placeholder(self) -> None:
         """Empty lists should render readable placeholders, not crash."""
         prompt = build_delegation_prompt(
             task="T",
@@ -553,7 +554,7 @@ class TestDelegation:
         assert "(all tools available)" in prompt or "- (" in prompt
         assert "(none specified)" in prompt
 
-    def test_build_delegation_prompt_escapes_content(self):
+    def test_build_delegation_prompt_escapes_content(self) -> None:
         """Special characters in task / context survive rendering intact."""
         special = 'task with "quotes" and {braces} and \\backslash'
         prompt = build_delegation_prompt(
@@ -566,7 +567,7 @@ class TestDelegation:
         )
         assert special in prompt
 
-    def test_build_delegation_prompt_must_not_listed(self):
+    def test_build_delegation_prompt_must_not_listed(self) -> None:
         prompt = build_delegation_prompt(
             task="T",
             expected_outcome="O",
@@ -587,17 +588,17 @@ class TestDelegation:
 class TestBackoff:
     """Tests for openseed_guard.backoff — pure functions, no mocking required."""
 
-    def test_compute_backoff_initial(self):
+    def test_compute_backoff_initial(self) -> None:
         """0 failures → base delay (5000 ms by default)."""
         assert compute_backoff_ms(0) == 5_000
 
-    def test_compute_backoff_exponential(self):
+    def test_compute_backoff_exponential(self) -> None:
         """Each additional failure doubles the delay."""
         assert compute_backoff_ms(1) == 10_000
         assert compute_backoff_ms(2) == 20_000
         assert compute_backoff_ms(3) == 40_000
 
-    def test_compute_backoff_cap(self):
+    def test_compute_backoff_cap(self) -> None:
         """Beyond cap_exponent the delay stops growing (max_ms boundary)."""
         # cap_exponent=5 → 5000 * 2^5 = 160_000
         at_cap = compute_backoff_ms(5)
@@ -605,21 +606,21 @@ class TestBackoff:
         assert at_cap == 160_000
         assert beyond_cap == 160_000
 
-    def test_compute_backoff_custom_base(self):
+    def test_compute_backoff_custom_base(self) -> None:
         """Custom base_ms is respected."""
         assert compute_backoff_ms(0, base_ms=1_000) == 1_000
         assert compute_backoff_ms(2, base_ms=1_000) == 4_000
 
-    def test_compute_backoff_custom_max(self):
+    def test_compute_backoff_custom_max(self) -> None:
         """max_ms clamps the result."""
         assert compute_backoff_ms(10, base_ms=5_000, cap_exponent=10, max_ms=30_000) == 30_000
 
-    def test_should_retry_within_limit(self):
+    def test_should_retry_within_limit(self) -> None:
         """Returns True when consecutive_failures < max_retries."""
         assert should_retry(0, max_retries=10) is True
         assert should_retry(9, max_retries=10) is True
 
-    def test_should_retry_exceeds_limit(self):
+    def test_should_retry_exceeds_limit(self) -> None:
         """Returns False when consecutive_failures >= max_retries."""
         assert should_retry(10, max_retries=10) is False
         assert should_retry(99, max_retries=10) is False
@@ -640,27 +641,27 @@ class TestStagnation:
             stagnation_count=stagnation_count,
         )
 
-    def test_is_stagnated_below_threshold(self):
+    def test_is_stagnated_below_threshold(self) -> None:
         assert is_stagnated(self._update(2), threshold=3) is False
 
-    def test_is_stagnated_at_threshold(self):
+    def test_is_stagnated_at_threshold(self) -> None:
         assert is_stagnated(self._update(3), threshold=3) is True
 
-    def test_is_stagnated_above_threshold(self):
+    def test_is_stagnated_above_threshold(self) -> None:
         assert is_stagnated(self._update(10), threshold=3) is True
 
-    def test_is_stagnated_zero(self):
+    def test_is_stagnated_zero(self) -> None:
         assert is_stagnated(self._update(0), threshold=3) is False
 
-    def test_stagnation_message_stagnated(self):
+    def test_stagnation_message_stagnated(self) -> None:
         msg = stagnation_message(self._update(4), threshold=3)
         assert "STAGNATED" in msg
 
-    def test_stagnation_message_warning(self):
+    def test_stagnation_message_warning(self) -> None:
         msg = stagnation_message(self._update(2), threshold=3)
         assert "Warning" in msg
 
-    def test_stagnation_message_progress(self):
+    def test_stagnation_message_progress(self) -> None:
         msg = stagnation_message(self._update(0), threshold=3)
         assert "progress" in msg.lower()
 
@@ -673,7 +674,7 @@ class TestStagnation:
 class TestProgress:
     """Tests for openseed_guard.progress.ProgressTracker."""
 
-    def test_first_call_is_baseline(self):
+    def test_first_call_is_baseline(self) -> None:
         """First track() call is always a baseline — not yet improvement."""
         tracker = ProgressTracker()
         snap = ProgressSnapshot(incomplete_count=5, completed_count=2)
@@ -681,7 +682,7 @@ class TestProgress:
         assert update.progress_source == "baseline"
         assert update.stagnation_count == 0
 
-    def test_progress_tracker_detects_improvement_via_completed(self):
+    def test_progress_tracker_detects_improvement_via_completed(self) -> None:
         tracker = ProgressTracker()
         tracker.track(ProgressSnapshot(completed_count=2, incomplete_count=5))
         update = tracker.track(ProgressSnapshot(completed_count=4, incomplete_count=3))
@@ -689,28 +690,28 @@ class TestProgress:
         assert update.progress_source == "todo"
         assert update.stagnation_count == 0
 
-    def test_progress_tracker_detects_improvement_via_files_created(self):
+    def test_progress_tracker_detects_improvement_via_files_created(self) -> None:
         tracker = ProgressTracker()
         tracker.track(ProgressSnapshot(files_created=[]))
         update = tracker.track(ProgressSnapshot(files_created=["foo.py"]))
         assert update.has_progressed is True
         assert update.progress_source == "files"
 
-    def test_progress_tracker_detects_improvement_via_tests(self):
+    def test_progress_tracker_detects_improvement_via_tests(self) -> None:
         tracker = ProgressTracker()
         tracker.track(ProgressSnapshot(test_pass_count=0))
         update = tracker.track(ProgressSnapshot(test_pass_count=5))
         assert update.has_progressed is True
         assert update.progress_source == "tests"
 
-    def test_progress_tracker_detects_improvement_via_error_reduction(self):
+    def test_progress_tracker_detects_improvement_via_error_reduction(self) -> None:
         tracker = ProgressTracker()
         tracker.track(ProgressSnapshot(error_count=10))
         update = tracker.track(ProgressSnapshot(error_count=5))
         assert update.has_progressed is True
         assert update.progress_source == "errors"
 
-    def test_progress_tracker_detects_stagnation(self):
+    def test_progress_tracker_detects_stagnation(self) -> None:
         tracker = ProgressTracker()
         snap = ProgressSnapshot(incomplete_count=5, completed_count=2)
         tracker.track(snap)  # baseline
@@ -720,7 +721,7 @@ class TestProgress:
         assert update.has_progressed is False
         assert update.stagnation_count == 3
 
-    def test_progress_tracker_resets_stagnation_on_improvement(self):
+    def test_progress_tracker_resets_stagnation_on_improvement(self) -> None:
         tracker = ProgressTracker()
         snap = ProgressSnapshot(completed_count=0)
         tracker.track(snap)
@@ -730,14 +731,14 @@ class TestProgress:
         assert update.has_progressed is True
         assert update.stagnation_count == 0
 
-    def test_progress_tracker_state_hash_change_counts_as_progress(self):
+    def test_progress_tracker_state_hash_change_counts_as_progress(self) -> None:
         tracker = ProgressTracker()
         tracker.track(ProgressSnapshot(raw_hash="abc"))
         update = tracker.track(ProgressSnapshot(raw_hash="xyz"))
         assert update.has_progressed is True
         assert update.progress_source == "state"
 
-    def test_progress_tracker_reset(self):
+    def test_progress_tracker_reset(self) -> None:
         tracker = ProgressTracker()
         tracker.track(ProgressSnapshot(completed_count=0))
         tracker.track(ProgressSnapshot(completed_count=0))  # stagnation 1
@@ -758,7 +759,7 @@ class TestEvaluateLoop:
 
     # ── PASS: QA + verification both pass ────────────────────────────────────
 
-    async def test_evaluate_loop_pass(self):
+    async def test_evaluate_loop_pass(self) -> None:
         qa = _make_qa_result(Verdict.PASS)
         vr = _make_verification(all_passed=True)
         state = LoopState()
@@ -767,7 +768,7 @@ class TestEvaluateLoop:
 
     # ── RETRY: QA fails, retries available, no stagnation ────────────────────
 
-    async def test_evaluate_loop_retry(self):
+    async def test_evaluate_loop_retry(self) -> None:
         qa = _make_qa_result(Verdict.BLOCK, findings=[Finding(description="err")])
         vr = _make_verification(all_passed=False)
         state = LoopState(consecutive_failures=0)
@@ -782,7 +783,7 @@ class TestEvaluateLoop:
     # tracker.track() always returns stagnation_count=0 (baseline). The only
     # way to force the stagnation branch is to mock is_stagnated directly.
 
-    async def test_evaluate_loop_sage_on_stagnation(self):
+    async def test_evaluate_loop_sage_on_stagnation(self) -> None:
         qa = _make_qa_result(Verdict.BLOCK, findings=[Finding(description="error")])
         vr = _make_verification(all_passed=False)
         state = LoopState(consecutive_failures=1)
@@ -811,7 +812,7 @@ class TestEvaluateLoop:
 
     # ── USER_ESCALATE: stagnated + insight already consulted ───────────────────
 
-    async def test_evaluate_loop_user_escalate(self):
+    async def test_evaluate_loop_user_escalate(self) -> None:
         qa = _make_qa_result(Verdict.BLOCK, findings=[Finding(description="error")])
         vr = _make_verification(all_passed=False)
         # Insight already consulted in a prior iteration
@@ -825,7 +826,7 @@ class TestEvaluateLoop:
 
     # ── ABORT: max retries exhausted ─────────────────────────────────────────
 
-    async def test_evaluate_loop_abort_on_max_retries(self):
+    async def test_evaluate_loop_abort_on_max_retries(self) -> None:
         qa = _make_qa_result(Verdict.BLOCK, findings=[Finding(description="err")])
         vr = _make_verification(all_passed=False)
         cfg = SentinelConfig(max_retries=3, stagnation_threshold=100)
@@ -838,7 +839,7 @@ class TestEvaluateLoop:
 
     # ── PASS even without a VerificationResult (None) ────────────────────────
 
-    async def test_evaluate_loop_pass_without_verification(self):
+    async def test_evaluate_loop_pass_without_verification(self) -> None:
         qa = _make_qa_result(Verdict.PASS)
         state = LoopState()
         decision = await evaluate_loop(qa, None, state)
@@ -846,7 +847,7 @@ class TestEvaluateLoop:
 
     # ── ABORT: insight recommends abandonment ─────────────────────────────────
 
-    async def test_evaluate_loop_abort_when_sage_says_abandon(self):
+    async def test_evaluate_loop_abort_when_sage_says_abandon(self) -> None:
         qa = _make_qa_result(Verdict.BLOCK, findings=[Finding(description="fatal")])
         vr = _make_verification(all_passed=False)
         state = LoopState(consecutive_failures=0)
@@ -881,7 +882,7 @@ class TestEvaluateLoop:
 class TestEvidenceVerifyFilesExist:
     """Tests for openseed_guard.evidence.verify_files_exist."""
 
-    async def test_file_exists_passes(self):
+    async def test_file_exists_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fname = "hello.py"
             open(os.path.join(tmp, fname), "w").close()
@@ -889,13 +890,13 @@ class TestEvidenceVerifyFilesExist:
         assert len(evidence) == 1
         assert evidence[0].passed is True
 
-    async def test_missing_file_fails(self):
+    async def test_missing_file_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             evidence = await verify_files_exist(tmp, ["does_not_exist.py"])
         assert evidence[0].passed is False
         assert "MISSING" in evidence[0].detail
 
-    async def test_multiple_files_mixed(self):
+    async def test_multiple_files_mixed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             open(os.path.join(tmp, "exists.py"), "w").close()
             evidence = await verify_files_exist(tmp, ["exists.py", "ghost.py"])

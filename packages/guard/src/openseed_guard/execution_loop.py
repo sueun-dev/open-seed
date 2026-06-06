@@ -85,9 +85,12 @@ def _parse_json_from_text(text: str) -> dict[str, Any]:
     end = text.rfind("}")
     if start != -1 and end > start:
         try:
-            return json.loads(text[start : end + 1])
+            parsed = json.loads(text[start : end + 1])
         except (json.JSONDecodeError, ValueError):
             pass
+        else:
+            if isinstance(parsed, dict):
+                return parsed
     return {}
 
 

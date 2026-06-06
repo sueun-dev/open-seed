@@ -75,7 +75,7 @@ def route_plan_to_specialists(state: PipelineState) -> list[Send] | Literal["imp
         return "implement"
 
 
-async def implement_task_node(state: PipelineState) -> dict:
+async def implement_task_node(state: PipelineState) -> dict[str, Any]:
     """
     Implement a single specialist task dispatched via Send().
 
@@ -122,7 +122,7 @@ async def implement_task_node(state: PipelineState) -> dict:
     }
 
 
-async def user_escalate_node(state: PipelineState) -> dict:
+async def user_escalate_node(state: PipelineState) -> dict[str, Any]:
     """
     User escalation node — asks the user what to do and AI interprets the response.
 
@@ -245,7 +245,7 @@ async def _interpret_user_response(
         return "stop"
 
 
-def build_graph(use_subgraphs: bool = False, use_send: bool = False) -> StateGraph:
+def build_graph(use_subgraphs: bool = False, use_send: bool = False) -> StateGraph[PipelineState]:
     """
     Build the Open Seed pipeline graph with advanced LangGraph features.
 

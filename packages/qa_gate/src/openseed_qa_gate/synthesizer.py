@@ -24,17 +24,21 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING, Any
 
 from openseed_core.types import Finding, Severity
 
 from openseed_qa_gate.types import SpecialistResult, SynthesisStats
+
+if TYPE_CHECKING:
+    from openseed_core.events import EventBus
 
 logger = logging.getLogger(__name__)
 
 
 async def synthesize(
     results: list[SpecialistResult],
-    event_bus=None,
+    event_bus: EventBus | None = None,
 ) -> tuple[list[Finding], str, str | None]:
     """
     LLM-driven synthesis of findings from multiple specialists.
@@ -54,7 +58,7 @@ async def synthesize(
     stats = SynthesisStats()
 
     # Collect and annotate all raw findings with their source agent
-    all_raw: list[dict] = []
+    all_raw: list[dict[str, Any]] = []
     for result in results:
         if not result.success:
             stats.agents_failed += 1
@@ -123,9 +127,9 @@ async def synthesize(
     }
     deduped.sort(key=lambda f: severity_order.get(f.severity, 5))
 
-    counts: dict = {}
-    for f in deduped:
-        counts[f.severity] = counts.get(f.severity, 0) + 1
+    counts: dict[Severity, int] = {}
+    for finding in deduped:
+        counts[finding.severity] = counts.get(finding.severity, 0) + 1
 
     summary = f"{len(deduped)} findings (basic dedup, LLM unavailable) — " + ", ".join(
         f"{s.value}: {c}" for s, c in sorted(counts.items(), key=lambda x: severity_order.get(x[0], 5))
@@ -134,9 +138,9 @@ async def synthesize(
 
 
 async def _synthesize_with_llm(
-    all_raw: list[dict],
+    all_raw: list[dict[str, Any]],
     results: list[SpecialistResult],
-) -> tuple[list[Finding], str, dict]:
+) -> tuple[list[Finding], str, dict[str, Any]]:
     """
     Call Claude Sonnet via subprocess to perform full knowledge synthesis.
 
@@ -286,7 +290,7 @@ Output ONLY valid JSON, no markdown, no explanation outside the JSON:
     return findings, summary, llm_stats
 
 
-def _normalize_finding_with_metadata(raw: dict) -> Finding:
+def _normalize_finding_with_metadata(raw: dict[str, Any]) -> Finding:
     """
     Normalize a finding dict from LLM synthesis output.
 
@@ -329,7 +333,7 @@ def _normalize_finding_with_metadata(raw: dict) -> Finding:
     )
 
 
-def _normalize_finding(raw: dict, agent_name: str) -> Finding:
+def _normalize_finding(raw: dict[str, Any], agent_name: str) -> Finding:
     """Normalize a raw finding dict to a Finding dataclass (basic fallback path)."""
     severity_map = {
         "critical": Severity.CRITICAL,

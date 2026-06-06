@@ -21,9 +21,15 @@ import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openseed_core.types import Finding, Severity
+
+if TYPE_CHECKING:
+    from openseed_core.config import QAGateConfig
+    from openseed_core.events import EventBus
+
+    from openseed_qa_gate.types import SpecialistResult
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +103,7 @@ class WorkflowOrchestrator:
         result = await orchestrator.run(context, working_dir, task)
     """
 
-    def __init__(self, config=None, event_bus=None):
+    def __init__(self, config: QAGateConfig | None = None, event_bus: EventBus | None = None) -> None:
         self._config = config
         self._event_bus = event_bus
 
@@ -247,7 +253,7 @@ class WorkflowOrchestrator:
         max_parallel = self._config.max_parallel_agents if self._config else 6
         semaphore = asyncio.Semaphore(max_parallel)
 
-        async def run_one(agent):
+        async def run_one(agent: Any) -> SpecialistResult:
             async with semaphore:
                 return await run_specialist(agent, context, working_dir, self._event_bus)
 

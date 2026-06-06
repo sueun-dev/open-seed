@@ -17,14 +17,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING, Any
 
 from openseed_brain.progress import emit_progress
 from openseed_brain.state import PipelineState
 
+if TYPE_CHECKING:
+    from openseed_codex.agent import CodexAgent
+    from openseed_core.harness.generator import HarnessFile, ScanResult
+
 logger = logging.getLogger(__name__)
 
 
-async def _emit(event_type: str, **data) -> None:
+async def _emit(event_type: str, **data: Any) -> None:
     await emit_progress(event_type, node="intake", **data)
 
 
@@ -33,7 +38,7 @@ async def _emit(event_type: str, **data) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def intake_node(state: PipelineState) -> dict:
+async def intake_node(state: PipelineState) -> dict[str, Any]:
     """
     Multi-step intake: context → gaps → research → questions (or plan if answers exist).
     """
@@ -85,7 +90,7 @@ async def intake_node(state: PipelineState) -> dict:
                 micro_ctx = [format_microagent_context(relevant)]
         except Exception:
             pass
-        result: dict = {
+        result: dict[str, Any] = {
             "skip_planning": False,
             "intake_analysis": existing,
             "messages": ["Intake: using user-approved plan"],
@@ -171,7 +176,7 @@ async def intake_node(state: PipelineState) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _analyze_and_ask(agent, task: str, context: dict, harness_hint: str) -> dict:
+async def _analyze_and_ask(agent: CodexAgent, task: str, context: dict[str, Any], harness_hint: str) -> dict[str, Any]:
     """
     Single AI call that analyzes the task, identifies gaps, researches options,
     and generates clarification questions — all in one invocation.
@@ -254,7 +259,7 @@ Rules for EXISTING_PROJECT:
     if context["detected_tech_stack"]:
         intake_analysis["tech_stack"] = ", ".join(context["detected_tech_stack"])
 
-    result: dict = {
+    result: dict[str, Any] = {
         "skip_planning": skip_planning,
         "intake_analysis": intake_analysis,
         "messages": [f"Intake: {analysis_text[:500]}"],
@@ -271,9 +276,9 @@ Rules for EXISTING_PROJECT:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _collect_context(task: str, working_dir: str) -> dict:
+async def _collect_context(task: str, working_dir: str) -> dict[str, Any]:
     """Gather all available context: codebase, memory, intent, microagents."""
-    context: dict = {
+    context: dict[str, Any] = {
         "intent_info": "",
         "memory_context": "",
         "codebase_context": "",
@@ -364,7 +369,7 @@ async def _collect_context(task: str, working_dir: str) -> dict:
     return context
 
 
-def _build_context_block(context: dict) -> str:
+def _build_context_block(context: dict[str, Any]) -> str:
     """Format collected context into a single text block for prompts."""
     parts = []
     if context["intent_info"]:
@@ -381,7 +386,9 @@ def _build_context_block(context: dict) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _select_skills(agent, task: str, gaps: list[dict], context: dict) -> list[str]:
+async def _select_skills(
+    agent: CodexAgent, task: str, gaps: list[dict[str, Any]], context: dict[str, Any]
+) -> list[str]:
     """Select relevant official skills from Anthropic/OpenAI repos."""
     try:
         from openseed_brain.skill_loader import select_skills_for_task
@@ -403,7 +410,7 @@ async def _select_skills(agent, task: str, gaps: list[dict], context: dict) -> l
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _identify_gaps(agent, task: str, context: dict) -> list[dict]:
+async def _identify_gaps(agent: CodexAgent, task: str, context: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Ask AI to deeply analyze the task and identify what it doesn't know.
     Returns a list of knowledge gaps, each with a topic and why it matters.
@@ -446,7 +453,7 @@ Rules:
     return _parse_gaps(response.text)
 
 
-def _parse_gaps(text: str) -> list[dict]:
+def _parse_gaps(text: str) -> list[dict[str, Any]]:
     """Parse GAPS section from AI response."""
     gaps = []
     for line in text.splitlines():
@@ -468,11 +475,11 @@ def _parse_gaps(text: str) -> list[dict]:
 
 
 async def _research_gaps(
-    agent,
+    agent: CodexAgent,
     task: str,
-    gaps: list[dict],
-    context: dict,
-) -> list[dict]:
+    gaps: list[dict[str, Any]],
+    context: dict[str, Any],
+) -> list[dict[str, Any]]:
     """
     Research each gap independently via web search.
     Runs all searches in parallel for speed.
@@ -480,7 +487,7 @@ async def _research_gaps(
     tech_stack = context.get("detected_tech_stack", [])
     tech_hint = f" (tech stack: {', '.join(tech_stack)})" if tech_stack else ""
 
-    async def _research_one(gap: dict) -> dict:
+    async def _research_one(gap: dict[str, Any]) -> dict[str, Any]:
         try:
             response = await agent.invoke(
                 prompt=f"""Research the best current options for this specific decision.
@@ -515,12 +522,12 @@ Include version numbers where relevant.""",
 
 
 async def _formulate_questions(
-    agent,
+    agent: CodexAgent,
     task: str,
-    context: dict,
-    gaps: list[dict],
-    research_results: list[dict],
-) -> dict:
+    context: dict[str, Any],
+    gaps: list[dict[str, Any]],
+    research_results: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     Generate research-backed questions with dynamic count based on complexity.
     Each option includes a rationale from the research phase.
@@ -578,7 +585,7 @@ Rules for EXISTING_PROJECT:
     if context["detected_tech_stack"]:
         intake_analysis["tech_stack"] = ", ".join(context["detected_tech_stack"])
 
-    result: dict = {
+    result: dict[str, Any] = {
         "skip_planning": skip_planning,
         "intake_analysis": intake_analysis,
         "messages": [f"Intake: {analysis_text[:500]}"],
@@ -595,7 +602,7 @@ Rules for EXISTING_PROJECT:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _quick_classify(agent, task: str, context: dict) -> dict:
+async def _quick_classify(agent: CodexAgent, task: str, context: dict[str, Any]) -> dict[str, Any]:
     """Fast classification for simple tasks — no questions needed."""
     context_block = _build_context_block(context)
 
@@ -628,7 +635,7 @@ LESSONS: none""",
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _phase2_plan(agent, state: PipelineState, context: dict) -> dict:
+async def _phase2_plan(agent: CodexAgent, state: PipelineState, context: dict[str, Any]) -> dict[str, Any]:
     """Generate execution plan after user answered clarification questions."""
     task = state["task"]
     working_dir = state["working_dir"]
@@ -700,7 +707,7 @@ CRITICAL RULES:
     if context["detected_tech_stack"]:
         intake_analysis["tech_stack"] = ", ".join(context["detected_tech_stack"])
 
-    result: dict = {
+    result: dict[str, Any] = {
         "skip_planning": skip_planning,
         "intake_analysis": intake_analysis,
         "messages": [f"Intake: {analysis_text[:500]}"],
@@ -758,8 +765,8 @@ def _scan_working_dir(working_dir: str) -> tuple[str, list[str], list[str]]:
     if os.path.exists(pkg_json):
         detected_configs.append("package.json")
         try:
-            with open(pkg_json) as f:
-                data = json.loads(f.read())
+            with open(pkg_json) as pkg_file:
+                data = json.loads(pkg_file.read())
             deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
             if "react" in deps:
                 tech_stack.append("React")
@@ -1028,8 +1035,8 @@ def _read_key_files(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def _parse_analysis(text: str) -> dict:
-    analysis: dict = {}
+def _parse_analysis(text: str) -> dict[str, Any]:
+    analysis: dict[str, Any] = {}
     requirements: list[str] = []
     current_key = ""
     _END_SECTIONS = {
@@ -1074,8 +1081,8 @@ def _parse_analysis(text: str) -> dict:
     return analysis
 
 
-def _parse_questions_with_options(text: str) -> list[dict]:
-    questions: list[dict] = []
+def _parse_questions_with_options(text: str) -> list[dict[str, Any]]:
+    questions: list[dict[str, Any]] = []
     in_questions = False
     for line in text.splitlines():
         stripped = line.strip()
@@ -1171,8 +1178,8 @@ def _parse_list_section(text: str, section_name: str) -> list[str]:
     return items
 
 
-def _parse_scope(text: str) -> dict:
-    scope: dict = {"modify": [], "create": [], "do_not_touch": []}
+def _parse_scope(text: str) -> dict[str, Any]:
+    scope: dict[str, Any] = {"modify": [], "create": [], "do_not_touch": []}
     in_scope = False
     for line in text.splitlines():
         stripped = line.strip()
@@ -1290,13 +1297,13 @@ async def _auto_harness_setup(
 
 
 async def _enhance_scaffold_with_ai(
-    scaffold_files: list,
-    scan,
+    scaffold_files: list[HarnessFile],
+    scan: ScanResult,
     ai_guide: str,
     working_dir: str,
     provider: str,
     project_description: str = "",
-) -> list:
+) -> list[Any]:
     """Use AI to replace [TODO] placeholders with project-specific content.
 
     Uses (in priority order):
@@ -1316,8 +1323,8 @@ async def _enhance_scaffold_with_ai(
     readme = os.path.join(working_dir, "README.md")
     if os.path.isfile(readme):
         try:
-            with open(readme) as f:
-                context_parts.append(f"README.md:\n{f.read(3000)}")
+            with open(readme) as readme_fh:
+                context_parts.append(f"README.md:\n{readme_fh.read(3000)}")
         except Exception:
             pass
 
@@ -1400,8 +1407,8 @@ async def _enhance_scaffold_with_ai(
 
 
 async def _enhance_sub_agents_with_ai(
-    sub_files: list,
-    scan,
+    sub_files: list[HarnessFile],
+    scan: ScanResult,
     working_dir: str,
     provider: str,
 ) -> None:
@@ -1410,7 +1417,7 @@ async def _enhance_sub_agents_with_ai(
 
     from openseed_codex.agent import CodexAgent
 
-    async def _enhance_one(f) -> None:
+    async def _enhance_one(f: HarnessFile) -> None:
         pkg_dir = os.path.join(working_dir, os.path.dirname(f.path))
         pkg_context = ""
         for name in ["__init__.py", "index.ts", "index.js", "main.py", "app.py"]:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from openseed_brain.progress import emit_progress
 from openseed_brain.state import FileEntry, PipelineState, Plan, PlanTask
@@ -17,11 +18,11 @@ from openseed_brain.state import FileEntry, PipelineState, Plan, PlanTask
 logger = logging.getLogger(__name__)
 
 
-async def _emit(event_type: str, **data) -> None:
+async def _emit(event_type: str, **data: Any) -> None:
     await emit_progress(event_type, node="plan", **data)
 
 
-async def plan_node(state: PipelineState) -> dict:
+async def plan_node(state: PipelineState) -> dict[str, Any]:
     """
     Generate a detailed implementation plan via Claude Opus.
     Reuses intake's plan if the user already approved one.
@@ -52,7 +53,7 @@ async def plan_node(state: PipelineState) -> dict:
         await _emit("plan.convert", message="Structuring user-approved plan into tasks...")
         plan = await _convert_intake_plan_via_llm(task, intake_analysis)
         logger.info("Using intake's user-approved plan (%d tasks, %d files)", len(plan.tasks), len(plan.file_manifest))
-        result: dict = {
+        result: dict[str, Any] = {
             "plan": plan,
             "messages": [f"Plan: {plan.summary} ({len(plan.tasks)} tasks, {len(plan.file_manifest)} files)"],
         }
@@ -126,7 +127,7 @@ No orphan endpoints, no orphan UI actions.
     }
 
 
-async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict) -> Plan:
+async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict[str, Any]) -> Plan:
     """
     Convert intake's text-based plan to structured Plan via LLM.
 
@@ -139,9 +140,9 @@ async def _convert_intake_plan_via_llm(task: str, intake_analysis: dict) -> Plan
     plan_text = intake_analysis.get("plan", "")
     scope_raw = intake_analysis.get("scope", {})
     # scope can arrive as string from frontend — normalize to dict
-    scope: dict = scope_raw if isinstance(scope_raw, dict) else {}
+    scope: dict[str, Any] = scope_raw if isinstance(scope_raw, dict) else {}
     done_when_raw = intake_analysis.get("done_when", [])
-    done_when: list = done_when_raw if isinstance(done_when_raw, list) else []
+    done_when: list[Any] = done_when_raw if isinstance(done_when_raw, list) else []
     selected_skills = intake_analysis.get("selected_skills", [])
     tech_stack = intake_analysis.get("tech_stack", "")
 
@@ -304,7 +305,7 @@ def _parse_llm_converted_plan(
     return plan
 
 
-def _build_analysis_context(intake_analysis: dict) -> str:
+def _build_analysis_context(intake_analysis: dict[str, Any]) -> str:
     """Build analysis context string from intake analysis fields."""
     if not intake_analysis:
         return ""

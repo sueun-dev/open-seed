@@ -6,13 +6,14 @@ REAL implementation — calls openseed_qa_gate.
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from openseed_core.types import Plan, QAResult, Verdict
 
 from openseed_brain.state import PipelineState
 
 
-async def qa_gate_node(state: PipelineState) -> dict:
+async def qa_gate_node(state: PipelineState) -> dict[str, Any]:
     """Run QA specialists in parallel, produce verdict.
 
     After fix attempts (retry_count > 0), runs lightweight QA:
@@ -123,7 +124,7 @@ async def qa_gate_node(state: PipelineState) -> dict:
         }
 
 
-async def _lightweight_qa(working_dir: str, plan: Plan | None) -> dict:
+async def _lightweight_qa(working_dir: str, plan: Plan | None) -> dict[str, Any]:
     """Fast QA after fix: build/lint check only, no full agent review.
 
     Runs deterministic checks (TypeScript compile, lint, file existence)
@@ -144,7 +145,7 @@ async def _lightweight_qa(working_dir: str, plan: Plan | None) -> dict:
     # 2. TypeScript check (if tsconfig exists)
     tsconfig = os.path.join(working_dir, "tsconfig.json")
     web_tsconfig = os.path.join(working_dir, "web", "tsconfig.json")
-    ts_dir = working_dir
+    ts_dir: str | None = working_dir
     if os.path.exists(web_tsconfig):
         ts_dir = os.path.join(working_dir, "web")
     elif not os.path.exists(tsconfig):

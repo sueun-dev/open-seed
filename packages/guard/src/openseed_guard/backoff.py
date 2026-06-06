@@ -33,8 +33,9 @@ def compute_backoff_ms(
         4 failures → 80,000ms (80s)
         5 failures → 160,000ms (160s) — capped
     """
-    exponent = min(consecutive_failures, cap_exponent)
-    delay = base_ms * (2**exponent)
+    exponent = max(0, min(consecutive_failures, cap_exponent))
+    # Bit-shift is an exact integer form of base_ms * 2**exponent.
+    delay = base_ms * (1 << exponent)
     return min(delay, max_ms)
 
 

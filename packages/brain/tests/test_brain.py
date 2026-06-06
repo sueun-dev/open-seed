@@ -10,6 +10,7 @@ Covers:
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,11 +33,11 @@ from openseed_core.types import (
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _make_state(**overrides) -> PipelineState:
+def _make_state(**overrides: Any) -> PipelineState:
     """Return a minimal PipelineState, merging any keyword overrides."""
-    base = initial_state(task="test task", working_dir="/tmp/test")
-    base.update(overrides)  # type: ignore[attr-defined]
-    return base
+    base = dict(initial_state(task="test task", working_dir="/tmp/test"))
+    base.update(overrides)
+    return cast(PipelineState, base)
 
 
 def _error(message: str, step: str = "qa") -> Error:
@@ -47,7 +48,7 @@ def _error(message: str, step: str = "qa") -> Error:
 
 
 class TestRetryPolicyDefaults:
-    def test_retry_policy_defaults(self):
+    def test_retry_policy_defaults(self) -> None:
         """RetryPolicy has sane defaults matching LangGraph conventions."""
         policy = RetryPolicy()
         # LangGraph defaults: max_attempts=3, initial_interval=0.5, backoff_factor=2.0
@@ -55,19 +56,19 @@ class TestRetryPolicyDefaults:
         assert policy.initial_interval >= 0
         assert policy.backoff_factor >= 1.0
 
-    def test_predefined_policies_exist(self):
+    def test_predefined_policies_exist(self) -> None:
         """IMPLEMENT_RETRY, QA_RETRY, DEPLOY_RETRY are importable and valid."""
         assert IMPLEMENT_RETRY.max_attempts == 3
         assert QA_RETRY.max_attempts == 2
         assert DEPLOY_RETRY.max_attempts == 2
 
-    def test_predefined_policies_initial_intervals(self):
+    def test_predefined_policies_initial_intervals(self) -> None:
         """Predefined policies carry the expected initial_interval values."""
         assert IMPLEMENT_RETRY.initial_interval == 2.0
         assert QA_RETRY.initial_interval == 1.0
         assert DEPLOY_RETRY.initial_interval == 3.0
 
-    def test_predefined_policies_are_retry_policy_instances(self):
+    def test_predefined_policies_are_retry_policy_instances(self) -> None:
         """All predefined policies are RetryPolicy instances."""
         assert isinstance(IMPLEMENT_RETRY, RetryPolicy)
         assert isinstance(QA_RETRY, RetryPolicy)
@@ -76,11 +77,11 @@ class TestRetryPolicyDefaults:
 
 class TestWithRetryDecorator:
     @pytest.mark.asyncio
-    async def test_with_retry_succeeds_first_attempt(self):
+    async def test_with_retry_succeeds_first_attempt(self) -> None:
         """Node that never fails returns its result without retrying."""
         policy = RetryPolicy(max_attempts=3, initial_interval=0.0, backoff_factor=1.0, jitter=False)
 
-        async def always_ok(state):
+        async def always_ok(state: Any) -> Any:
             return {"messages": ["ok"]}
 
         wrapped = with_retry(always_ok, policy)
@@ -88,12 +89,12 @@ class TestWithRetryDecorator:
         assert result == {"messages": ["ok"]}
 
     @pytest.mark.asyncio
-    async def test_with_retry_succeeds_after_failure(self):
+    async def test_with_retry_succeeds_after_failure(self) -> None:
         """Node that fails once then succeeds returns the success result."""
         policy = RetryPolicy(max_attempts=3, initial_interval=0.0, backoff_factor=1.0, jitter=False)
         call_count = 0
 
-        async def flaky(state):
+        async def flaky(state: Any) -> Any:
             nonlocal call_count
             call_count += 1
             if call_count < 2:
@@ -109,12 +110,12 @@ class TestWithRetryDecorator:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_with_retry_succeeds_after_multiple_failures(self):
+    async def test_with_retry_succeeds_after_multiple_failures(self) -> None:
         """Node that fails twice then succeeds completes within max_attempts=3."""
         policy = RetryPolicy(max_attempts=3, initial_interval=0.0, backoff_factor=1.0, jitter=False)
         call_count = 0
 
-        async def flaky(state):
+        async def flaky(state: Any) -> Any:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
@@ -129,11 +130,11 @@ class TestWithRetryDecorator:
         assert call_count == 3
 
     @pytest.mark.asyncio
-    async def test_with_retry_exhausts_attempts(self):
+    async def test_with_retry_exhausts_attempts(self) -> None:
         """Node that always fails raises after max_attempts is exhausted."""
         policy = RetryPolicy(max_attempts=3, initial_interval=0.0, backoff_factor=1.0, jitter=False)
 
-        async def always_fails(state):
+        async def always_fails(state: Any) -> None:
             raise ValueError("permanent failure")
 
         wrapped = with_retry(always_fails, policy)
@@ -142,7 +143,7 @@ class TestWithRetryDecorator:
                 await wrapped({})
 
     @pytest.mark.asyncio
-    async def test_with_retry_respects_retry_on_exception_types(self):
+    async def test_with_retry_respects_retry_on_exception_types(self) -> None:
         """Only the configured exception type triggers a retry; others propagate immediately."""
         policy = RetryPolicy(
             max_attempts=3,
@@ -153,7 +154,7 @@ class TestWithRetryDecorator:
         )
         call_count = 0
 
-        async def raises_type_error(state):
+        async def raises_type_error(state: Any) -> None:
             nonlocal call_count
             call_count += 1
             raise TypeError("not retried")
@@ -167,7 +168,7 @@ class TestWithRetryDecorator:
         assert call_count == 1
 
     @pytest.mark.asyncio
-    async def test_with_retry_backoff_increases(self):
+    async def test_with_retry_backoff_increases(self) -> None:
         """Each retry waits for a longer (or equal) sleep than the previous one."""
         policy = RetryPolicy(
             max_attempts=3,
@@ -176,13 +177,13 @@ class TestWithRetryDecorator:
             jitter=False,
         )
 
-        async def always_fails(state):
+        async def always_fails(state: Any) -> None:
             raise RuntimeError("boom")
 
         wrapped = with_retry(always_fails, policy)
         sleep_calls: list[float] = []
 
-        async def record_sleep(t: float):
+        async def record_sleep(t: float) -> None:
             sleep_calls.append(t)
 
         with patch("openseed_brain.retry.asyncio.sleep", side_effect=record_sleep), pytest.raises(RuntimeError):
@@ -194,7 +195,7 @@ class TestWithRetryDecorator:
         assert sleep_calls[1] >= sleep_calls[0]
 
     @pytest.mark.asyncio
-    async def test_with_retry_no_sleep_on_final_failure(self):
+    async def test_with_retry_no_sleep_on_final_failure(self) -> None:
         """No sleep is performed after the final failed attempt."""
         policy = RetryPolicy(
             max_attempts=2,
@@ -203,13 +204,13 @@ class TestWithRetryDecorator:
             jitter=False,
         )
 
-        async def always_fails(state):
+        async def always_fails(state: Any) -> None:
             raise RuntimeError("fail")
 
         wrapped = with_retry(always_fails, policy)
         sleep_calls: list[float] = []
 
-        async def record_sleep(t: float):
+        async def record_sleep(t: float) -> None:
             sleep_calls.append(t)
 
         with patch("openseed_brain.retry.asyncio.sleep", side_effect=record_sleep), pytest.raises(RuntimeError):
@@ -223,49 +224,49 @@ class TestWithRetryDecorator:
 
 
 class TestRouteAfterIntake:
-    def test_route_after_intake_returns_plan_by_default(self):
+    def test_route_after_intake_returns_plan_by_default(self) -> None:
         """When skip_planning is False (default), route to 'plan'."""
         state = _make_state(skip_planning=False)
         assert route_after_intake(state) == "plan"
 
-    def test_route_after_intake_returns_plan_when_key_absent(self):
+    def test_route_after_intake_returns_plan_when_key_absent(self) -> None:
         """When skip_planning is absent from state, defaults to 'plan'."""
         state = _make_state()
         state.pop("skip_planning", None)  # type: ignore[misc]
         assert route_after_intake(state) == "plan"
 
-    def test_route_after_intake_returns_implement_when_skip_planning(self):
+    def test_route_after_intake_returns_implement_when_skip_planning(self) -> None:
         """When skip_planning is True, route to 'implement'."""
         state = _make_state(skip_planning=True)
         assert route_after_intake(state) == "implement"
 
 
 class TestRouteAfterQA:
-    def test_route_after_qa_returns_deploy_on_pass(self):
+    def test_route_after_qa_returns_deploy_on_pass(self) -> None:
         """QAResult with Verdict.PASS → 'deploy'."""
         qa = QAResult(verdict=Verdict.PASS)
         state = _make_state(qa_result=qa)
         assert route_after_qa(state) == "deploy"
 
-    def test_route_after_qa_returns_fix_on_fail_with_retries_left(self):
+    def test_route_after_qa_returns_fix_on_fail_with_retries_left(self) -> None:
         """QAResult with Verdict.BLOCK and retries remaining → 'fix'."""
         qa = QAResult(verdict=Verdict.BLOCK)
         state = _make_state(qa_result=qa, retry_count=1, max_retries=10)
         assert route_after_qa(state) == "fix"
 
-    def test_route_after_qa_returns_fix_on_warn_with_retries_left(self):
+    def test_route_after_qa_returns_fix_on_warn_with_retries_left(self) -> None:
         """QAResult with Verdict.WARN (non-pass) and retries remaining → 'fix'."""
         qa = QAResult(verdict=Verdict.WARN)
         state = _make_state(qa_result=qa, retry_count=0, max_retries=10)
         assert route_after_qa(state) == "fix"
 
-    def test_route_after_qa_returns_user_escalate_when_max_retries_exhausted(self):
+    def test_route_after_qa_returns_user_escalate_when_max_retries_exhausted(self) -> None:
         """retry_count >= max_retries with no pass → 'user_escalate'."""
         qa = QAResult(verdict=Verdict.BLOCK)
         state = _make_state(qa_result=qa, retry_count=10, max_retries=10)
         assert route_after_qa(state) == "user_escalate"
 
-    def test_route_after_qa_returns_user_escalate_on_stagnation(self):
+    def test_route_after_qa_returns_user_escalate_on_stagnation(self) -> None:
         """3+ retries with the same repeating error messages → 'user_escalate'."""
         qa = QAResult(verdict=Verdict.BLOCK)
         repeated_errors = [
@@ -284,26 +285,26 @@ class TestRouteAfterQA:
         )
         assert route_after_qa(state) == "user_escalate"
 
-    def test_route_after_qa_returns_end_on_abort(self):
+    def test_route_after_qa_returns_end_on_abort(self) -> None:
         """An error message containing 'abort' → 'end'."""
         qa = QAResult(verdict=Verdict.BLOCK)
         errors = [_error("Please abort this run immediately")]
         state = _make_state(qa_result=qa, retry_count=0, max_retries=10, errors=errors)
         assert route_after_qa(state) == "end"
 
-    def test_route_after_qa_returns_end_on_abandon(self):
+    def test_route_after_qa_returns_end_on_abandon(self) -> None:
         """An error message containing 'abandon' → 'end'."""
         qa = QAResult(verdict=Verdict.BLOCK)
         errors = [_error("Abandon the current attempt")]
         state = _make_state(qa_result=qa, retry_count=0, max_retries=10, errors=errors)
         assert route_after_qa(state) == "end"
 
-    def test_route_after_qa_no_qa_result_returns_fix(self):
+    def test_route_after_qa_no_qa_result_returns_fix(self) -> None:
         """No qa_result in state with retries left defaults to 'fix'."""
         state = _make_state(qa_result=None, retry_count=0, max_retries=10)
         assert route_after_qa(state) == "fix"
 
-    def test_route_after_qa_pass_overrides_errors(self):
+    def test_route_after_qa_pass_overrides_errors(self) -> None:
         """PASS verdict is returned even when errors list is non-empty."""
         qa = QAResult(verdict=Verdict.PASS)
         errors = [_error("some non-fatal warning")]
@@ -314,7 +315,7 @@ class TestRouteAfterQA:
 # ─── 3. Checkpoint (unit, mock graph) ─────────────────────────────────────────
 
 
-def _make_snapshot(thread_id: str, checkpoint_id: str, values: dict) -> MagicMock:
+def _make_snapshot(thread_id: str, checkpoint_id: str, values: dict[str, Any]) -> MagicMock:
     """Build a minimal StateSnapshot-like mock."""
     snap = MagicMock()
     snap.values = values
@@ -326,13 +327,13 @@ def _make_snapshot(thread_id: str, checkpoint_id: str, values: dict) -> MagicMoc
 
 class TestCheckpointGetStateHistory:
     @pytest.mark.asyncio
-    async def test_get_state_history_returns_snapshots(self):
+    async def test_get_state_history_returns_snapshots(self) -> None:
         """get_state_history returns a list of StateSnapshot objects."""
         from openseed_brain.checkpoint import get_state_history
 
         snaps = [_make_snapshot("t1", f"ck{i}", {"step": i}) for i in range(5)]
 
-        async def _agen(*args, **kwargs):
+        async def _agen(*args: Any, **kwargs: Any) -> Any:
             for s in snaps:
                 yield s
 
@@ -344,13 +345,13 @@ class TestCheckpointGetStateHistory:
         assert result[0].config["configurable"]["checkpoint_id"] == "ck0"
 
     @pytest.mark.asyncio
-    async def test_get_state_history_respects_limit(self):
+    async def test_get_state_history_respects_limit(self) -> None:
         """get_state_history stops at the requested limit."""
         from openseed_brain.checkpoint import get_state_history
 
         snaps = [_make_snapshot("t1", f"ck{i}", {}) for i in range(10)]
 
-        async def _agen(*args, **kwargs):
+        async def _agen(*args: Any, **kwargs: Any) -> Any:
             for s in snaps:
                 yield s
 
@@ -361,13 +362,13 @@ class TestCheckpointGetStateHistory:
         assert len(result) == 3
 
     @pytest.mark.asyncio
-    async def test_get_latest_state_returns_first(self):
+    async def test_get_latest_state_returns_first(self) -> None:
         """get_latest_state returns the most recent snapshot (index 0)."""
         from openseed_brain.checkpoint import get_latest_state
 
         snaps = [_make_snapshot("t1", f"ck{i}", {"step": i}) for i in range(3)]
 
-        async def _agen(*args, **kwargs):
+        async def _agen(*args: Any, **kwargs: Any) -> Any:
             for s in snaps:
                 yield s
 
@@ -378,11 +379,11 @@ class TestCheckpointGetStateHistory:
         assert result is snaps[0]
 
     @pytest.mark.asyncio
-    async def test_get_latest_state_returns_none_when_empty(self):
+    async def test_get_latest_state_returns_none_when_empty(self) -> None:
         """get_latest_state returns None when no checkpoints exist."""
         from openseed_brain.checkpoint import get_latest_state
 
-        async def _agen(*args, **kwargs):
+        async def _agen(*args: Any, **kwargs: Any) -> Any:
             return
             yield  # make it an async generator
 
@@ -393,7 +394,7 @@ class TestCheckpointGetStateHistory:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_fork_from_checkpoint_copies_state(self):
+    async def test_fork_from_checkpoint_copies_state(self) -> None:
         """fork_from_checkpoint reads source state and writes it to new thread."""
         from openseed_brain.checkpoint import fork_from_checkpoint
 
@@ -422,7 +423,7 @@ class TestCheckpointGetStateHistory:
         assert new_cfg["configurable"]["thread_id"] == "fork-1"
 
     @pytest.mark.asyncio
-    async def test_fork_from_checkpoint_raises_on_missing_checkpoint(self):
+    async def test_fork_from_checkpoint_raises_on_missing_checkpoint(self) -> None:
         """fork_from_checkpoint raises ValueError when checkpoint is not found."""
         from openseed_brain.checkpoint import fork_from_checkpoint
 
@@ -437,7 +438,7 @@ class TestCheckpointGetStateHistory:
 
 
 class TestBuildGraph:
-    def _get_graph(self):
+    def _get_graph(self) -> Any:
         from openseed_brain.graph import build_graph
 
         # Patch all node imports so we don't need a full LLM/tool environment
@@ -455,7 +456,7 @@ class TestBuildGraph:
         with patch.multiple("openseed_brain.graph", **{t.split(".")[-1]: v for t, v in mocks.items()}):
             return build_graph()
 
-    def test_build_graph_has_all_nodes(self):
+    def test_build_graph_has_all_nodes(self) -> None:
         """build_graph registers every required pipeline node."""
         graph = self._get_graph()
         node_ids = set(graph.nodes.keys())
@@ -472,7 +473,7 @@ class TestBuildGraph:
         }
         assert expected.issubset(node_ids), f"Missing nodes: {expected - node_ids}"
 
-    def test_build_graph_has_all_edges(self):
+    def test_build_graph_has_all_edges(self) -> None:
         """build_graph wires critical sequential edges correctly.
 
         graph.edges is a set of (source, target) tuples in LangGraph >= 0.2.
@@ -488,7 +489,7 @@ class TestBuildGraph:
 
 
 class TestCompileGraph:
-    def _patch_nodes(self):
+    def _patch_nodes(self) -> Any:
         """Return a dict of patches for all imported node functions."""
         node_names = [
             "intake_node",
@@ -502,7 +503,7 @@ class TestCompileGraph:
         ]
         return {name: AsyncMock(return_value={}) for name in node_names}
 
-    def test_compile_graph_without_checkpoint(self):
+    def test_compile_graph_without_checkpoint(self) -> None:
         """compile_graph(checkpoint_dir=None) returns a compiled graph object."""
         from openseed_brain.graph import compile_graph
 
@@ -512,7 +513,7 @@ class TestCompileGraph:
         # LangGraph compiled graphs expose an invoke / ainvoke method
         assert hasattr(compiled, "ainvoke") or hasattr(compiled, "invoke")
 
-    def test_compile_graph_with_interrupt_on_escalation(self):
+    def test_compile_graph_with_interrupt_on_escalation(self) -> None:
         """compile_graph(interrupt_on_escalation=True) produces a compilable graph."""
         from openseed_brain.graph import compile_graph
 
@@ -521,7 +522,7 @@ class TestCompileGraph:
 
         assert compiled is not None
 
-    def test_compile_graph_with_checkpoint(self, tmp_path):
+    def test_compile_graph_with_checkpoint(self, tmp_path: Any) -> None:
         """compile_graph with a checkpoint_dir creates the directory and compiles."""
         from openseed_brain.graph import compile_graph
 
@@ -547,12 +548,12 @@ class TestCompileGraph:
 
 
 class TestInitialState:
-    def test_initial_state_sets_task_and_working_dir(self):
+    def test_initial_state_sets_task_and_working_dir(self) -> None:
         state = initial_state(task="write tests", working_dir="/proj")
         assert state["task"] == "write tests"
         assert state["working_dir"] == "/proj"
 
-    def test_initial_state_defaults(self):
+    def test_initial_state_defaults(self) -> None:
         state = initial_state(task="t", working_dir="/w")
         assert state["provider"] == "codex"
         assert state["retry_count"] == 0
@@ -568,6 +569,6 @@ class TestInitialState:
         assert state["findings"] == []
         assert state["relevant_memories"] == []
 
-    def test_initial_state_custom_provider(self):
+    def test_initial_state_custom_provider(self) -> None:
         state = initial_state(task="t", working_dir="/w", provider="codex")
         assert state["provider"] == "codex"

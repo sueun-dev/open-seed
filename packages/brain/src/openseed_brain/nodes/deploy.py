@@ -5,10 +5,12 @@ REAL implementation — calls openseed_deploy.
 
 from __future__ import annotations
 
+from typing import Any
+
 from openseed_brain.state import DeployResult, PipelineState
 
 
-async def deploy_node(state: PipelineState) -> dict:
+async def deploy_node(state: PipelineState) -> dict[str, Any]:
     """Deploy the verified implementation via configured channels."""
     working_dir = state["working_dir"]
     task = state["task"]

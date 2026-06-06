@@ -12,16 +12,18 @@ Covers:
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from openseed_brain.nodes.implement import _self_verify_and_fix
+from openseed_brain.state import PipelineState
 from openseed_core.types import Implementation
 
 
-def _make_state(**overrides):
+def _make_state(**overrides: Any) -> PipelineState:
     """Create a minimal PipelineState-like dict."""
-    base = {
+    base: dict[str, Any] = {
         "task": "Build a REST API",
         "working_dir": "/tmp/test-project",
         "provider": "claude",
@@ -42,14 +44,14 @@ def _make_state(**overrides):
         "_specialist_task": None,
     }
     base.update(overrides)
-    return base
+    return cast(PipelineState, base)
 
 
-def _make_impl(summary="Built the API"):
+def _make_impl(summary: str = "Built the API") -> Any:
     return Implementation(summary=summary, raw_output="full output here")
 
 
-def _make_evidence(passed: bool, detail: str = ""):
+def _make_evidence(passed: bool, detail: str = "") -> Any:
     from openseed_guard.evidence import Evidence
 
     return Evidence(check="lint: tsc", passed=passed, detail=detail)
@@ -59,7 +61,7 @@ def _make_evidence(passed: bool, detail: str = ""):
 
 
 @pytest.mark.asyncio
-async def test_no_lint_commands_passthrough():
+async def test_no_lint_commands_passthrough() -> None:
     """When no lint tools are detected, implementation passes through unchanged."""
     state = _make_state()
     impl = _make_impl()
@@ -79,7 +81,7 @@ async def test_no_lint_commands_passthrough():
 
 
 @pytest.mark.asyncio
-async def test_lint_passes_no_fix():
+async def test_lint_passes_no_fix() -> None:
     """When all lint checks pass, no fix is invoked."""
     state = _make_state()
     impl = _make_impl()
@@ -106,14 +108,14 @@ async def test_lint_passes_no_fix():
 
 
 @pytest.mark.asyncio
-async def test_lint_fails_fix_succeeds():
+async def test_lint_fails_fix_succeeds() -> None:
     """When lint fails, Claude fixes, and re-check passes."""
     state = _make_state()
     impl = _make_impl()
 
     call_count = 0
 
-    async def mock_verify_command(cmd, working_dir):
+    async def mock_verify_command(cmd: Any, working_dir: Any) -> Any:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -153,12 +155,12 @@ async def test_lint_fails_fix_succeeds():
 
 
 @pytest.mark.asyncio
-async def test_lint_fails_fix_still_fails():
+async def test_lint_fails_fix_still_fails() -> None:
     """When lint fails and fix doesn't resolve it, message reports remaining issues."""
     state = _make_state()
     impl = _make_impl()
 
-    async def mock_verify_always_fails(cmd, working_dir):
+    async def mock_verify_always_fails(cmd: Any, working_dir: Any) -> Any:
         return _make_evidence(passed=False, detail="still broken")
 
     mock_agent = MagicMock()
@@ -188,7 +190,7 @@ async def test_lint_fails_fix_still_fails():
 
 
 @pytest.mark.asyncio
-async def test_exception_graceful_fallthrough():
+async def test_exception_graceful_fallthrough() -> None:
     """If self-verify throws, implementation passes through silently."""
     state = _make_state()
     impl = _make_impl()
@@ -208,7 +210,7 @@ async def test_exception_graceful_fallthrough():
 
 
 @pytest.mark.asyncio
-async def test_multiple_lint_commands_partial_failure():
+async def test_multiple_lint_commands_partial_failure() -> None:
     """When one lint passes and another fails, only the failing one triggers fix."""
     state = _make_state()
     impl = _make_impl()

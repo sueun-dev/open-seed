@@ -30,7 +30,7 @@ Usage:
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -83,7 +83,7 @@ class StreamEvent:
 
 async def stream_pipeline(
     compiled_graph: Any,
-    initial_state: dict[str, Any],
+    initial_state: Mapping[str, Any],
     thread_id: str = "default",
     mode: PipelineStreamMode | list[PipelineStreamMode] = PipelineStreamMode.UPDATES,
     event_bus: Any = None,
@@ -249,7 +249,7 @@ def _parse_chunk(mode_name: str, chunk: Any, ts: int) -> StreamEvent:
     if mode_name == "updates":
         if isinstance(chunk, dict) and chunk:
             # Pick the first (and almost always only) node name
-            node_name = next(iter(chunk))
+            node_name: str = next(iter(chunk))
             update = chunk[node_name]
             return StreamEvent(
                 mode=PipelineStreamMode.UPDATES,
@@ -276,7 +276,7 @@ def _parse_chunk(mode_name: str, chunk: Any, ts: int) -> StreamEvent:
         if isinstance(chunk, tuple) and len(chunk) == 2:
             msg_chunk, metadata = chunk
             content = getattr(msg_chunk, "content", "")
-            node_name: str = metadata.get("langgraph_node", "") if isinstance(metadata, dict) else ""
+            node_name = metadata.get("langgraph_node", "") if isinstance(metadata, dict) else ""
             return StreamEvent(
                 mode=PipelineStreamMode.MESSAGES,
                 node=node_name,
@@ -300,7 +300,7 @@ def _parse_chunk(mode_name: str, chunk: Any, ts: int) -> StreamEvent:
         if isinstance(chunk, dict):
             return StreamEvent(
                 mode=PipelineStreamMode.TASKS,
-                node=chunk.get("name", chunk.get("id", "")),
+                node=str(chunk.get("name", chunk.get("id", ""))),
                 data=chunk,
                 timestamp_ms=ts,
             )

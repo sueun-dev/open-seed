@@ -13,7 +13,7 @@ Usage in the parent graph:
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -40,7 +40,7 @@ class FixSubState(TypedDict):
 # ── Node implementations ──────────────────────────────────────────────────────
 
 
-async def diagnose_node(state: FixSubState) -> dict:
+async def diagnose_node(state: FixSubState) -> dict[str, Any]:
     """
     Analyse the errors and produce a structured repair plan via LLM.
     Uses Claude Haiku for fast triage.
@@ -77,7 +77,7 @@ Be brief — this plan will be fed directly to an automated fix agent."""
     return {"repair_plan": response.text.strip()}
 
 
-async def fix_node(state: FixSubState) -> dict:
+async def fix_node(state: FixSubState) -> dict[str, Any]:
     """
     Apply fixes according to the repair plan using CodexAgent (codex-standard).
     Mirrors the logic of openseed_brain.nodes.sentinel.fix_node but is
@@ -120,7 +120,7 @@ Rules:
     return {"fix_applied": response.text.strip()}
 
 
-async def verify_node(state: FixSubState) -> dict:
+async def verify_node(state: FixSubState) -> dict[str, Any]:
     """
     Evidence-based verification that the fix was applied correctly.
     Uses openseed_guard.evidence.verify_implementation when available;
@@ -156,7 +156,7 @@ async def verify_node(state: FixSubState) -> dict:
 # ── Graph builder ─────────────────────────────────────────────────────────────
 
 
-def build_fix_subgraph() -> StateGraph:
+def build_fix_subgraph() -> StateGraph[FixSubState]:
     """
     Build the Fix cycle as a self-contained LangGraph subgraph.
 

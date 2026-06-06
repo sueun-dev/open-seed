@@ -95,8 +95,8 @@ class SQLiteMemoryBackend(MemoryBackend):
         query: str,
         user_id: str = "default",
         limit: int = 10,
-        filters: dict | None = None,
-    ) -> list[dict]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         if not self._conn:
             self.initialize()
         assert self._conn
@@ -151,8 +151,8 @@ class SQLiteMemoryBackend(MemoryBackend):
         self,
         user_id: str = "default",
         limit: int = 100,
-        filters: dict | None = None,
-    ) -> list[dict]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         if not self._conn:
             self.initialize()
         assert self._conn
@@ -220,7 +220,7 @@ class SQLiteMemoryBackend(MemoryBackend):
         self._conn.commit()
         return True
 
-    def history(self, memory_id: str) -> list[dict]:
+    def history(self, memory_id: str) -> list[dict[str, Any]]:
         if not self._conn:
             return []
         rows = self._conn.execute(

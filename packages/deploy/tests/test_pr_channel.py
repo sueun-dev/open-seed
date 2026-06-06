@@ -4,6 +4,7 @@ Tests for PR deploy channel — OpenHands pattern.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -28,7 +29,7 @@ class TestPRChannel:
             assert await PRChannel().check() is False
 
     @pytest.mark.asyncio
-    async def test_deploy_not_git_repo(self, tmp_path) -> None:
+    async def test_deploy_not_git_repo(self, tmp_path: Any) -> None:
         result = await PRChannel().deploy(str(tmp_path))
         assert not result.success
         assert "Not a git" in result.message

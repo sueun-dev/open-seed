@@ -12,6 +12,9 @@ Covers:
 
 from __future__ import annotations
 
+import contextlib
+from contextlib import AbstractContextManager
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -31,11 +34,11 @@ from openseed_core.types import (
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _make_state(**overrides) -> PipelineState:
+def _make_state(**overrides: Any) -> PipelineState:
     """Return a minimal PipelineState, merging any keyword overrides."""
-    base = initial_state(task="test task", working_dir="/tmp/test")
-    base.update(overrides)  # type: ignore[attr-defined]
-    return base
+    base = dict(initial_state(task="test task", working_dir="/tmp/test"))
+    base.update(overrides)
+    return cast(PipelineState, base)
 
 
 def _make_qa_fail(findings: list[Finding] | None = None) -> QAResult:
@@ -55,7 +58,7 @@ def _make_qa_fail(findings: list[Finding] | None = None) -> QAResult:
     )
 
 
-def _mock_agent_response(text: str = "Fixed.", session_id: str = "sess-1"):
+def _mock_agent_response(text: str = "Fixed.", session_id: str = "sess-1") -> Any:
     """Create a mock ClaudeResponse."""
     resp = MagicMock()
     resp.text = text
@@ -63,11 +66,14 @@ def _mock_agent_response(text: str = "Fixed.", session_id: str = "sess-1"):
     return resp
 
 
-def _patch_fix_node_deps(mock_agent, stash_push=None, stash_revert=None, insight=None):
+def _patch_fix_node_deps(
+    mock_agent: Any,
+    stash_push: Any = None,
+    stash_revert: Any = None,
+    insight: Any = None,
+) -> tuple[contextlib.ExitStack, list[AbstractContextManager[Any]]]:
     """Return a combined context manager that patches all fix_node dependencies."""
-    import contextlib
-
-    patches = [
+    patches: list[AbstractContextManager[Any]] = [
         patch("openseed_codex.agent.CodexAgent", return_value=mock_agent),
         patch(
             "openseed_brain.nodes.sentinel._recall_past_fixes",
@@ -99,7 +105,7 @@ def _patch_fix_node_deps(mock_agent, stash_push=None, stash_revert=None, insight
 
 class TestFixNodeSessionContinuity:
     @pytest.mark.asyncio
-    async def test_first_attempt_creates_session(self, tmp_path):
+    async def test_first_attempt_creates_session(self, tmp_path: Any) -> None:
         """retry_count=0 should pass session_id, not continue_session."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -112,7 +118,7 @@ class TestFixNodeSessionContinuity:
 
         mock_agent = AsyncMock()
 
-        async def invoke_and_modify(*args, **kwargs):
+        async def invoke_and_modify(*args: Any, **kwargs: Any) -> Any:
             (tmp_path / "app.py").write_text("fixed-1")
             return _mock_agent_response()
 
@@ -131,7 +137,7 @@ class TestFixNodeSessionContinuity:
         assert not invoke_call.kwargs.get("continue_session")
 
     @pytest.mark.asyncio
-    async def test_subsequent_attempt_continues_session(self, tmp_path):
+    async def test_subsequent_attempt_continues_session(self, tmp_path: Any) -> None:
         """retry_count>0 should pass continue_session=True, no session_id."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -144,7 +150,7 @@ class TestFixNodeSessionContinuity:
 
         mock_agent = AsyncMock()
 
-        async def invoke_and_modify(*args, **kwargs):
+        async def invoke_and_modify(*args: Any, **kwargs: Any) -> Any:
             (tmp_path / "app.py").write_text("fixed-v2")
             return _mock_agent_response()
 
@@ -165,7 +171,7 @@ class TestFixNodeSessionContinuity:
 
 
 class TestBuildFixPrompt:
-    def test_early_retry_uses_3_phase_approach(self):
+    def test_early_retry_uses_3_phase_approach(self) -> None:
         """retry 0-2 should produce a prompt with PHASE 1/2/3."""
         from openseed_brain.nodes.sentinel import _build_fix_prompt
 
@@ -182,7 +188,7 @@ class TestBuildFixPrompt:
         assert "PHASE 3: VERIFY" in prompt
         assert "COMPLETELY DIFFERENT" not in prompt
 
-    def test_late_retry_uses_different_strategy(self):
+    def test_late_retry_uses_different_strategy(self) -> None:
         """retry 3+ should insist on a completely different approach."""
         from openseed_brain.nodes.sentinel import _build_fix_prompt
 
@@ -198,7 +204,7 @@ class TestBuildFixPrompt:
         assert "previous" in prompt.lower()
         assert "DO NOT repeat" in prompt
 
-    def test_insight_advice_included_when_present(self):
+    def test_insight_advice_included_when_present(self) -> None:
         """Insight advice should be embedded in the prompt."""
         from openseed_brain.nodes.sentinel import _build_fix_prompt
 
@@ -218,7 +224,7 @@ class TestBuildFixPrompt:
         assert "INSIGHT GUIDANCE" in prompt
         assert "flat module layout" in prompt
 
-    def test_failure_history_included(self):
+    def test_failure_history_included(self) -> None:
         """Previous failure messages should appear in the prompt."""
         from openseed_brain.nodes.sentinel import _build_fix_prompt
 
@@ -239,7 +245,7 @@ class TestBuildFixPrompt:
 
 class TestInsightConsultation:
     @pytest.mark.asyncio
-    async def test_insight_consulted_at_retry_3(self, tmp_path):
+    async def test_insight_consulted_at_retry_3(self, tmp_path: Any) -> None:
         """At retry_count=3, Insight should be consulted."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -258,7 +264,7 @@ class TestInsightConsultation:
 
         mock_agent = AsyncMock()
 
-        async def invoke_and_modify(*args, **kwargs):
+        async def invoke_and_modify(*args: Any, **kwargs: Any) -> Any:
             (tmp_path / "app.py").write_text("insight-fixed")
             return _mock_agent_response()
 
@@ -281,7 +287,7 @@ class TestInsightConsultation:
         assert not result.get("errors")
 
     @pytest.mark.asyncio
-    async def test_insight_abandon_escalates_to_user(self, tmp_path):
+    async def test_insight_abandon_escalates_to_user(self, tmp_path: Any) -> None:
         """When Insight says should_abandon=True, fix_node returns an error for escalation."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -314,7 +320,7 @@ class TestInsightConsultation:
         assert "ABANDON" in result["messages"][0]
 
     @pytest.mark.asyncio
-    async def test_insight_not_consulted_at_retry_1(self, tmp_path):
+    async def test_insight_not_consulted_at_retry_1(self, tmp_path: Any) -> None:
         """At retry_count=1, Insight should NOT be consulted."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -327,7 +333,7 @@ class TestInsightConsultation:
 
         mock_agent = AsyncMock()
 
-        async def invoke_and_modify(*args, **kwargs):
+        async def invoke_and_modify(*args: Any, **kwargs: Any) -> Any:
             (tmp_path / "app.py").write_text("fixed")
             return _mock_agent_response()
 
@@ -345,7 +351,7 @@ class TestInsightConsultation:
         insight_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_insight_consulted_at_retry_6(self, tmp_path):
+    async def test_insight_consulted_at_retry_6(self, tmp_path: Any) -> None:
         """At retry_count=6 (another multiple of 3), Insight is consulted again."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -363,7 +369,7 @@ class TestInsightConsultation:
 
         mock_agent = AsyncMock()
 
-        async def invoke_and_modify(*args, **kwargs):
+        async def invoke_and_modify(*args: Any, **kwargs: Any) -> Any:
             (tmp_path / "app.py").write_text("fixed-v6")
             return _mock_agent_response()
 
@@ -388,7 +394,7 @@ class TestInsightConsultation:
 
 class TestEvidenceVerification:
     @pytest.mark.asyncio
-    async def test_detects_changed_files(self, tmp_path):
+    async def test_detects_changed_files(self, tmp_path: Any) -> None:
         """When files change, fix_node reports them."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -401,7 +407,7 @@ class TestEvidenceVerification:
 
         mock_agent = AsyncMock()
 
-        async def invoke_and_modify(*args, **kwargs):
+        async def invoke_and_modify(*args: Any, **kwargs: Any) -> Any:
             (tmp_path / "app.py").write_text("fixed!")
             return _mock_agent_response()
 
@@ -418,7 +424,7 @@ class TestEvidenceVerification:
         assert "app.py" in result["messages"][0]
 
     @pytest.mark.asyncio
-    async def test_noop_fix_gets_second_chance(self, tmp_path):
+    async def test_noop_fix_gets_second_chance(self, tmp_path: Any) -> None:
         """When first invoke changes nothing, a second invoke is tried."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -432,7 +438,7 @@ class TestEvidenceVerification:
         mock_agent = AsyncMock()
         call_count = 0
 
-        async def invoke_side_effect(*args, **kwargs):
+        async def invoke_side_effect(*args: Any, **kwargs: Any) -> Any:
             nonlocal call_count
             call_count += 1
             if call_count == 2:
@@ -452,7 +458,7 @@ class TestEvidenceVerification:
         assert "1 files changed" in result["messages"][0]
 
     @pytest.mark.asyncio
-    async def test_double_noop_returns_error(self, tmp_path):
+    async def test_double_noop_returns_error(self, tmp_path: Any) -> None:
         """When both invocations change nothing, an error is returned."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -483,7 +489,7 @@ class TestEvidenceVerification:
 
 class TestGitStash:
     @pytest.mark.asyncio
-    async def test_stash_push_on_first_attempt(self, tmp_path):
+    async def test_stash_push_on_first_attempt(self, tmp_path: Any) -> None:
         """Git stash push is called on retry_count=0."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -496,7 +502,7 @@ class TestGitStash:
 
         mock_agent = AsyncMock()
 
-        async def invoke_and_modify(*args, **kwargs):
+        async def invoke_and_modify(*args: Any, **kwargs: Any) -> Any:
             (tmp_path / "app.py").write_text("fixed")
             return _mock_agent_response()
 
@@ -514,7 +520,7 @@ class TestGitStash:
         stash_push.assert_awaited_once_with(str(tmp_path))
 
     @pytest.mark.asyncio
-    async def test_no_stash_on_subsequent_attempts(self, tmp_path):
+    async def test_no_stash_on_subsequent_attempts(self, tmp_path: Any) -> None:
         """Git stash push is NOT called on retry_count > 0 (unless multiple of 3)."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -527,7 +533,7 @@ class TestGitStash:
 
         mock_agent = AsyncMock()
 
-        async def invoke_and_modify(*args, **kwargs):
+        async def invoke_and_modify(*args: Any, **kwargs: Any) -> Any:
             (tmp_path / "app.py").write_text("fixed")
             return _mock_agent_response()
 
@@ -545,7 +551,7 @@ class TestGitStash:
         stash_push.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_stash_revert_on_3rd_failure(self, tmp_path):
+    async def test_stash_revert_on_3rd_failure(self, tmp_path: Any) -> None:
         """Git stash revert is called at retry_count=3 (3 consecutive failures)."""
         from openseed_brain.nodes.sentinel import fix_node
 
@@ -563,7 +569,7 @@ class TestGitStash:
 
         mock_agent = AsyncMock()
 
-        async def invoke_and_modify(*args, **kwargs):
+        async def invoke_and_modify(*args: Any, **kwargs: Any) -> Any:
             (tmp_path / "app.py").write_text("insight-fixed")
             return _mock_agent_response()
 
@@ -592,7 +598,7 @@ class TestGitStash:
 
 
 class TestBuildFindingsText:
-    def test_formats_findings(self):
+    def test_formats_findings(self) -> None:
         from openseed_brain.nodes.sentinel import _build_findings_text
 
         qa = _make_qa_fail(
@@ -607,7 +613,7 @@ class TestBuildFindingsText:
         assert "bad code" in text
         assert "x.py" in text
 
-    def test_empty_findings(self):
+    def test_empty_findings(self) -> None:
         from openseed_brain.nodes.sentinel import _build_findings_text
 
         assert _build_findings_text(None) == ""
@@ -616,7 +622,7 @@ class TestBuildFindingsText:
 
 
 class TestSnapshotDir:
-    def test_hashes_files(self, tmp_path):
+    def test_hashes_files(self, tmp_path: Any) -> None:
         from openseed_brain.nodes.sentinel import _snapshot_dir
 
         (tmp_path / "a.txt").write_text("hello")
@@ -627,7 +633,7 @@ class TestSnapshotDir:
         assert "b.txt" in snap
         assert len(snap) == 2
 
-    def test_excludes_git_and_node_modules(self, tmp_path):
+    def test_excludes_git_and_node_modules(self, tmp_path: Any) -> None:
         from openseed_brain.nodes.sentinel import _snapshot_dir
 
         (tmp_path / ".git").mkdir()
@@ -641,7 +647,7 @@ class TestSnapshotDir:
         assert ".git/config" not in snap
         assert "node_modules/pkg.js" not in snap
 
-    def test_detects_file_changes(self, tmp_path):
+    def test_detects_file_changes(self, tmp_path: Any) -> None:
         from openseed_brain.nodes.sentinel import _snapshot_dir
 
         (tmp_path / "f.txt").write_text("v1")
@@ -655,7 +661,7 @@ class TestSnapshotDir:
 
 class TestGitStashHelpers:
     @pytest.mark.asyncio
-    async def test_git_stash_push_no_git_dir(self, tmp_path):
+    async def test_git_stash_push_no_git_dir(self, tmp_path: Any) -> None:
         """_git_stash_push returns False when no .git directory exists."""
         from openseed_brain.nodes.sentinel import _git_stash_push
 
@@ -663,7 +669,7 @@ class TestGitStashHelpers:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_git_stash_revert_no_git_dir(self, tmp_path):
+    async def test_git_stash_revert_no_git_dir(self, tmp_path: Any) -> None:
         """_git_stash_revert returns False when no .git directory exists."""
         from openseed_brain.nodes.sentinel import _git_stash_revert
 
@@ -671,7 +677,7 @@ class TestGitStashHelpers:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_git_stash_push_with_git_dir(self, tmp_path):
+    async def test_git_stash_push_with_git_dir(self, tmp_path: Any) -> None:
         """_git_stash_push calls run_simple when .git exists."""
         from openseed_brain.nodes.sentinel import _git_stash_push
 

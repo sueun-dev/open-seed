@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from openseed_memory.filters import build_sql_where, matches_filter
 
@@ -15,114 +16,114 @@ from openseed_memory.filters import build_sql_where, matches_filter
 
 
 class TestMatchesFilterEquality:
-    def test_matches_filter_equality_match(self):
+    def test_matches_filter_equality_match(self) -> None:
         meta = {"memory_type": "procedural", "resolved": True}
         assert matches_filter(meta, {"memory_type": "procedural"}) is True
 
-    def test_matches_filter_equality_no_match(self):
+    def test_matches_filter_equality_no_match(self) -> None:
         meta = {"memory_type": "semantic"}
         assert matches_filter(meta, {"memory_type": "procedural"}) is False
 
-    def test_matches_filter_equality_missing_key(self):
+    def test_matches_filter_equality_missing_key(self) -> None:
         meta = {"other": "value"}
         assert matches_filter(meta, {"memory_type": "procedural"}) is False
 
-    def test_matches_filter_boolean_value(self):
+    def test_matches_filter_boolean_value(self) -> None:
         meta = {"resolved": True}
         assert matches_filter(meta, {"resolved": True}) is True
         assert matches_filter(meta, {"resolved": False}) is False
 
 
 class TestMatchesFilterNe:
-    def test_matches_filter_ne_match(self):
+    def test_matches_filter_ne_match(self) -> None:
         meta = {"memory_type": "semantic"}
         assert matches_filter(meta, {"memory_type": {"$ne": "procedural"}}) is True
 
-    def test_matches_filter_ne_no_match(self):
+    def test_matches_filter_ne_no_match(self) -> None:
         meta = {"memory_type": "procedural"}
         assert matches_filter(meta, {"memory_type": {"$ne": "procedural"}}) is False
 
 
 class TestMatchesFilterGtLt:
-    def test_matches_filter_gt_match(self):
+    def test_matches_filter_gt_match(self) -> None:
         meta = {"score": 0.9}
         assert matches_filter(meta, {"score": {"$gt": 0.8}}) is True
 
-    def test_matches_filter_gt_no_match(self):
+    def test_matches_filter_gt_no_match(self) -> None:
         meta = {"score": 0.7}
         assert matches_filter(meta, {"score": {"$gt": 0.8}}) is False
 
-    def test_matches_filter_lt_match(self):
+    def test_matches_filter_lt_match(self) -> None:
         meta = {"priority": 2}
         assert matches_filter(meta, {"priority": {"$lt": 5}}) is True
 
-    def test_matches_filter_lt_no_match(self):
+    def test_matches_filter_lt_no_match(self) -> None:
         meta = {"priority": 7}
         assert matches_filter(meta, {"priority": {"$lt": 5}}) is False
 
-    def test_matches_filter_gt_non_comparable(self):
+    def test_matches_filter_gt_non_comparable(self) -> None:
         meta = {"label": "abc"}
         # Strings are comparable in Python but let's check numeric intent
         assert matches_filter(meta, {"label": {"$gt": "aaa"}}) is True
 
-    def test_matches_filter_gt_type_mismatch_returns_false(self):
+    def test_matches_filter_gt_type_mismatch_returns_false(self) -> None:
         meta = {"val": "text"}
         # Comparing str > int raises TypeError → returns False
         assert matches_filter(meta, {"val": {"$gt": 10}}) is False
 
 
 class TestMatchesFilterGteLte:
-    def test_matches_filter_gte_equal(self):
+    def test_matches_filter_gte_equal(self) -> None:
         meta = {"score": 0.8}
         assert matches_filter(meta, {"score": {"$gte": 0.8}}) is True
 
-    def test_matches_filter_gte_greater(self):
+    def test_matches_filter_gte_greater(self) -> None:
         meta = {"score": 0.9}
         assert matches_filter(meta, {"score": {"$gte": 0.8}}) is True
 
-    def test_matches_filter_gte_less(self):
+    def test_matches_filter_gte_less(self) -> None:
         meta = {"score": 0.7}
         assert matches_filter(meta, {"score": {"$gte": 0.8}}) is False
 
-    def test_matches_filter_lte_equal(self):
+    def test_matches_filter_lte_equal(self) -> None:
         meta = {"count": 5}
         assert matches_filter(meta, {"count": {"$lte": 5}}) is True
 
-    def test_matches_filter_lte_less(self):
+    def test_matches_filter_lte_less(self) -> None:
         meta = {"count": 3}
         assert matches_filter(meta, {"count": {"$lte": 5}}) is True
 
-    def test_matches_filter_lte_greater(self):
+    def test_matches_filter_lte_greater(self) -> None:
         meta = {"count": 7}
         assert matches_filter(meta, {"count": {"$lte": 5}}) is False
 
 
 class TestMatchesFilterIn:
-    def test_matches_filter_in_match(self):
+    def test_matches_filter_in_match(self) -> None:
         meta = {"memory_type": "semantic"}
         assert matches_filter(meta, {"memory_type": {"$in": ["semantic", "episodic"]}}) is True
 
-    def test_matches_filter_in_no_match(self):
+    def test_matches_filter_in_no_match(self) -> None:
         meta = {"memory_type": "procedural"}
         assert matches_filter(meta, {"memory_type": {"$in": ["semantic", "episodic"]}}) is False
 
-    def test_matches_filter_in_empty_list(self):
+    def test_matches_filter_in_empty_list(self) -> None:
         meta = {"memory_type": "semantic"}
         assert matches_filter(meta, {"memory_type": {"$in": []}}) is False
 
 
 class TestMatchesFilterNin:
-    def test_matches_filter_nin_match(self):
+    def test_matches_filter_nin_match(self) -> None:
         meta = {"memory_type": "procedural"}
         assert matches_filter(meta, {"memory_type": {"$nin": ["semantic", "episodic"]}}) is True
 
-    def test_matches_filter_nin_no_match(self):
+    def test_matches_filter_nin_no_match(self) -> None:
         meta = {"memory_type": "semantic"}
         assert matches_filter(meta, {"memory_type": {"$nin": ["semantic", "episodic"]}}) is False
 
 
 class TestMatchesFilterAnd:
-    def test_matches_filter_and_all_match(self):
+    def test_matches_filter_and_all_match(self) -> None:
         meta = {"memory_type": "procedural", "resolved": True}
         assert (
             matches_filter(
@@ -137,7 +138,7 @@ class TestMatchesFilterAnd:
             is True
         )
 
-    def test_matches_filter_and_one_fails(self):
+    def test_matches_filter_and_one_fails(self) -> None:
         meta = {"memory_type": "procedural", "resolved": False}
         assert (
             matches_filter(
@@ -152,14 +153,14 @@ class TestMatchesFilterAnd:
             is False
         )
 
-    def test_matches_filter_and_empty_list(self):
+    def test_matches_filter_and_empty_list(self) -> None:
         meta = {"x": 1}
         # All of [] is vacuously True
         assert matches_filter(meta, {"$and": []}) is True
 
 
 class TestMatchesFilterOr:
-    def test_matches_filter_or_first_matches(self):
+    def test_matches_filter_or_first_matches(self) -> None:
         meta = {"memory_type": "semantic"}
         assert (
             matches_filter(
@@ -174,7 +175,7 @@ class TestMatchesFilterOr:
             is True
         )
 
-    def test_matches_filter_or_second_matches(self):
+    def test_matches_filter_or_second_matches(self) -> None:
         meta = {"memory_type": "procedural"}
         assert (
             matches_filter(
@@ -189,7 +190,7 @@ class TestMatchesFilterOr:
             is True
         )
 
-    def test_matches_filter_or_none_match(self):
+    def test_matches_filter_or_none_match(self) -> None:
         meta = {"memory_type": "episodic"}
         assert (
             matches_filter(
@@ -206,17 +207,17 @@ class TestMatchesFilterOr:
 
 
 class TestMatchesFilterNot:
-    def test_matches_filter_not_negates(self):
+    def test_matches_filter_not_negates(self) -> None:
         meta = {"memory_type": "semantic"}
         assert matches_filter(meta, {"$not": {"memory_type": "procedural"}}) is True
 
-    def test_matches_filter_not_when_inner_matches(self):
+    def test_matches_filter_not_when_inner_matches(self) -> None:
         meta = {"memory_type": "procedural"}
         assert matches_filter(meta, {"$not": {"memory_type": "procedural"}}) is False
 
 
 class TestMatchesFilterNested:
-    def test_matches_filter_nested_or_inside_and(self):
+    def test_matches_filter_nested_or_inside_and(self) -> None:
         meta = {"memory_type": "procedural", "resolved": True}
         assert (
             matches_filter(
@@ -236,7 +237,7 @@ class TestMatchesFilterNested:
             is True
         )
 
-    def test_matches_filter_nested_or_inside_and_fails(self):
+    def test_matches_filter_nested_or_inside_and_fails(self) -> None:
         meta = {"memory_type": "episodic", "resolved": True}
         assert (
             matches_filter(
@@ -256,7 +257,7 @@ class TestMatchesFilterNested:
             is False
         )
 
-    def test_matches_filter_deep_nesting(self):
+    def test_matches_filter_deep_nesting(self) -> None:
         meta = {"a": 1, "b": "x", "c": True}
         f = {
             "$or": [
@@ -273,18 +274,18 @@ class TestMatchesFilterNested:
 
 
 class TestMatchesFilterEmpty:
-    def test_matches_filter_empty_filters(self):
+    def test_matches_filter_empty_filters(self) -> None:
         meta = {"memory_type": "semantic"}
         assert matches_filter(meta, {}) is True
 
-    def test_matches_filter_empty_metadata(self):
+    def test_matches_filter_empty_metadata(self) -> None:
         # Non-existent key → value is None → None != "semantic" → False
         assert matches_filter({}, {"memory_type": "semantic"}) is False
 
-    def test_matches_filter_both_empty(self):
+    def test_matches_filter_both_empty(self) -> None:
         assert matches_filter({}, {}) is True
 
-    def test_matches_filter_multiple_top_level_keys_all_must_match(self):
+    def test_matches_filter_multiple_top_level_keys_all_must_match(self) -> None:
         meta = {"memory_type": "semantic", "resolved": True}
         assert matches_filter(meta, {"memory_type": "semantic", "resolved": True}) is True
         assert matches_filter(meta, {"memory_type": "semantic", "resolved": False}) is False
@@ -296,29 +297,29 @@ class TestMatchesFilterEmpty:
 
 
 class TestBuildSqlWhere:
-    def test_empty_filters(self):
+    def test_empty_filters(self) -> None:
         sql, params = build_sql_where({})
         assert sql == "1"
         assert params == {}
 
-    def test_simple_equality(self):
+    def test_simple_equality(self) -> None:
         sql, params = build_sql_where({"memory_type": "procedural"})
         assert "json_extract" in sql
         assert "memory_type" in sql
         assert "procedural" in params.values()
 
-    def test_gt_operator(self):
+    def test_gt_operator(self) -> None:
         sql, params = build_sql_where({"score": {"$gt": 0.8}})
         assert ">" in sql
         assert 0.8 in params.values()
 
-    def test_in_operator(self):
+    def test_in_operator(self) -> None:
         sql, params = build_sql_where({"memory_type": {"$in": ["semantic", "procedural"]}})
         assert "IN" in sql
         assert "semantic" in params.values()
         assert "procedural" in params.values()
 
-    def test_and_operator(self):
+    def test_and_operator(self) -> None:
         sql, params = build_sql_where(
             {
                 "$and": [
@@ -330,7 +331,7 @@ class TestBuildSqlWhere:
         assert "AND" in sql
         assert "procedural" in params.values()
 
-    def test_or_operator(self):
+    def test_or_operator(self) -> None:
         sql, params = build_sql_where(
             {
                 "$or": [
@@ -341,7 +342,7 @@ class TestBuildSqlWhere:
         )
         assert "OR" in sql
 
-    def test_not_operator(self):
+    def test_not_operator(self) -> None:
         sql, params = build_sql_where({"$not": {"memory_type": "procedural"}})
         assert "NOT" in sql
 
@@ -352,14 +353,14 @@ class TestBuildSqlWhere:
 
 
 class TestSQLiteSearchWithFilters:
-    def _make_backend(self):
+    def _make_backend(self) -> Any:
         from openseed_memory.backends.sqlite import SQLiteMemoryBackend
 
         backend = SQLiteMemoryBackend(db_path=":memory:")
         backend.initialize()
         return backend
 
-    def test_sqlite_search_with_filters_match(self):
+    def test_sqlite_search_with_filters_match(self) -> None:
         backend = self._make_backend()
         backend.add(
             "Python facts", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic", "lang": "python"}
@@ -374,14 +375,14 @@ class TestSQLiteSearchWithFilters:
         results = backend.search("facts", user_id="u1", limit=10, filters={"memory_type": "semantic"})
         assert all(r["metadata"].get("memory_type") == "semantic" for r in results)
 
-    def test_sqlite_search_with_filters_no_match(self):
+    def test_sqlite_search_with_filters_no_match(self) -> None:
         backend = self._make_backend()
         backend.add("Python facts", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
 
         results = backend.search("facts", user_id="u1", limit=10, filters={"memory_type": "procedural"})
         assert results == []
 
-    def test_sqlite_search_with_filters_operator(self):
+    def test_sqlite_search_with_filters_operator(self) -> None:
         backend = self._make_backend()
         backend.add(
             "High score item",
@@ -400,7 +401,7 @@ class TestSQLiteSearchWithFilters:
         assert len(results) == 1
         assert results[0]["metadata"]["importance"] == 9
 
-    def test_sqlite_search_without_filters(self):
+    def test_sqlite_search_without_filters(self) -> None:
         backend = self._make_backend()
         backend.add("Alpha", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
         backend.add("Beta", user_id="u1", memory_type="procedural", metadata={"memory_type": "procedural"})
@@ -410,14 +411,14 @@ class TestSQLiteSearchWithFilters:
 
 
 class TestSQLiteGetAllWithFilters:
-    def _make_backend(self):
+    def _make_backend(self) -> Any:
         from openseed_memory.backends.sqlite import SQLiteMemoryBackend
 
         backend = SQLiteMemoryBackend(db_path=":memory:")
         backend.initialize()
         return backend
 
-    def test_sqlite_get_all_with_filters_single_field(self):
+    def test_sqlite_get_all_with_filters_single_field(self) -> None:
         backend = self._make_backend()
         backend.add("Fact A", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
         backend.add("Procedure B", user_id="u1", memory_type="procedural", metadata={"memory_type": "procedural"})
@@ -427,7 +428,7 @@ class TestSQLiteGetAllWithFilters:
         assert len(results) == 1
         assert results[0]["memory_type"] == "procedural"
 
-    def test_sqlite_get_all_with_filters_and(self):
+    def test_sqlite_get_all_with_filters_and(self) -> None:
         backend = self._make_backend()
         backend.add(
             "Done procedure",
@@ -454,7 +455,7 @@ class TestSQLiteGetAllWithFilters:
         assert len(results) == 1
         assert results[0]["metadata"]["done"] is True
 
-    def test_sqlite_get_all_with_filters_in(self):
+    def test_sqlite_get_all_with_filters_in(self) -> None:
         backend = self._make_backend()
         backend.add("Sem", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
         backend.add("Proc", user_id="u1", memory_type="procedural", metadata={"memory_type": "procedural"})
@@ -465,7 +466,7 @@ class TestSQLiteGetAllWithFilters:
         assert "episodic" not in types
         assert types == {"semantic", "procedural"}
 
-    def test_sqlite_get_all_no_filters(self):
+    def test_sqlite_get_all_no_filters(self) -> None:
         backend = self._make_backend()
         backend.add("A", user_id="u1", memory_type="semantic", metadata={})
         backend.add("B", user_id="u1", memory_type="procedural", metadata={})
@@ -473,7 +474,7 @@ class TestSQLiteGetAllWithFilters:
         results = backend.get_all(user_id="u1")
         assert len(results) == 2
 
-    def test_sqlite_get_all_filters_different_users(self):
+    def test_sqlite_get_all_filters_different_users(self) -> None:
         backend = self._make_backend()
         backend.add("U1 item", user_id="u1", memory_type="semantic", metadata={"memory_type": "semantic"})
         backend.add("U2 item", user_id="u2", memory_type="semantic", metadata={"memory_type": "semantic"})
@@ -489,10 +490,10 @@ class TestSQLiteGetAllWithFilters:
 
 
 class TestStoreSearchWithFilters:
-    def _make_store(self):
+    def _make_store(self) -> Any:
         import tempfile
 
-        from openseed_core.config import MemoryConfig  # type: ignore[import]
+        from openseed_core.config import MemoryConfig
         from openseed_memory.store import MemoryStore
 
         tmp = tempfile.mktemp(suffix=".db")
@@ -506,7 +507,7 @@ class TestStoreSearchWithFilters:
         loop.run_until_complete(store.initialize())
         return store
 
-    def test_store_search_with_filters(self):
+    def test_store_search_with_filters(self) -> None:
         store = self._make_store()
         loop = asyncio.get_event_loop()
 
@@ -534,7 +535,7 @@ class TestStoreSearchWithFilters:
         )
         assert all(r.entry.metadata.get("memory_type") == "procedural" for r in results)
 
-    def test_store_search_no_filters(self):
+    def test_store_search_no_filters(self) -> None:
         store = self._make_store()
         loop = asyncio.get_event_loop()
         MemoryType = __import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType
@@ -553,10 +554,10 @@ class TestStoreSearchWithFilters:
 
 
 class TestStoreGetAllWithFilters:
-    def _make_store(self):
+    def _make_store(self) -> Any:
         import tempfile
 
-        from openseed_core.config import MemoryConfig  # type: ignore[import]
+        from openseed_core.config import MemoryConfig
         from openseed_memory.store import MemoryStore
 
         tmp = tempfile.mktemp(suffix=".db")
@@ -570,7 +571,7 @@ class TestStoreGetAllWithFilters:
         loop.run_until_complete(store.initialize())
         return store
 
-    def test_store_get_all_with_filters(self):
+    def test_store_get_all_with_filters(self) -> None:
         store = self._make_store()
         loop = asyncio.get_event_loop()
         MemoryType = __import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType
@@ -598,7 +599,7 @@ class TestStoreGetAllWithFilters:
         assert len(entries) == 1
         assert entries[0].metadata.get("memory_type") == "semantic"
 
-    def test_store_get_all_no_filters(self):
+    def test_store_get_all_no_filters(self) -> None:
         store = self._make_store()
         loop = asyncio.get_event_loop()
         MemoryType = __import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType
@@ -617,7 +618,7 @@ class TestStoreGetAllWithFilters:
         entries = loop.run_until_complete(store.get_all(user_id="u1"))
         assert len(entries) == 3
 
-    def test_store_get_all_with_or_filter(self):
+    def test_store_get_all_with_or_filter(self) -> None:
         store = self._make_store()
         loop = asyncio.get_event_loop()
         MemoryType = __import__("openseed_memory.types", fromlist=["MemoryType"]).MemoryType
