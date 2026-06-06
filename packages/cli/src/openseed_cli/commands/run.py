@@ -10,10 +10,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
 from rich.console import Console
 from rich.panel import Panel
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.base import BaseCheckpointSaver
 
 console = Console()
 
@@ -90,7 +94,7 @@ async def _run(task: str, working_dir: str, config_path: str | None, plan_only: 
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     db_path = str(checkpoint_dir / "checkpoints.db")
 
-    checkpointer = None
+    checkpointer: BaseCheckpointSaver[Any] | None = None
     try:
         import aiosqlite
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver

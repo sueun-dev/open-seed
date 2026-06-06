@@ -8,10 +8,12 @@ Two storage paths:
 
 from __future__ import annotations
 
+from typing import Any
+
 from openseed_brain.state import PipelineState
 
 
-async def memorize_node(state: PipelineState) -> dict:
+async def memorize_node(state: PipelineState) -> dict[str, Any]:
     """Store pipeline results and extract wisdom for future runs."""
     task = state["task"]
     retry_count = state.get("retry_count", 0)

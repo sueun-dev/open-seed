@@ -32,8 +32,8 @@ class MemoryBackend(ABC):
         query: str,
         user_id: str = "default",
         limit: int = 10,
-        filters: dict | None = None,
-    ) -> list[dict]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Return up to *limit* records relevant to *query* for *user_id*.
 
         Each dict must contain at least: ``id``, ``memory`` (content), ``score``.
@@ -60,8 +60,8 @@ class MemoryBackend(ABC):
         self,
         user_id: str = "default",
         limit: int = 100,
-        filters: dict | None = None,
-    ) -> list[dict]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Return the most-recent *limit* entries for *user_id*.
 
         Args:
@@ -70,6 +70,6 @@ class MemoryBackend(ABC):
         ...
 
     @abstractmethod
-    def history(self, memory_id: str) -> list[dict]:
+    def history(self, memory_id: str) -> list[dict[str, Any]]:
         """Return the change history for a single memory entry (oldest first)."""
         ...

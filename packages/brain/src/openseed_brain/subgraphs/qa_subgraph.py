@@ -17,10 +17,13 @@ on exit, the parent graph merges findings/verdict/synthesis back.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from openseed_core.types import Finding
+
+if TYPE_CHECKING:
+    from openseed_qa_gate.types import AgentDefinition, SpecialistResult
 
 
 class QASubState(TypedDict):
@@ -30,8 +33,10 @@ class QASubState(TypedDict):
     context: str  # Code/diff/files to review
     working_dir: str
 
-    # Accumulated by parallel specialist runs (reducer: list append)
-    findings: Annotated[list[Finding], operator.add]
+    # Accumulated by parallel specialist runs (reducer: list append).
+    # During accumulation these are raw dict findings emitted by specialists;
+    # the synthesize node replaces them with structured Finding objects.
+    findings: Annotated[list[Finding | dict[str, Any]], operator.add]
 
     # Set by synthesize node
     synthesis: str
@@ -47,7 +52,7 @@ class QASubState(TypedDict):
 # ── Node implementations ──────────────────────────────────────────────────────
 
 
-async def select_agents_node(state: QASubState) -> dict:
+async def select_agents_node(state: QASubState) -> dict[str, Any]:
     """
     LLM picks the most relevant specialist agents for this context.
     Wraps openseed_qa_gate.agent_selector.select_agents and
@@ -81,7 +86,7 @@ async def select_agents_node(state: QASubState) -> dict:
     }
 
 
-async def run_specialists_node(state: QASubState) -> dict:
+async def run_specialists_node(state: QASubState) -> dict[str, Any]:
     """
     Run each selected specialist in parallel (bounded concurrency).
     Wraps openseed_qa_gate.specialist.run_specialist.
@@ -101,14 +106,14 @@ async def run_specialists_node(state: QASubState) -> dict:
     cfg = QAGateConfig()
     semaphore = asyncio.Semaphore(cfg.max_parallel_agents)
 
-    async def run_one(agent):
+    async def run_one(agent: AgentDefinition) -> SpecialistResult:
         async with semaphore:
             return await run_specialist(agent, context, working_dir, None)
 
     results = await asyncio.gather(*[run_one(a) for a in agents], return_exceptions=True)
 
     # Collect findings from successful runs; ignore exceptions
-    all_findings: list = []
+    all_findings: list[Any] = []
     for r in results:
         if isinstance(r, BaseException):
             continue
@@ -118,29 +123,42 @@ async def run_specialists_node(state: QASubState) -> dict:
     return {"findings": all_findings}
 
 
-async def synthesize_node(state: QASubState) -> dict:
+async def synthesize_node(state: QASubState) -> dict[str, Any]:
     """
     Synthesize all specialist findings into a verdict via LLM.
     Wraps openseed_qa_gate.synthesizer.synthesize.
     """
-    from openseed_qa_gate.synthesizer import synthesize
+    from openseed_core.types import Finding
+    from openseed_qa_gate.synthesizer import _normalize_finding, synthesize
     from openseed_qa_gate.types import SpecialistResult
 
     findings = state.get("findings", [])
     agents_run = state.get("agents_run", [])
 
+    # synthesize() only consumes raw dict findings (it converts them into
+    # structured Finding objects), so pass through just the dict entries.
+    raw_findings = [f for f in findings if isinstance(f, dict)]
+
     # Build minimal SpecialistResult wrappers so synthesize() works without
     # re-running the specialists (it only needs the findings list).
     specialist_results = (
-        [SpecialistResult(agent_name=name, success=True, findings=findings) for name in (agents_run or ["qa_subgraph"])]
-        if findings
+        [
+            SpecialistResult(agent_name=name, success=True, findings=raw_findings)
+            for name in (agents_run or ["qa_subgraph"])
+        ]
+        if raw_findings
         else []
     )
 
+    synthesized_findings: list[Finding]
     try:
         synthesized_findings, synthesis_text, _ = await synthesize(specialist_results, None)
     except Exception as exc:
-        synthesized_findings = findings
+        # Fallback: normalize raw dict findings into Finding objects so the
+        # verdict logic (which reads .severity) still works.
+        synthesized_findings = [
+            f if isinstance(f, Finding) else _normalize_finding(f, str(f.get("agent", "unknown"))) for f in findings
+        ]
         synthesis_text = f"Synthesis error: {exc}"
 
     # Determine verdict from findings
@@ -160,7 +178,7 @@ async def synthesize_node(state: QASubState) -> dict:
 # ── Graph builder ─────────────────────────────────────────────────────────────
 
 
-def build_qa_subgraph() -> StateGraph:
+def build_qa_subgraph() -> StateGraph[QASubState]:
     """
     Build the QA Gate as a self-contained LangGraph subgraph.
 

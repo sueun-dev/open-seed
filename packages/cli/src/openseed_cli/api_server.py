@@ -81,7 +81,7 @@ class IntakeRequest(BaseModel):
     working_dir: str = "."
     provider: str = "codex"
     clarification_answers: list[str] = []
-    clarification_questions: list[dict] = []
+    clarification_questions: list[dict[str, Any]] = []
 
 
 class ChatRequest(BaseModel):
@@ -102,12 +102,12 @@ class MemorySearchRequest(BaseModel):
 
 
 @app.get("/api/health")
-async def health() -> dict:
+async def health() -> dict[str, Any]:
     return {"status": "ok", "version": "2.1.0"}
 
 
 @app.post("/api/chat")
-async def chat(req: ChatRequest) -> dict:
+async def chat(req: ChatRequest) -> dict[str, Any]:
     """Pair Mode: direct CLI call with provider selection + file change detection."""
     import hashlib
     import os
@@ -312,7 +312,7 @@ Start with "VERDICT: [Engineer A/Engineer B/Combined] because..." then execute."
 
 
 @app.post("/api/terminal")
-async def run_terminal(body: dict) -> dict:
+async def run_terminal(body: dict[str, Any]) -> dict[str, Any]:
     """Run a shell command in the working directory with streaming support."""
     import os
     import subprocess
@@ -361,7 +361,7 @@ async def ws_terminal(ws: WebSocket) -> None:
     await ws.accept()
 
     working_dir = os.path.expanduser("~")
-    current_process: subprocess.Popen | None = None
+    current_process: subprocess.Popen[str] | None = None
 
     try:
         while True:
@@ -438,7 +438,8 @@ async def ws_terminal(ws: WebSocket) -> None:
                         env={**os.environ, "TERM": "dumb", "NO_COLOR": "1"},
                     )
 
-                    # Stream output line by line
+                    # Stream output line by line (stdout is guaranteed by stdout=PIPE)
+                    assert current_process.stdout is not None
                     for line in iter(current_process.stdout.readline, ""):
                         await ws.send_text(
                             json.dumps(
@@ -497,7 +498,7 @@ async def ws_terminal(ws: WebSocket) -> None:
 
 
 @app.get("/api/files")
-async def list_files(path: str = "") -> dict:
+async def list_files(path: str = "") -> dict[str, Any]:
     """List files as a tree for the code viewer."""
     import os
 
@@ -507,7 +508,7 @@ async def list_files(path: str = "") -> dict:
 
     skip = {".git", "node_modules", "__pycache__", ".venv", "dist", "build", ".next", ".agent"}
 
-    def build_tree(dir_path: str, depth: int = 0) -> list:
+    def build_tree(dir_path: str, depth: int = 0) -> list[Any]:
         if depth > 4:
             return []
         nodes = []
@@ -530,7 +531,7 @@ async def list_files(path: str = "") -> dict:
 
 
 @app.get("/api/file")
-async def read_file(path: str) -> dict:
+async def read_file(path: str) -> dict[str, Any]:
     """Read a single file's content for the code viewer."""
     import os
 
@@ -549,7 +550,7 @@ async def read_file(path: str) -> dict:
 
 
 @app.post("/api/file")
-async def save_file(body: dict) -> dict:
+async def save_file(body: dict[str, Any]) -> dict[str, Any]:
     """Save file content from the code editor."""
     import os
 
@@ -569,7 +570,7 @@ async def save_file(body: dict) -> dict:
 
 
 @app.post("/api/intake")
-async def run_intake(req: IntakeRequest) -> dict:
+async def run_intake(req: IntakeRequest) -> dict[str, Any]:
     """Start intake analysis (async). Results delivered via WebSocket.
 
     Returns immediately with {"status":"started"}.
@@ -598,7 +599,7 @@ async def _execute_intake(
     working_dir: str,
     provider: str,
     clarification_answers: list[str],
-    clarification_questions: list[dict],
+    clarification_questions: list[dict[str, Any]],
 ) -> None:
     """Run intake in background, broadcast results via WebSocket."""
     import traceback
@@ -645,7 +646,7 @@ class HarnessRequest(BaseModel):
 
 
 @app.post("/api/harness/check")
-async def harness_check(req: HarnessRequest) -> dict:
+async def harness_check(req: HarnessRequest) -> dict[str, Any]:
     """Check harness quality score + return README preview for user confirmation."""
     import os
 
@@ -675,7 +676,7 @@ async def harness_check(req: HarnessRequest) -> dict:
 
 
 @app.post("/api/harness/setup")
-async def harness_setup(req: HarnessRequest) -> dict:
+async def harness_setup(req: HarnessRequest) -> dict[str, Any]:
     """Run harness setup with user's project description."""
     from openseed_brain.nodes.intake import _auto_harness_setup
     from openseed_core.harness.checker import check_harness_quality
@@ -694,7 +695,7 @@ async def harness_setup(req: HarnessRequest) -> dict:
 
 
 @app.post("/api/run")
-async def start_run(req: RunRequest) -> dict | JSONResponse:
+async def start_run(req: RunRequest) -> dict[str, Any] | JSONResponse:
     """Start a pipeline run. Events streamed via WebSocket."""
     global _current_run
 
@@ -728,14 +729,14 @@ async def start_run(req: RunRequest) -> dict | JSONResponse:
 
 
 @app.get("/api/status")
-async def get_status() -> dict:
+async def get_status() -> dict[str, Any]:
     if not _current_run:
         return {"status": "idle"}
     return _current_run
 
 
 @app.get("/api/diagram")
-async def get_diagram(working_dir: str = ".") -> dict:
+async def get_diagram(working_dir: str = ".") -> dict[str, Any]:
     """Get cached diagram. Does NOT auto-trigger generation — use POST /api/diagram/generate."""
     wd = str(Path(working_dir).resolve())
     cache_key = f"{wd}:{_dir_content_hash(wd)}"
@@ -750,7 +751,7 @@ async def get_diagram(working_dir: str = ".") -> dict:
 
 
 @app.post("/api/diagram/generate")
-async def trigger_diagram(body: dict) -> dict:
+async def trigger_diagram(body: dict[str, Any]) -> dict[str, Any]:
     """Force (re)generate diagram for a working directory."""
     wd = str(Path(body.get("working_dir", ".")).resolve())
 
@@ -798,7 +799,7 @@ async def _generate_diagram_bg(working_dir: str, generator: str = "codex", verif
 
 
 @app.get("/api/auth/status")
-async def auth_status() -> dict:
+async def auth_status() -> dict[str, Any]:
     """Check authentication status for OpenAI Codex."""
     from openseed_core.auth.openai import check_openai_auth
 
@@ -814,7 +815,7 @@ async def auth_status() -> dict:
 
 
 @app.post("/api/auth/login")
-async def auth_login(body: dict) -> dict:
+async def auth_login(body: dict[str, Any]) -> dict[str, Any]:
     """Trigger OAuth login. Runs CLI auth command."""
     import subprocess
 
@@ -831,7 +832,7 @@ async def auth_login(body: dict) -> dict:
 
 
 @app.get("/api/config")
-async def get_config() -> dict:
+async def get_config() -> dict[str, Any]:
     from openseed_core.config import load_config
 
     cfg = load_config()
@@ -839,7 +840,7 @@ async def get_config() -> dict:
 
 
 @app.post("/api/config")
-async def save_config(body: dict) -> dict:
+async def save_config(body: dict[str, Any]) -> dict[str, Any]:
     """Save config to ~/.openseed/config.yaml."""
     import os
 
@@ -856,7 +857,7 @@ async def save_config(body: dict) -> dict:
 
 
 @app.get("/api/resolve-folder")
-async def resolve_folder(name: str, children: str = "") -> dict:
+async def resolve_folder(name: str, children: str = "") -> dict[str, Any]:
     """Resolve a folder name to its full absolute path by searching common locations.
 
     Args:
@@ -1005,7 +1006,7 @@ async def resolve_folder(name: str, children: str = "") -> dict:
 
 
 @app.get("/api/browse")
-async def browse_folder(path: str = "") -> dict:
+async def browse_folder(path: str = "") -> dict[str, Any]:
     """Browse folders on the server filesystem."""
     import os
 
@@ -1030,7 +1031,7 @@ async def browse_folder(path: str = "") -> dict:
 
 
 @app.get("/api/memory/search")
-async def search_memory(q: str, limit: int = 10) -> dict:
+async def search_memory(q: str, limit: int = 10) -> dict[str, Any]:
     from openseed_memory import MemoryStore
 
     store = MemoryStore()
@@ -1058,7 +1059,7 @@ async def ws_events(ws: WebSocket) -> None:
         _ws_clients.remove(ws)
 
 
-async def _broadcast(event: dict) -> None:
+async def _broadcast(event: dict[str, Any]) -> None:
     """Broadcast event to all connected WebSocket clients."""
     data = json.dumps(event)
     disconnected = []

@@ -47,6 +47,6 @@ class TestEventCausality:
         assert events[1].cause_id == events[0].id
 
     def test_new_event_types_exist(self) -> None:
-        assert EventType.SENTINEL_STUCK == "sentinel.stuck"
-        assert EventType.SECURITY_CHECK == "security.check"
-        assert EventType.METRICS_UPDATE == "metrics.update"
+        assert EventType.SENTINEL_STUCK.value == "sentinel.stuck"
+        assert EventType.SECURITY_CHECK.value == "security.check"
+        assert EventType.METRICS_UPDATE.value == "metrics.update"

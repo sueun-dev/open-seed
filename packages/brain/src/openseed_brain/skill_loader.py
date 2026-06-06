@@ -12,6 +12,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from openseed_codex.agent import CodexAgent
 
 logger = logging.getLogger(__name__)
 
@@ -242,9 +246,9 @@ def build_skill_catalog() -> str:
 
 
 async def select_skills_for_task(
-    agent,
+    agent: CodexAgent,
     task: str,
-    gaps: list[dict],
+    gaps: list[dict[str, Any]],
     tech_stack: list[str],
     codebase_context: str,
 ) -> list[str]:

@@ -36,7 +36,7 @@ def create_backend(config: MemoryConfig) -> MemoryBackend:
     # ── 1. Qdrant via mem0 ────────────────────────────────────────────────
     if config.backend == "qdrant":
         try:
-            from mem0 import Memory  # type: ignore[import]
+            from mem0 import Memory  # type: ignore[import-untyped]
 
             mem0_config = {
                 "embedder": {
@@ -107,7 +107,7 @@ class _Mem0Wrapper(MemoryBackend):
         user_id: str = "default",
         agent_id: str = "",
         memory_type: str = "semantic",
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         result = self._m.add(
             messages=[{"role": "user", "content": content}],
@@ -123,17 +123,19 @@ class _Mem0Wrapper(MemoryBackend):
         query: str,
         user_id: str = "default",
         limit: int = 10,
-        filters: dict | None = None,
-    ) -> list[dict]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         result = self._m.search(query=query, user_id=user_id, limit=limit)
-        items = result.get("results", [])
+        items: list[dict[str, Any]] = [r for r in result.get("results", []) if isinstance(r, dict)]
         if filters:
             from openseed_memory.filters import matches_filter
 
             items = [r for r in items if matches_filter(r.get("metadata", {}), filters)]
         return items
 
-    def update(self, memory_id: str, content: str, metadata: dict | None = None, user_id: str = "default") -> bool:
+    def update(
+        self, memory_id: str, content: str, metadata: dict[str, Any] | None = None, user_id: str = "default"
+    ) -> bool:
         self._m.delete(memory_id)
         result = self._m.add(
             messages=[{"role": "user", "content": content}],
@@ -150,15 +152,15 @@ class _Mem0Wrapper(MemoryBackend):
         self,
         user_id: str = "default",
         limit: int = 100,
-        filters: dict | None = None,
-    ) -> list[dict]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         result = self._m.get_all(user_id=user_id, limit=limit)
-        items = result.get("results", [])
+        items: list[dict[str, Any]] = [r for r in result.get("results", []) if isinstance(r, dict)]
         if filters:
             from openseed_memory.filters import matches_filter
 
             items = [r for r in items if matches_filter(r.get("metadata", {}), filters)]
         return items
 
-    def history(self, memory_id: str) -> list[dict]:
-        return self._m.history(memory_id)
+    def history(self, memory_id: str) -> list[dict[str, Any]]:
+        return [h for h in self._m.history(memory_id) if isinstance(h, dict)]

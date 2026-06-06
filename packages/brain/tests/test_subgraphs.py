@@ -10,6 +10,7 @@ Covers:
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from openseed_brain.subgraphs.fix_subgraph import FixSubState, build_fix_subgraph
@@ -18,7 +19,7 @@ from openseed_brain.subgraphs.qa_subgraph import QASubState, build_qa_subgraph
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _node_names(graph) -> set[str]:
+def _node_names(graph: Any) -> set[str]:
     """Return the set of user-defined node names from a StateGraph."""
     return set(graph.nodes.keys())
 
@@ -27,21 +28,21 @@ def _node_names(graph) -> set[str]:
 
 
 class TestQASubgraphNodes:
-    def test_qa_subgraph_has_all_nodes(self):
+    def test_qa_subgraph_has_all_nodes(self) -> None:
         """build_qa_subgraph registers select_agents, run_specialists, and synthesize."""
         graph = build_qa_subgraph()
         nodes = _node_names(graph)
         expected = {"select_agents", "run_specialists", "synthesize"}
         assert expected.issubset(nodes), f"Missing nodes: {expected - nodes}"
 
-    def test_qa_subgraph_has_correct_edges(self):
+    def test_qa_subgraph_has_correct_edges(self) -> None:
         """The QA subgraph wires edges in the correct order."""
         graph = build_qa_subgraph()
         edges: set[tuple[str, str]] = set(graph.edges)
         assert ("select_agents", "run_specialists") in edges
         assert ("run_specialists", "synthesize") in edges
 
-    def test_qa_subgraph_state_schema(self):
+    def test_qa_subgraph_state_schema(self) -> None:
         """QASubState is a TypedDict with the expected keys."""
         required_keys = {"context", "working_dir", "findings", "verdict", "synthesis", "agents_run"}
         hints = QASubState.__annotations__
@@ -49,14 +50,14 @@ class TestQASubgraphNodes:
 
 
 class TestQASubgraphCompiles:
-    def test_qa_subgraph_compiles(self):
+    def test_qa_subgraph_compiles(self) -> None:
         """build_qa_subgraph().compile() returns a runnable compiled graph."""
         graph = build_qa_subgraph()
         compiled = graph.compile()
         # LangGraph compiled graphs expose ainvoke / invoke
         assert hasattr(compiled, "ainvoke") or hasattr(compiled, "invoke"), "Compiled QA subgraph has no invoke method"
 
-    def test_qa_subgraph_compiled_is_not_none(self):
+    def test_qa_subgraph_compiled_is_not_none(self) -> None:
         """Compiled QA subgraph is not None."""
         compiled = build_qa_subgraph().compile()
         assert compiled is not None
@@ -66,21 +67,21 @@ class TestQASubgraphCompiles:
 
 
 class TestFixSubgraphNodes:
-    def test_fix_subgraph_has_all_nodes(self):
+    def test_fix_subgraph_has_all_nodes(self) -> None:
         """build_fix_subgraph registers diagnose, fix, and verify nodes."""
         graph = build_fix_subgraph()
         nodes = _node_names(graph)
         expected = {"diagnose", "fix", "verify"}
         assert expected.issubset(nodes), f"Missing nodes: {expected - nodes}"
 
-    def test_fix_subgraph_has_correct_edges(self):
+    def test_fix_subgraph_has_correct_edges(self) -> None:
         """The Fix subgraph wires edges in the correct order."""
         graph = build_fix_subgraph()
         edges: set[tuple[str, str]] = set(graph.edges)
         assert ("diagnose", "fix") in edges
         assert ("fix", "verify") in edges
 
-    def test_fix_subgraph_state_schema(self):
+    def test_fix_subgraph_state_schema(self) -> None:
         """FixSubState is a TypedDict with the expected keys."""
         required_keys = {"task", "working_dir", "errors", "fix_applied", "verified"}
         hints = FixSubState.__annotations__
@@ -88,13 +89,13 @@ class TestFixSubgraphNodes:
 
 
 class TestFixSubgraphCompiles:
-    def test_fix_subgraph_compiles(self):
+    def test_fix_subgraph_compiles(self) -> None:
         """build_fix_subgraph().compile() returns a runnable compiled graph."""
         graph = build_fix_subgraph()
         compiled = graph.compile()
         assert hasattr(compiled, "ainvoke") or hasattr(compiled, "invoke"), "Compiled Fix subgraph has no invoke method"
 
-    def test_fix_subgraph_compiled_is_not_none(self):
+    def test_fix_subgraph_compiled_is_not_none(self) -> None:
         """Compiled Fix subgraph is not None."""
         compiled = build_fix_subgraph().compile()
         assert compiled is not None
@@ -106,7 +107,7 @@ class TestFixSubgraphCompiles:
 class TestBuildGraphWithSubgraphs:
     """build_graph(use_subgraphs=True) should wire compiled subgraphs as nodes."""
 
-    def _build(self):
+    def _build(self) -> Any:
         from openseed_brain.graph import build_graph
 
         node_mocks = {
@@ -118,9 +119,10 @@ class TestBuildGraphWithSubgraphs:
             "sentinel_check_node": AsyncMock(return_value={}),
         }
 
-        # Patch heavy qa / fix imports so compile() doesn't need real credentials
-        mock_compiled = MagicMock()
-        mock_compiled.__call__ = AsyncMock(return_value={})
+        # Patch heavy qa / fix imports so compile() doesn't need real credentials.
+        # AsyncMock is already callable and awaitable, so it stands in for a
+        # compiled subgraph without reassigning the __call__ dunder.
+        mock_compiled = AsyncMock(return_value={})
 
         with (
             patch.multiple("openseed_brain.graph", **node_mocks),
@@ -135,21 +137,21 @@ class TestBuildGraphWithSubgraphs:
         ):
             return build_graph(use_subgraphs=True)
 
-    def test_build_graph_with_subgraphs_has_all_standard_nodes(self):
+    def test_build_graph_with_subgraphs_has_all_standard_nodes(self) -> None:
         """All non-subgraph nodes are still present when use_subgraphs=True."""
         graph = self._build()
         standard_nodes = {"intake", "plan", "implement", "sentinel_check", "user_escalate", "deploy", "memorize"}
         node_ids = set(graph.nodes.keys())
         assert standard_nodes.issubset(node_ids), f"Missing nodes: {standard_nodes - node_ids}"
 
-    def test_build_graph_with_subgraphs_includes_qa_gate_and_fix(self):
+    def test_build_graph_with_subgraphs_includes_qa_gate_and_fix(self) -> None:
         """qa_gate and fix nodes exist when use_subgraphs=True."""
         graph = self._build()
         node_ids = set(graph.nodes.keys())
         assert "qa_gate" in node_ids
         assert "fix" in node_ids
 
-    def test_build_graph_with_subgraphs_edges_intact(self):
+    def test_build_graph_with_subgraphs_edges_intact(self) -> None:
         """Critical edges are present when use_subgraphs=True."""
         graph = self._build()
         edges: set[tuple[str, str]] = set(graph.edges)
@@ -165,7 +167,7 @@ class TestBuildGraphWithSubgraphs:
 class TestBuildGraphWithoutSubgraphsDefault:
     """build_graph() with no arguments (or use_subgraphs=False) retains the original behavior."""
 
-    def _build(self, use_subgraphs: bool = False):
+    def _build(self, use_subgraphs: bool = False) -> Any:
         from openseed_brain.graph import build_graph
 
         node_mocks = {
@@ -182,7 +184,7 @@ class TestBuildGraphWithoutSubgraphsDefault:
         with patch.multiple("openseed_brain.graph", **node_mocks):
             return build_graph(use_subgraphs=use_subgraphs)
 
-    def test_build_graph_default_has_all_nodes(self):
+    def test_build_graph_default_has_all_nodes(self) -> None:
         """Default build has all required nodes."""
         graph = self._build()
         expected = {
@@ -199,7 +201,7 @@ class TestBuildGraphWithoutSubgraphsDefault:
         node_ids = set(graph.nodes.keys())
         assert expected.issubset(node_ids), f"Missing nodes: {expected - node_ids}"
 
-    def test_build_graph_default_uses_flat_nodes(self):
+    def test_build_graph_default_uses_flat_nodes(self) -> None:
         """Default build does not call build_qa_subgraph or build_fix_subgraph."""
         from openseed_brain.graph import build_graph
 
@@ -224,13 +226,13 @@ class TestBuildGraphWithoutSubgraphsDefault:
         mock_qa.assert_not_called()
         mock_fix.assert_not_called()
 
-    def test_build_graph_explicit_false_equals_default(self):
+    def test_build_graph_explicit_false_equals_default(self) -> None:
         """build_graph(use_subgraphs=False) produces the same node set as build_graph()."""
         graph_default = self._build(use_subgraphs=False)
         graph_explicit = self._build(use_subgraphs=False)
         assert set(graph_default.nodes.keys()) == set(graph_explicit.nodes.keys())
 
-    def test_build_graph_without_subgraphs_edges_intact(self):
+    def test_build_graph_without_subgraphs_edges_intact(self) -> None:
         """All critical sequential edges exist in the default flat graph."""
         graph = self._build()
         edges: set[tuple[str, str]] = set(graph.edges)

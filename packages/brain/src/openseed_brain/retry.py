@@ -77,7 +77,7 @@ def with_retry(node_fn: F, policy: RetryPolicy) -> F:
         for attempt in range(1, max_attempts + 1):
             try:
                 return await node_fn(*args, **kwargs)
-            except retry_on as exc:  # type: ignore[misc]
+            except retry_on as exc:
                 last_exc = exc
                 if attempt == max_attempts:
                     break

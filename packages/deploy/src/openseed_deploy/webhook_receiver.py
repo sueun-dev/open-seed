@@ -44,7 +44,7 @@ def register_webhook_routes(
             raise HTTPException(status_code=401, detail="Invalid token")
 
     @app.post("/hooks/wake")
-    async def hook_wake(request: Request) -> dict:
+    async def hook_wake(request: Request) -> dict[str, Any]:
         """Wake the main session with a task."""
         _check_auth(request)
         body = await request.json()
@@ -55,7 +55,7 @@ def register_webhook_routes(
         return {"status": "triggered", "task": task}
 
     @app.post("/hooks/agent")
-    async def hook_agent(request: Request) -> dict:
+    async def hook_agent(request: Request) -> dict[str, Any]:
         """Trigger an isolated agent run."""
         _check_auth(request)
         body = await request.json()
@@ -67,7 +67,7 @@ def register_webhook_routes(
         return {"status": "triggered", "task": task, "agent_id": agent_id}
 
     @app.post("/hooks/{hook_name}")
-    async def hook_custom(hook_name: str, request: Request) -> dict:
+    async def hook_custom(hook_name: str, request: Request) -> dict[str, Any]:
         """Custom webhook endpoint."""
         _check_auth(request)
         body = await request.json()

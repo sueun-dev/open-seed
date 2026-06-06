@@ -19,6 +19,7 @@ Covers:
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from openseed_core.types import Finding, QAResult, Severity, Verdict
@@ -72,7 +73,7 @@ def _make_subprocess_result(
     return r
 
 
-def _make_config(block_on_critical: bool = True, max_parallel_agents: int = 4):
+def _make_config(block_on_critical: bool = True, max_parallel_agents: int = 4) -> Any:
     cfg = MagicMock()
     cfg.block_on_critical = block_on_critical
     cfg.max_parallel_agents = max_parallel_agents
@@ -84,7 +85,7 @@ def _make_config(block_on_critical: bool = True, max_parallel_agents: int = 4):
 
 
 class TestWorkflowDataclasses:
-    def test_stage_result_dataclass(self):
+    def test_stage_result_dataclass(self) -> None:
         """StageResult stores all fields with correct defaults."""
         sr = StageResult(stage=WorkflowStage.REVIEW)
         assert sr.stage == WorkflowStage.REVIEW
@@ -93,7 +94,7 @@ class TestWorkflowDataclasses:
         assert sr.reason == ""
         assert sr.duration_ms == 0
 
-    def test_workflow_result_dataclass(self):
+    def test_workflow_result_dataclass(self) -> None:
         """WorkflowResult stores all fields."""
         wr = WorkflowResult(
             stages_completed=[WorkflowStage.DISCOVERY, WorkflowStage.REVIEW],
@@ -107,7 +108,7 @@ class TestWorkflowDataclasses:
         assert WorkflowStage.DISCOVERY in wr.stages_completed
         assert wr.total_duration_ms == 150
 
-    def test_workflow_stage_enum_values(self):
+    def test_workflow_stage_enum_values(self) -> None:
         """WorkflowStage enum values match expected strings."""
         assert WorkflowStage.DISCOVERY.value == "discovery"
         assert WorkflowStage.REVIEW.value == "review"
@@ -119,7 +120,7 @@ class TestWorkflowDataclasses:
 
 
 class TestWorkflowStageMapping:
-    def test_workflow_stage_mapping(self):
+    def test_workflow_stage_mapping(self) -> None:
         """Each stage maps to the correct agent categories."""
         assert "10-research-analysis" in _STAGE_CATEGORIES[WorkflowStage.DISCOVERY]
         assert "09-meta-orchestration" in _STAGE_CATEGORIES[WorkflowStage.DISCOVERY]
@@ -133,7 +134,7 @@ class TestWorkflowStageMapping:
 
         assert "09-meta-orchestration" in _STAGE_CATEGORIES[WorkflowStage.SYNTHESIS]
 
-    def test_all_four_stages_have_mappings(self):
+    def test_all_four_stages_have_mappings(self) -> None:
         """All four workflow stages have at least one category mapped."""
         for stage in (
             WorkflowStage.DISCOVERY,
@@ -148,7 +149,7 @@ class TestWorkflowStageMapping:
 
 
 class TestFinalize:
-    def test_finalize_combines_findings(self):
+    def test_finalize_combines_findings(self) -> None:
         """_finalize merges findings from all stages into all_findings."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         import time
@@ -173,7 +174,7 @@ class TestFinalize:
         assert "A" in titles
         assert "B" in titles
 
-    def test_finalize_deduplicates_findings(self):
+    def test_finalize_deduplicates_findings(self) -> None:
         """_finalize removes duplicate findings (same title+file+line) across stages."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         import time
@@ -191,7 +192,7 @@ class TestFinalize:
         titles = [f.title for f in result.all_findings]
         assert titles.count("Dup finding") == 1
 
-    def test_finalize_verdict_block_on_critical(self):
+    def test_finalize_verdict_block_on_critical(self) -> None:
         """_finalize returns block verdict when critical finding is present."""
         orchestrator = WorkflowOrchestrator(config=_make_config(block_on_critical=True))
         import time
@@ -209,7 +210,7 @@ class TestFinalize:
 
         assert result.verdict == "block"
 
-    def test_finalize_verdict_warn_on_high(self):
+    def test_finalize_verdict_warn_on_high(self) -> None:
         """High finding with block_on_critical=False → warn verdict."""
         orchestrator = WorkflowOrchestrator(config=_make_config(block_on_critical=False))
         import time
@@ -226,7 +227,7 @@ class TestFinalize:
         result = orchestrator._finalize(stage_results, start)
         assert result.verdict == "warn"
 
-    def test_finalize_verdict_pass_on_low(self):
+    def test_finalize_verdict_pass_on_low(self) -> None:
         """Only low/info findings → pass verdict."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         import time
@@ -243,7 +244,7 @@ class TestFinalize:
         result = orchestrator._finalize(stage_results, start)
         assert result.verdict == "pass"
 
-    def test_finalize_synthesis_contains_stage_names(self):
+    def test_finalize_synthesis_contains_stage_names(self) -> None:
         """_finalize synthesis text mentions the completed stages."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         import time
@@ -265,11 +266,11 @@ class TestFinalize:
 
 
 class TestWorkflowRun:
-    async def test_workflow_completes_all_stages(self):
+    async def test_workflow_completes_all_stages(self) -> None:
         """When every stage has go/no-go=True, all three non-synthesis stages run."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
 
-        async def fake_run_stage(stage, context, working_dir, task):
+        async def fake_run_stage(stage: Any, context: Any, working_dir: Any, task: Any) -> Any:
             return _make_stage_result(stage=stage, should_continue=True)
 
         with patch.object(orchestrator, "_run_stage", side_effect=fake_run_stage):
@@ -281,11 +282,11 @@ class TestWorkflowRun:
         # Total stages = 3 (SYNTHESIS is folded into _finalize, not a stage call)
         assert len(result.stages_completed) == 3
 
-    async def test_workflow_stops_at_discovery_blocker(self):
+    async def test_workflow_stops_at_discovery_blocker(self) -> None:
         """When DISCOVERY gate closes (should_continue=False), REVIEW and VALIDATION are skipped."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
 
-        async def fake_run_stage(stage, context, working_dir, task):
+        async def fake_run_stage(stage: Any, context: Any, working_dir: Any, task: Any) -> Any:
             if stage == WorkflowStage.DISCOVERY:
                 return _make_stage_result(
                     stage=stage,
@@ -303,11 +304,11 @@ class TestWorkflowRun:
         # _run_stage was called exactly once
         mock_run.assert_called_once()
 
-    async def test_workflow_skips_review_when_review_gate_closed(self):
+    async def test_workflow_skips_review_when_review_gate_closed(self) -> None:
         """When REVIEW gate closes, VALIDATION is skipped but DISCOVERY ran."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
 
-        async def fake_run_stage(stage, context, working_dir, task):
+        async def fake_run_stage(stage: Any, context: Any, working_dir: Any, task: Any) -> Any:
             if stage == WorkflowStage.REVIEW:
                 return _make_stage_result(
                     stage=stage,
@@ -323,11 +324,11 @@ class TestWorkflowRun:
         assert WorkflowStage.REVIEW in result.stages_completed
         assert WorkflowStage.VALIDATION not in result.stages_completed
 
-    async def test_workflow_verdict_block_on_critical(self):
+    async def test_workflow_verdict_block_on_critical(self) -> None:
         """Critical finding in a stage produces a 'block' verdict in the workflow result."""
         orchestrator = WorkflowOrchestrator(config=_make_config(block_on_critical=True))
 
-        async def fake_run_stage(stage, context, working_dir, task):
+        async def fake_run_stage(stage: Any, context: Any, working_dir: Any, task: Any) -> Any:
             findings = [_make_finding(severity=Severity.CRITICAL, title="RCE")] if stage == WorkflowStage.REVIEW else []
             return _make_stage_result(stage=stage, findings=findings, should_continue=True)
 
@@ -341,7 +342,7 @@ class TestWorkflowRun:
 
 
 class TestWorkflowDefaultIsFlat:
-    async def test_workflow_default_is_flat(self):
+    async def test_workflow_default_is_flat(self) -> None:
         """run_qa_gate without staged=True uses the flat (non-orchestrated) path."""
         from openseed_core.config import QAGateConfig
         from openseed_qa_gate.gate import run_qa_gate
@@ -361,7 +362,7 @@ class TestWorkflowDefaultIsFlat:
 
         mock_staged.assert_not_called()
 
-    async def test_workflow_staged_true_calls_orchestrator(self):
+    async def test_workflow_staged_true_calls_orchestrator(self) -> None:
         """run_qa_gate with staged=True delegates to _run_staged."""
         from openseed_core.config import QAGateConfig
         from openseed_qa_gate.gate import run_qa_gate
@@ -388,7 +389,7 @@ class TestWorkflowDefaultIsFlat:
 
 
 class TestEvaluateGate:
-    async def test_gate_falls_back_on_llm_failure(self):
+    async def test_gate_falls_back_on_llm_failure(self) -> None:
         """When the LLM gate call raises, the gate defaults to continue=True."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         findings = [_make_finding(severity=Severity.CRITICAL)]
@@ -404,7 +405,7 @@ class TestEvaluateGate:
         assert should_continue is True
         assert "default" in reason.lower() or "fail" in reason.lower()
 
-    async def test_gate_continues_when_no_critical_findings(self):
+    async def test_gate_continues_when_no_critical_findings(self) -> None:
         """Gate always continues if there are no CRITICAL findings (no LLM call needed)."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         findings = [
@@ -422,7 +423,7 @@ class TestEvaluateGate:
         mock_llm.assert_not_called()
         assert should_continue is True
 
-    async def test_gate_llm_decision_parses_response(self):
+    async def test_gate_llm_decision_parses_response(self) -> None:
         """_llm_gate_decision correctly parses Claude's JSON response."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
         findings = [_make_finding(severity=Severity.CRITICAL)]
@@ -439,7 +440,7 @@ class TestEvaluateGate:
         assert should_continue is False
         assert "broken" in reason.lower()
 
-    async def test_workflow_no_agents_for_stage_continues(self):
+    async def test_workflow_no_agents_for_stage_continues(self) -> None:
         """A stage with no agents produces an empty StageResult with should_continue=True."""
         orchestrator = WorkflowOrchestrator(config=_make_config())
 

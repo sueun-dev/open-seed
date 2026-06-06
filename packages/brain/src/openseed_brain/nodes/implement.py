@@ -15,12 +15,13 @@ Falls back to fullstack specialist when:
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from openseed_brain.progress import emit_progress
 from openseed_brain.state import Implementation, PipelineState, PlanTask
 
 
-async def _emit(event_type: str, **data) -> None:
+async def _emit(event_type: str, **data: Any) -> None:
     await emit_progress(event_type, node="implement", **data)
 
 
@@ -92,7 +93,7 @@ _WEB_INDICATORS = frozenset(
 )
 
 
-def _build_rules(intake: dict) -> str:
+def _build_rules(intake: dict[str, Any]) -> str:
     """Build context-aware implementation rules from intake_analysis."""
     intent = intake.get("intent", "implementation")
     tech_stack_raw = intake.get("tech_stack", "")
@@ -130,7 +131,7 @@ def _build_plan_text(state: PipelineState) -> str:
 # ─── Skill-aware Prompt Resolution ────────────────────────────────────────────
 
 
-def _build_specialist_prompt(domain: str, tasks: list[PlanTask], intake: dict) -> str:
+def _build_specialist_prompt(domain: str, tasks: list[PlanTask], intake: dict[str, Any]) -> str:
     """
     Build specialist prompt by combining:
     1. Hardcoded domain specialist prompt (base expertise)
@@ -276,7 +277,7 @@ Full plan context:
 # ─── Intake-Aware Prompt Builder ───────────────────────────────────────────
 
 
-def _build_action_instruction(intake: dict) -> str:
+def _build_action_instruction(intake: dict[str, Any]) -> str:
     """Build the primary instruction based on intent and project status."""
     intent = intake.get("intent", "implementation")
     existing = intake.get("existing_project", "").lower() == "yes"
@@ -306,7 +307,7 @@ def _build_action_instruction(intake: dict) -> str:
     return "Implement this project from scratch. Write ALL files with COMPLETE code."
 
 
-def _build_intake_context(intake: dict) -> str:
+def _build_intake_context(intake: dict[str, Any]) -> str:
     """Build context sections from intake_analysis."""
     sections: list[str] = []
 
@@ -330,7 +331,7 @@ def _build_intake_context(intake: dict) -> str:
     return "\n".join(sections)
 
 
-def _resolve_max_turns(intake: dict, has_plan: bool) -> int:
+def _resolve_max_turns(intake: dict[str, Any], has_plan: bool) -> int:
     """Determine max_turns based on complexity and context."""
     complexity = intake.get("complexity", "moderate")
     intent = intake.get("intent", "implementation")
@@ -781,7 +782,7 @@ Rules:
 # ─── Main Node ───────────────────────────────────────────────────────────────
 
 
-async def implement_node(state: PipelineState) -> dict:
+async def implement_node(state: PipelineState) -> dict[str, Any]:
     """
     Execute the plan using domain specialists in parallel.
 

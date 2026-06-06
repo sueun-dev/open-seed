@@ -24,7 +24,7 @@ from openseed_memory.wisdom import (
 
 
 class TestWisdom:
-    def test_empty_wisdom(self):
+    def test_empty_wisdom(self) -> None:
         w = Wisdom()
         assert w.conventions == []
         assert w.successes == []
@@ -32,7 +32,7 @@ class TestWisdom:
         assert w.gotchas == []
         assert w.commands == []
 
-    def test_wisdom_with_data(self):
+    def test_wisdom_with_data(self) -> None:
         w = Wisdom(
             conventions=["Use camelCase"],
             successes=["Express + Prisma worked well"],
@@ -48,7 +48,7 @@ class TestWisdom:
 
 
 class TestParseWisdom:
-    def test_valid_json(self):
+    def test_valid_json(self) -> None:
         raw = '{"conventions": ["Use TypeScript strict"], "successes": ["First try"], "failures": [], "gotchas": [], "commands": ["npm test"]}'
         w = _parse_wisdom(raw)
         assert w.conventions == ["Use TypeScript strict"]
@@ -56,22 +56,22 @@ class TestParseWisdom:
         assert w.commands == ["npm test"]
         assert w.failures == []
 
-    def test_json_with_surrounding_text(self):
+    def test_json_with_surrounding_text(self) -> None:
         raw = 'Here is the wisdom:\n{"conventions": ["PEP8"], "successes": [], "failures": ["forgot migrations"], "gotchas": [], "commands": []}\nDone.'
         w = _parse_wisdom(raw)
         assert w.conventions == ["PEP8"]
         assert w.failures == ["forgot migrations"]
 
-    def test_invalid_json(self):
+    def test_invalid_json(self) -> None:
         w = _parse_wisdom("not json at all")
         assert w.conventions == []
         assert w.successes == []
 
-    def test_empty_string(self):
+    def test_empty_string(self) -> None:
         w = _parse_wisdom("")
         assert w == Wisdom()
 
-    def test_partial_fields(self):
+    def test_partial_fields(self) -> None:
         raw = '{"conventions": ["test"], "successes": ["yes"]}'
         w = _parse_wisdom(raw)
         assert w.conventions == ["test"]
@@ -80,7 +80,7 @@ class TestParseWisdom:
         assert w.gotchas == []
         assert w.commands == []
 
-    def test_non_list_values_handled(self):
+    def test_non_list_values_handled(self) -> None:
         raw = '{"conventions": "not a list", "successes": 42}'
         w = _parse_wisdom(raw)
         assert w.conventions == []
@@ -91,22 +91,22 @@ class TestParseWisdom:
 
 
 class TestHeuristicWisdom:
-    def test_first_attempt_success(self):
+    def test_first_attempt_success(self) -> None:
         w = _heuristic_wisdom("Build API", retry_count=0, errors=[])
         assert len(w.successes) == 1
         assert "first attempt" in w.successes[0].lower()
 
-    def test_many_retries(self):
+    def test_many_retries(self) -> None:
         w = _heuristic_wisdom("Fix bug", retry_count=5, errors=[])
         assert len(w.failures) == 1
         assert "5 retries" in w.failures[0]
 
-    def test_with_errors(self):
+    def test_with_errors(self) -> None:
         w = _heuristic_wisdom("Deploy", retry_count=1, errors=["TypeError", "ImportError"])
         assert len(w.gotchas) == 2
         assert "TypeError" in w.gotchas[0]
 
-    def test_errors_capped_at_3(self):
+    def test_errors_capped_at_3(self) -> None:
         w = _heuristic_wisdom("Task", retry_count=1, errors=["e1", "e2", "e3", "e4", "e5"])
         assert len(w.gotchas) == 3
 
@@ -115,7 +115,7 @@ class TestHeuristicWisdom:
 
 
 class TestParseStoredWisdom:
-    def test_round_trip(self):
+    def test_round_trip(self) -> None:
         """Wisdom stored as text should be parseable back."""
         content = (
             "Wisdom from: Build API\n"
@@ -132,13 +132,13 @@ class TestParseStoredWisdom:
         assert w.gotchas == ["Dev server port changes"]
         assert w.commands == ["npm run build", "npm test"]
 
-    def test_partial_content(self):
+    def test_partial_content(self) -> None:
         content = "Wisdom from: Fix\nSuccesses: It worked"
         w = _parse_stored_wisdom(content)
         assert w.successes == ["It worked"]
         assert w.conventions == []
 
-    def test_empty_content(self):
+    def test_empty_content(self) -> None:
         w = _parse_stored_wisdom("")
         assert w == Wisdom()
 
@@ -147,13 +147,13 @@ class TestParseStoredWisdom:
 
 
 class TestFormatWisdomForPrompt:
-    def test_empty_list(self):
+    def test_empty_list(self) -> None:
         assert format_wisdom_for_prompt([]) == ""
 
-    def test_empty_wisdom(self):
+    def test_empty_wisdom(self) -> None:
         assert format_wisdom_for_prompt([Wisdom()]) == ""
 
-    def test_single_wisdom(self):
+    def test_single_wisdom(self) -> None:
         w = Wisdom(
             conventions=["Use strict TypeScript"],
             failures=["Don't use SQLite for concurrent writes"],
@@ -164,7 +164,7 @@ class TestFormatWisdomForPrompt:
         assert "What to AVOID" in result
         assert "SQLite" in result
 
-    def test_multiple_wisdoms_deduplication(self):
+    def test_multiple_wisdoms_deduplication(self) -> None:
         w1 = Wisdom(successes=["Express worked", "Prisma worked"])
         w2 = Wisdom(successes=["Express worked", "React worked"])
         result = format_wisdom_for_prompt([w1, w2])
@@ -173,7 +173,7 @@ class TestFormatWisdomForPrompt:
         assert "Prisma worked" in result
         assert "React worked" in result
 
-    def test_all_categories(self):
+    def test_all_categories(self) -> None:
         w = Wisdom(
             conventions=["c1"],
             successes=["s1"],

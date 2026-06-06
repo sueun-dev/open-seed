@@ -26,6 +26,7 @@ class TestParseSecurityResponse:
         result = _parse_security_response(text)
         assert result.risk == SecurityRisk.HIGH
         assert result.requires_approval
+        assert result.flagged_items is not None
         assert ".env" in result.flagged_items
 
     def test_parse_valid_json_medium(self) -> None:

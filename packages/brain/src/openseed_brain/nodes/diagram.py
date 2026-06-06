@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import zlib
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ CONFIG_FILES = {
 # ─── File Scanner ────────────────────────────────────────────────────────────
 
 
-def scan_project_files(working_dir: str) -> list[dict]:
+def scan_project_files(working_dir: str) -> list[dict[str, Any]]:
     """
     Scan project directory, select files within token budget.
     Returns list of {path, content} sorted by priority.
@@ -154,7 +155,7 @@ def scan_project_files(working_dir: str) -> list[dict]:
     candidates.sort(key=lambda x: x[0])
 
     # Read files within token budget
-    selected: list[dict] = []
+    selected: list[dict[str, Any]] = []
     budget_used = 0
 
     for _priority, rel_path, abs_path in candidates[:MAX_FILES]:
@@ -269,7 +270,7 @@ Format: VERDICT line first, then the mermaid block."""
 MAX_VERIFY_ROUNDS = 3
 
 
-async def generate_diagram(working_dir: str, generator: str = "claude", verifier: str = "gpt") -> dict:
+async def generate_diagram(working_dir: str, generator: str = "claude", verifier: str = "gpt") -> dict[str, Any]:
     """
     Generate a Mermaid architecture diagram for the project.
 
@@ -280,7 +281,7 @@ async def generate_diagram(working_dir: str, generator: str = "claude", verifier
     """
     from openseed_brain.progress import emit_progress
 
-    async def _emit(msg: str, **kw):
+    async def _emit(msg: str, **kw: Any) -> None:
         await emit_progress("diagram.progress", node="diagram", message=msg, **kw)
 
     await _emit("Scanning project files...")
@@ -467,7 +468,7 @@ def fix_mermaid_cycles(mermaid_code: str) -> str:
     Fix: append underscore to the subgraph name.
     """
     lines = mermaid_code.splitlines()
-    ancestors: list[dict] = []  # [{name, line_idx}]
+    ancestors: list[dict[str, Any]] = []  # [{name, line_idx}]
     cyclic: dict[int, str] = {}  # {line_idx: name}
 
     for i, line in enumerate(lines):

@@ -14,17 +14,18 @@ Escalation chain: retry → retry (different approach) → Insight → User
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openseed_core.types import Error, Verdict
 
 from openseed_brain.state import PipelineState
 
 if TYPE_CHECKING:
+    from openseed_core.types import QAResult
     from openseed_guard.insight import InsightAdvice
 
 
-async def sentinel_check_node(state: PipelineState) -> dict:
+async def sentinel_check_node(state: PipelineState) -> dict[str, Any]:
     """
     Evaluate QA result + run evidence verification via Sentinel ExecutionLoop.
     The routing function route_after_qa reads qa_result to decide next node.
@@ -201,7 +202,7 @@ async def sentinel_check_node(state: PipelineState) -> dict:
         }
 
 
-async def fix_node(state: PipelineState) -> dict:
+async def fix_node(state: PipelineState) -> dict[str, Any]:
     """
     Fix errors reported by QA gate.
 
@@ -401,15 +402,15 @@ async def fix_node(state: PipelineState) -> dict:
 # ── Private helpers ──────────────────────────────────────────────────────────
 
 
-def _build_findings_text(qa_result: object | None) -> str:
+def _build_findings_text(qa_result: QAResult | None) -> str:
     """Format QA findings into readable text, sorted by severity (critical first)."""
-    if not qa_result or not getattr(qa_result, "findings", None):
+    if not qa_result or not qa_result.findings:
         return ""
     # Sort findings so the LLM sees the most severe issues first.
     # The ordering itself is just data presentation — the LLM decides what to fix.
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     sorted_findings = sorted(
-        qa_result.findings,  # type: ignore[union-attr]
+        qa_result.findings,
         key=lambda f: severity_order.get(f.severity.value, 5),
     )
     return "\n".join(
@@ -417,7 +418,7 @@ def _build_findings_text(qa_result: object | None) -> str:
     )
 
 
-async def _recall_past_fixes(task: str, qa_result: object | None) -> str:
+async def _recall_past_fixes(task: str, qa_result: QAResult | None) -> str:
     """Query memory for similar past failures. Returns context string or empty."""
     try:
         from openseed_memory.failure import recall_similar_failures
@@ -425,7 +426,7 @@ async def _recall_past_fixes(task: str, qa_result: object | None) -> str:
 
         store = MemoryStore()
         await store.initialize()
-        findings = getattr(qa_result, "findings", None) or []
+        findings = qa_result.findings if qa_result else []
         patterns = await recall_similar_failures(
             store,
             task,
@@ -481,18 +482,15 @@ async def _git_stash_revert(working_dir: str) -> bool:
 async def _consult_insight_for_fix(
     task: str,
     failure_history: list[str],
-    qa_result: object | None,
+    qa_result: QAResult | None,
 ) -> InsightAdvice | None:
     """Consult Insight (Opus with extended thinking) for a different strategy."""
     try:
         from openseed_guard.insight import consult_insight
 
         current_errors = []
-        if qa_result and getattr(qa_result, "findings", None):
-            current_errors = [
-                f.description
-                for f in qa_result.findings[:10]  # type: ignore[union-attr]
-            ]
+        if qa_result and qa_result.findings:
+            current_errors = [f.description for f in qa_result.findings[:10]]
 
         return await consult_insight(
             task=task,

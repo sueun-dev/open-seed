@@ -52,6 +52,20 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 
+# Optional C-extension / native backend libraries that ship no type stubs.
+# These imports are all guarded by `try/except ImportError` (the packages are
+# optional runtime dependencies), so ignoring their missing stubs is correct
+# and does not relax type checking of any first-party code.
+[[tool.mypy.overrides]]
+module = [
+    "psycopg.*",
+    "psycopg2.*",
+    "psycopg_pool",
+    "pgvector.*",
+    "playwright.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["packages/*/tests", "tests"]

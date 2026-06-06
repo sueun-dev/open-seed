@@ -11,6 +11,7 @@ Covers:
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from openseed_core.types import Finding, QAResult, Severity, Verdict
@@ -52,7 +53,7 @@ def _make_agent(
 
 def _make_specialist_result(
     agent_name: str = "agent-a",
-    findings: list[dict] | None = None,
+    findings: list[dict[str, Any]] | None = None,
     success: bool = True,
     error: str = "",
     agent_description: str = "",
@@ -70,7 +71,7 @@ def _make_specialist_result(
 
 
 class TestSynthesizeNoFindings:
-    async def test_synthesize_no_findings_returns_empty(self):
+    async def test_synthesize_no_findings_returns_empty(self) -> None:
         """When all agents succeed but report no findings, return empty list."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -81,7 +82,7 @@ class TestSynthesizeNoFindings:
         assert "No findings" in summary
         assert llm_verdict is None
 
-    async def test_synthesize_empty_results_list(self):
+    async def test_synthesize_empty_results_list(self) -> None:
         """An empty results list should return empty findings immediately."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -93,7 +94,7 @@ class TestSynthesizeNoFindings:
 
 
 class TestSynthesizeWithLLMSuccess:
-    async def test_synthesize_llm_returns_valid_json(self):
+    async def test_synthesize_llm_returns_valid_json(self) -> None:
         """LLM returns valid JSON — findings are parsed and returned."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -137,7 +138,7 @@ class TestSynthesizeWithLLMSuccess:
         assert "One medium issue found" in summary
         assert llm_verdict == "warn"
 
-    async def test_synthesize_llm_response_wrapped_in_markdown(self):
+    async def test_synthesize_llm_response_wrapped_in_markdown(self) -> None:
         """Claude sometimes wraps JSON in markdown fences — should still parse."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -166,7 +167,7 @@ class TestSynthesizeWithLLMSuccess:
         assert "No issues" in summary
         assert llm_verdict == "pass"
 
-    async def test_synthesize_llm_skips_false_positives(self):
+    async def test_synthesize_llm_skips_false_positives(self) -> None:
         """Findings with evidence_type=false_positive must be excluded from output."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -206,7 +207,7 @@ class TestSynthesizeWithLLMSuccess:
         assert findings == []
         assert llm_verdict == "pass"
 
-    async def test_synthesize_llm_sorts_by_severity(self):
+    async def test_synthesize_llm_sorts_by_severity(self) -> None:
         """Output findings must be sorted critical → info."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -278,7 +279,7 @@ class TestSynthesizeWithLLMSuccess:
 
 
 class TestSynthesizeFallback:
-    async def test_synthesize_fallback_on_llm_failure(self):
+    async def test_synthesize_fallback_on_llm_failure(self) -> None:
         """When Claude subprocess raises, fallback to basic dedup without crashing."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -305,7 +306,7 @@ class TestSynthesizeFallback:
         assert "LLM unavailable" in summary
         assert llm_verdict is None
 
-    async def test_synthesize_fallback_on_timeout(self):
+    async def test_synthesize_fallback_on_timeout(self) -> None:
         """A timed-out subprocess triggers the fallback path."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -327,7 +328,7 @@ class TestSynthesizeFallback:
         assert "LLM unavailable" in summary
         assert llm_verdict is None
 
-    async def test_synthesize_fallback_on_invalid_json(self):
+    async def test_synthesize_fallback_on_invalid_json(self) -> None:
         """Malformed JSON in LLM output triggers the fallback path gracefully."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -351,7 +352,7 @@ class TestSynthesizeFallback:
 
 
 class TestSynthesizeDeduplicate:
-    async def test_synthesize_dedup_same_finding_in_fallback(self):
+    async def test_synthesize_dedup_same_finding_in_fallback(self) -> None:
         """Fallback dedup removes identical title+file+line findings."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -370,7 +371,7 @@ class TestSynthesizeDeduplicate:
         titles = [f.title for f in findings]
         assert titles.count("Same bug") == 1
 
-    async def test_synthesize_different_files_not_deduped(self):
+    async def test_synthesize_different_files_not_deduped(self) -> None:
         """Findings with same title but different files are treated as distinct."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -388,7 +389,7 @@ class TestSynthesizeDeduplicate:
 
 
 class TestSynthesizeAgentFailures:
-    async def test_synthesize_handles_agent_failures(self):
+    async def test_synthesize_handles_agent_failures(self) -> None:
         """Failed agents inject an 'Agent failed' info finding into the synthesis input."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -407,7 +408,7 @@ class TestSynthesizeAgentFailures:
         assert findings[0].title == "Agent failed"
         assert findings[0].severity == Severity.INFO
 
-    async def test_synthesize_mixed_success_and_failure(self):
+    async def test_synthesize_mixed_success_and_failure(self) -> None:
         """Mix of successful and failed agents — both contribute to synthesis input."""
         from openseed_qa_gate.synthesizer import synthesize
 
@@ -432,7 +433,7 @@ class TestSynthesizeAgentFailures:
 
 
 class TestNormalizeFinding:
-    def test_normalize_finding_maps_severities(self):
+    def test_normalize_finding_maps_severities(self) -> None:
         """_normalize_finding correctly maps all severity strings."""
         from openseed_qa_gate.synthesizer import _normalize_finding
 
@@ -447,7 +448,7 @@ class TestNormalizeFinding:
             finding = _normalize_finding(raw, "agent-x")
             assert finding.severity == expected, f"Failed for severity={raw_sev}"
 
-    def test_normalize_finding_unknown_severity_defaults_to_medium(self):
+    def test_normalize_finding_unknown_severity_defaults_to_medium(self) -> None:
         """Unknown severity strings should fall back to MEDIUM."""
         from openseed_qa_gate.synthesizer import _normalize_finding
 
@@ -455,7 +456,7 @@ class TestNormalizeFinding:
         finding = _normalize_finding(raw, "agent-x")
         assert finding.severity == Severity.MEDIUM
 
-    def test_normalize_finding_with_metadata_appends_sources(self):
+    def test_normalize_finding_with_metadata_appends_sources(self) -> None:
         """_normalize_finding_with_metadata embeds source_agents in description."""
         from openseed_qa_gate.synthesizer import _normalize_finding_with_metadata
 
@@ -476,7 +477,7 @@ class TestNormalizeFinding:
 
 
 class TestSynthesizeConflictResolution:
-    async def test_synthesize_conflict_resolution_in_prompt(self):
+    async def test_synthesize_conflict_resolution_in_prompt(self) -> None:
         """Verify that when agents produce conflicting findings, the prompt sent to Claude
         contains both agents' inputs so Claude can adjudicate."""
         from openseed_qa_gate.synthesizer import synthesize
@@ -499,9 +500,9 @@ class TestSynthesizeConflictResolution:
             ),
         ]
 
-        captured_cmd: list = []
+        captured_cmd: list[Any] = []
 
-        async def fake_run(cmd, **kwargs):
+        async def fake_run(cmd: Any, **kwargs: Any) -> None:
             captured_cmd.extend(cmd)
             # Simulate no JSON returned to trigger fallback
             raise RuntimeError("no claude")
@@ -522,7 +523,7 @@ class TestSynthesizeConflictResolution:
 
 
 class TestSelectAgentsReturnAllWhenFew:
-    async def test_select_agents_returns_all_when_few(self):
+    async def test_select_agents_returns_all_when_few(self) -> None:
         """When available agents <= max_agents, all are returned without LLM call."""
         from openseed_qa_gate.agent_selector import select_agents
 
@@ -534,7 +535,7 @@ class TestSelectAgentsReturnAllWhenFew:
         mock_llm.assert_not_called()
         assert result == agents
 
-    async def test_select_agents_empty_list(self):
+    async def test_select_agents_empty_list(self) -> None:
         """Empty available_agents list returns empty without error."""
         from openseed_qa_gate.agent_selector import select_agents
 
@@ -543,7 +544,7 @@ class TestSelectAgentsReturnAllWhenFew:
 
 
 class TestSelectAgentsLLMSelectsSubset:
-    async def test_select_agents_llm_selects_subset(self):
+    async def test_select_agents_llm_selects_subset(self) -> None:
         """LLM response picks a valid named subset; result respects that selection."""
         from openseed_qa_gate.agent_selector import select_agents
 
@@ -561,7 +562,7 @@ class TestSelectAgentsLLMSelectsSubset:
         assert len(result) == 2
         assert {a.name for a in result} == {"agent-1", "agent-3"}
 
-    async def test_select_agents_respects_max_agents_cap(self):
+    async def test_select_agents_respects_max_agents_cap(self) -> None:
         """Even if LLM returns more names than max_agents, cap is enforced."""
         from openseed_qa_gate.agent_selector import select_agents
 
@@ -580,7 +581,7 @@ class TestSelectAgentsLLMSelectsSubset:
 
 
 class TestSelectAgentsFallback:
-    async def test_select_agents_fallback_on_failure(self):
+    async def test_select_agents_fallback_on_failure(self) -> None:
         """When LLM selection fails, all available agents are returned."""
         from openseed_qa_gate.agent_selector import select_agents
 
@@ -597,7 +598,7 @@ class TestSelectAgentsFallback:
         # Fallback: all 6 agents returned
         assert result == agents
 
-    async def test_select_agents_fallback_on_timeout(self):
+    async def test_select_agents_fallback_on_timeout(self) -> None:
         """Timed-out subprocess triggers fallback to all agents."""
         from openseed_qa_gate.agent_selector import select_agents
 
@@ -614,7 +615,7 @@ class TestSelectAgentsFallback:
 
 
 class TestSelectAgentsValidatesNames:
-    async def test_select_agents_validates_names(self):
+    async def test_select_agents_validates_names(self) -> None:
         """Names returned by LLM that don't match available agents are silently dropped."""
         from openseed_qa_gate.agent_selector import select_agents
 
@@ -632,7 +633,7 @@ class TestSelectAgentsValidatesNames:
         assert len(result) == 1
         assert result[0].name == "real-agent"
 
-    async def test_select_agents_all_names_invalid_triggers_fallback(self):
+    async def test_select_agents_all_names_invalid_triggers_fallback(self) -> None:
         """When every LLM-returned name is invalid, RuntimeError triggers fallback."""
         from openseed_qa_gate.agent_selector import select_agents
 
@@ -656,13 +657,13 @@ class TestSelectAgentsValidatesNames:
 class TestDetermineVerdict:
     """Unit tests for verdict resolution — pure logic, no mocking needed."""
 
-    def test_determine_verdict_pass(self):
+    def test_determine_verdict_pass(self) -> None:
         """No findings → PASS."""
         from openseed_qa_gate.gate import _determine_verdict
 
         assert _determine_verdict([], block_on_critical=True) == Verdict.PASS
 
-    def test_determine_verdict_pass_with_low_and_info(self):
+    def test_determine_verdict_pass_with_low_and_info(self) -> None:
         """Only low/info findings → PASS."""
         from openseed_qa_gate.gate import _determine_verdict
 
@@ -672,28 +673,28 @@ class TestDetermineVerdict:
         ]
         assert _determine_verdict(findings, block_on_critical=True) == Verdict.PASS
 
-    def test_determine_verdict_warn_on_high(self):
+    def test_determine_verdict_warn_on_high(self) -> None:
         """High finding → WARN (not BLOCK) when block_on_critical=True."""
         from openseed_qa_gate.gate import _determine_verdict
 
         findings = [Finding(severity=Severity.HIGH, title="High issue")]
         assert _determine_verdict(findings, block_on_critical=True) == Verdict.WARN
 
-    def test_determine_verdict_warn_on_critical_when_blocking_disabled(self):
+    def test_determine_verdict_warn_on_critical_when_blocking_disabled(self) -> None:
         """Critical finding with block_on_critical=False → WARN, not BLOCK."""
         from openseed_qa_gate.gate import _determine_verdict
 
         findings = [Finding(severity=Severity.CRITICAL, title="Critical bug")]
         assert _determine_verdict(findings, block_on_critical=False) == Verdict.WARN
 
-    def test_determine_verdict_block(self):
+    def test_determine_verdict_block(self) -> None:
         """Critical finding with block_on_critical=True → BLOCK."""
         from openseed_qa_gate.gate import _determine_verdict
 
         findings = [Finding(severity=Severity.CRITICAL, title="Security hole")]
         assert _determine_verdict(findings, block_on_critical=True) == Verdict.BLOCK
 
-    def test_determine_verdict_block_takes_priority(self):
+    def test_determine_verdict_block_takes_priority(self) -> None:
         """Mix of severities: critical dominates → BLOCK."""
         from openseed_qa_gate.gate import _determine_verdict
 
@@ -708,35 +709,35 @@ class TestDetermineVerdict:
 class TestResolveVerdict:
     """Unit tests for _resolve_verdict — LLM verdict + safety floor."""
 
-    def test_llm_verdict_pass_trusted(self):
+    def test_llm_verdict_pass_trusted(self) -> None:
         """LLM says pass with no critical findings → PASS."""
         from openseed_qa_gate.gate import _resolve_verdict
 
         findings = [Finding(severity=Severity.HIGH, title="High issue")]
         assert _resolve_verdict("pass", findings, block_on_critical=True) == Verdict.PASS
 
-    def test_llm_verdict_overridden_by_critical(self):
+    def test_llm_verdict_overridden_by_critical(self) -> None:
         """LLM says pass but critical finding exists → BLOCK (safety floor)."""
         from openseed_qa_gate.gate import _resolve_verdict
 
         findings = [Finding(severity=Severity.CRITICAL, title="RCE")]
         assert _resolve_verdict("pass", findings, block_on_critical=True) == Verdict.BLOCK
 
-    def test_llm_verdict_block_without_critical(self):
+    def test_llm_verdict_block_without_critical(self) -> None:
         """LLM says block with no critical findings → BLOCK (trust LLM)."""
         from openseed_qa_gate.gate import _resolve_verdict
 
         findings = [Finding(severity=Severity.HIGH, title="Pattern issue")]
         assert _resolve_verdict("block", findings, block_on_critical=True) == Verdict.BLOCK
 
-    def test_llm_verdict_none_falls_back(self):
+    def test_llm_verdict_none_falls_back(self) -> None:
         """No LLM verdict → fallback to severity-based logic."""
         from openseed_qa_gate.gate import _resolve_verdict
 
         findings = [Finding(severity=Severity.HIGH, title="High")]
         assert _resolve_verdict(None, findings, block_on_critical=True) == Verdict.WARN
 
-    def test_llm_verdict_invalid_string_falls_back(self):
+    def test_llm_verdict_invalid_string_falls_back(self) -> None:
         """Invalid LLM verdict string → fallback to severity-based logic."""
         from openseed_qa_gate.gate import _resolve_verdict
 
@@ -745,7 +746,7 @@ class TestResolveVerdict:
 
 
 class TestRunQAGateFullFlow:
-    async def test_run_qa_gate_full_flow(self):
+    async def test_run_qa_gate_full_flow(self) -> None:
         """Full integration: load agents → select → run specialists → synthesize → verdict."""
         from openseed_core.config import QAGateConfig
         from openseed_qa_gate.gate import run_qa_gate
@@ -778,7 +779,7 @@ class TestRunQAGateFullFlow:
         assert len(result.findings) == 1
         assert "reviewer" in result.agents_run
 
-    async def test_run_qa_gate_no_agents(self):
+    async def test_run_qa_gate_no_agents(self) -> None:
         """When no agents are loaded, return WARN with empty findings."""
         from openseed_core.config import QAGateConfig
         from openseed_qa_gate.gate import run_qa_gate
@@ -792,7 +793,7 @@ class TestRunQAGateFullFlow:
         assert result.agents_run == []
         assert "No QA agents" in result.synthesis
 
-    async def test_run_qa_gate_blocks_on_critical(self):
+    async def test_run_qa_gate_blocks_on_critical(self) -> None:
         """Critical finding from specialist causes BLOCK verdict."""
         from openseed_core.config import QAGateConfig
         from openseed_qa_gate.gate import run_qa_gate
@@ -819,7 +820,7 @@ class TestRunQAGateFullFlow:
 
         assert result.verdict == Verdict.BLOCK
 
-    async def test_run_qa_gate_specialist_exception_handled(self):
+    async def test_run_qa_gate_specialist_exception_handled(self) -> None:
         """If a specialist raises an exception (via gather), it is wrapped in SpecialistResult."""
         from openseed_core.config import QAGateConfig
         from openseed_qa_gate.gate import run_qa_gate
@@ -840,7 +841,7 @@ class TestRunQAGateFullFlow:
         assert isinstance(result, QAResult)
         assert result.verdict == Verdict.PASS
 
-    async def test_run_qa_gate_duration_ms_populated(self):
+    async def test_run_qa_gate_duration_ms_populated(self) -> None:
         """duration_ms in QAResult should be a positive integer."""
         from openseed_core.config import QAGateConfig
         from openseed_qa_gate.gate import run_qa_gate
@@ -866,7 +867,7 @@ class TestRunQAGateFullFlow:
 
 
 class TestAgentDefinitionFields:
-    def test_agent_definition_fields(self):
+    def test_agent_definition_fields(self) -> None:
         """AgentDefinition stores all fields with correct defaults."""
         agent = AgentDefinition(name="my-agent", description="Does stuff")
 
@@ -878,7 +879,7 @@ class TestAgentDefinitionFields:
         assert agent.instructions == ""
         assert agent.mcp_servers == {}
 
-    def test_agent_definition_custom_fields(self):
+    def test_agent_definition_custom_fields(self) -> None:
         """AgentDefinition stores custom field values."""
         agent = AgentDefinition(
             name="security-agent",
@@ -896,7 +897,7 @@ class TestAgentDefinitionFields:
 
 
 class TestSpecialistResultFields:
-    def test_specialist_result_defaults(self):
+    def test_specialist_result_defaults(self) -> None:
         """SpecialistResult has correct default values."""
         result = SpecialistResult(agent_name="my-agent")
 
@@ -908,7 +909,7 @@ class TestSpecialistResultFields:
         assert result.error == ""
         assert result.duration_ms == 0
 
-    def test_specialist_result_failure_state(self):
+    def test_specialist_result_failure_state(self) -> None:
         """SpecialistResult correctly represents a failed agent run."""
         result = SpecialistResult(
             agent_name="broken-agent",
@@ -922,7 +923,7 @@ class TestSpecialistResultFields:
         assert result.duration_ms == 5000
         assert result.findings == []
 
-    def test_synthesis_stats_defaults(self):
+    def test_synthesis_stats_defaults(self) -> None:
         """SynthesisStats initialises all counters to zero / False."""
         stats = SynthesisStats()
 

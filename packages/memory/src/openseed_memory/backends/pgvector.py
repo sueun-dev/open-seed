@@ -192,9 +192,9 @@ class PgVectorMemoryBackend(MemoryBackend):
         try:
             # Register vector type for this connection
             if _PSYCOPG_VERSION == 2:
-                _register_vector_v2(conn)  # type: ignore[name-defined]
+                _register_vector_v2(conn)
             elif _PSYCOPG_VERSION == 3:
-                _register_vector_v3(conn)  # type: ignore[name-defined]
+                _register_vector_v3(conn)
 
             with conn.cursor() as cur:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -261,7 +261,7 @@ class PgVectorMemoryBackend(MemoryBackend):
         conn = self._get_conn()
         try:
             if _PSYCOPG_VERSION == 2:
-                _register_vector_v2(conn)  # type: ignore[name-defined]
+                _register_vector_v2(conn)
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -290,15 +290,15 @@ class PgVectorMemoryBackend(MemoryBackend):
         query: str,
         user_id: str = "default",
         limit: int = 10,
-        filters: dict | None = None,
-    ) -> list[dict]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         embedding = self._embed(query)
         # Fetch extra rows to allow for Python-side filtering when filters are set.
         fetch_limit = limit * 3 if filters else limit
         conn = self._get_conn()
         try:
             if _PSYCOPG_VERSION == 2:
-                _register_vector_v2(conn)  # type: ignore[name-defined]
+                _register_vector_v2(conn)
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -337,7 +337,7 @@ class PgVectorMemoryBackend(MemoryBackend):
         conn = self._get_conn()
         try:
             if _PSYCOPG_VERSION == 2:
-                _register_vector_v2(conn)  # type: ignore[name-defined]
+                _register_vector_v2(conn)
             with conn.cursor() as cur:
                 # Fetch old content for history
                 cur.execute(
@@ -394,7 +394,7 @@ class PgVectorMemoryBackend(MemoryBackend):
                     f"DELETE FROM {self._collection} WHERE id = %s",
                     (memory_id,),
                 )
-                deleted = cur.rowcount > 0
+                deleted = bool(cur.rowcount > 0)
             conn.commit()
         finally:
             self._put_conn(conn)
@@ -404,8 +404,8 @@ class PgVectorMemoryBackend(MemoryBackend):
         self,
         user_id: str = "default",
         limit: int = 100,
-        filters: dict | None = None,
-    ) -> list[dict]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         # Fetch extra rows to allow for Python-side filtering when filters are set.
         fetch_limit = limit * 3 if filters else limit
         conn = self._get_conn()
@@ -435,7 +435,7 @@ class PgVectorMemoryBackend(MemoryBackend):
                 break
         return result
 
-    def history(self, memory_id: str) -> list[dict]:
+    def history(self, memory_id: str) -> list[dict[str, Any]]:
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:

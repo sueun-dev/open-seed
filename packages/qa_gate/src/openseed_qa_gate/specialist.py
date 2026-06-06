@@ -122,9 +122,12 @@ def _extract_findings(text: str, agent_name: str) -> list[dict[str, Any]]:
     end = text.rfind("]")
     if start != -1 and end > start:
         try:
-            return json.loads(text[start : end + 1])
+            parsed = json.loads(text[start : end + 1])
         except json.JSONDecodeError:
             pass
+        else:
+            if isinstance(parsed, list):
+                return [item for item in parsed if isinstance(item, dict)]
 
     # Fallback: whole output is one finding
     if text.strip():

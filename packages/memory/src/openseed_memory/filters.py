@@ -46,7 +46,7 @@ def _match_value(actual: Any, condition: Any) -> bool:
     """
     if not isinstance(condition, dict):
         # Plain equality
-        return actual == condition
+        return bool(actual == condition)
 
     for op, operand in condition.items():
         if op == "$eq":
@@ -57,25 +57,25 @@ def _match_value(actual: Any, condition: Any) -> bool:
                 return False
         elif op == "$gt":
             try:
-                if not (actual > operand):  # type: ignore[operator]
+                if not (actual > operand):
                     return False
             except TypeError:
                 return False
         elif op == "$gte":
             try:
-                if not (actual >= operand):  # type: ignore[operator]
+                if not (actual >= operand):
                     return False
             except TypeError:
                 return False
         elif op == "$lt":
             try:
-                if not (actual < operand):  # type: ignore[operator]
+                if not (actual < operand):
                     return False
             except TypeError:
                 return False
         elif op == "$lte":
             try:
-                if not (actual <= operand):  # type: ignore[operator]
+                if not (actual <= operand):
                     return False
             except TypeError:
                 return False

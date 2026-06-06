@@ -13,7 +13,7 @@ Categories:
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -658,6 +658,7 @@ class TestMemoryStore:
         await store.initialize()
 
         mem_id = await store.add(content="v1 content", user_id="alice", infer=False)
+        assert mem_id is not None
         await store._update(mem_id, "v2 content")
 
         history = await store.history(mem_id)
@@ -674,7 +675,7 @@ class TestMemoryStore:
 
 class TestFailurePatterns:
     @pytest.fixture(autouse=True)
-    def _no_claude_cli(self, monkeypatch):
+    def _no_claude_cli(self, monkeypatch: Any) -> None:
         """Disable LLM fact extraction — no real CLI in test env."""
         monkeypatch.setattr(
             "openseed_memory.fact_extractor.FactExtractor._get_cli",
@@ -788,7 +789,7 @@ class TestFailurePatterns:
 
 class TestProceduralMemory:
     @pytest.fixture(autouse=True)
-    def _no_claude_cli(self, monkeypatch):
+    def _no_claude_cli(self, monkeypatch: Any) -> None:
         """Disable LLM fact extraction — no real CLI in test env."""
         monkeypatch.setattr(
             "openseed_memory.fact_extractor.FactExtractor._get_cli",

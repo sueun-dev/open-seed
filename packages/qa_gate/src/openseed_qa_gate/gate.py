@@ -26,7 +26,7 @@ from openseed_qa_gate.specialist import run_specialist
 from openseed_qa_gate.synthesizer import synthesize
 
 if TYPE_CHECKING:
-    from openseed_qa_gate.types import AgentDefinition
+    from openseed_qa_gate.types import AgentDefinition, SpecialistResult
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ async def run_qa_gate(
     # Run selected agents in parallel
     semaphore = asyncio.Semaphore(cfg.max_parallel_agents)
 
-    async def run_one(agent: AgentDefinition):
+    async def run_one(agent: AgentDefinition) -> SpecialistResult:
         async with semaphore:
             return await run_specialist(agent, context, working_dir, event_bus)
 
@@ -105,11 +105,11 @@ async def run_qa_gate(
     )
 
     # Collect successful results
-    specialist_results = []
-    for r in results:
-        if isinstance(r, Exception):
-            from openseed_qa_gate.types import SpecialistResult
+    from openseed_qa_gate.types import SpecialistResult
 
+    specialist_results: list[SpecialistResult] = []
+    for r in results:
+        if isinstance(r, BaseException):
             specialist_results.append(
                 SpecialistResult(
                     agent_name="unknown",

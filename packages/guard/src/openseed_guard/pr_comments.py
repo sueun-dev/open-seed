@@ -340,6 +340,7 @@ async def _graphql_query(
         return {}
 
     try:
-        return json.loads(result.stdout)
+        parsed = json.loads(result.stdout)
     except (json.JSONDecodeError, TypeError):
         return {}
+    return parsed if isinstance(parsed, dict) else {}
