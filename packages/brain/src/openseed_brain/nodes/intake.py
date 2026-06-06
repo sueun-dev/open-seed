@@ -56,6 +56,7 @@ async def intake_node(state: PipelineState) -> dict:
             if ("/" in plan_text or "\\" in plan_text) and state["working_dir"] not in plan_text:
                 # Only reject if plan has absolute paths that don't match
                 import os
+
                 if os.sep in plan_text and state["working_dir"] not in plan_text:
                     logger.warning("Intake: stale plan (path mismatch in plan text)")
                     working_dir_check = False
@@ -294,7 +295,8 @@ async def _collect_context(task: str, working_dir: str) -> dict:
 
         # Try project-scoped search first, fall back to global
         results = await store.search(
-            task, limit=5,
+            task,
+            limit=5,
             filters={"working_dir": working_dir} if working_dir else None,
         )
         # If no project-scoped results, search globally

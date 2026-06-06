@@ -70,9 +70,10 @@ export default function CodeViewer({ workingDir, highlightFiles = [], onOpenFile
       try {
         const res = await fetch(`/api/files?path=${encodeURIComponent(workingDir)}`);
         if (res.ok) {
-          const data = await res.json();
-          setTree(data.tree || []);
-          const firstLevel = new Set((data.tree || []).filter((n: FileNode) => n.isDir).map((n: FileNode) => n.path));
+          const data = (await res.json()) as { tree?: FileNode[] };
+          const tree = data.tree || [];
+          setTree(tree);
+          const firstLevel = new Set(tree.filter((n) => n.isDir).map((n) => n.path));
           setExpandedDirs(firstLevel);
         }
       } catch {}
